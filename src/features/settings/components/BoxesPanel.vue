@@ -18,6 +18,13 @@ const emit = defineEmits<{
   openBox: [box: DesktopBox];
   refresh: [];
 }>();
+
+/**
+ * 设置列表需要给空标题 Box 一个识别名称，真实 Box 标题仍保持用户保存的空文本。
+ */
+function displayBoxTitle(box: DesktopBox): string {
+  return box.title || "未命名 Box";
+}
 </script>
 
 <template>
@@ -62,7 +69,7 @@ const emit = defineEmits<{
         @click="emit('openBox', box)"
       >
         <span class="min-w-0">
-          <strong class="block truncate text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">{{ box.title }}</strong>
+          <strong class="block truncate text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">{{ displayBoxTitle(box) }}</strong>
           <span class="mt-1 block text-[12px] text-[#707684] dark:text-[#9ca0aa]">
             {{ box.width }} × {{ box.height }} · {{ boxItemCounts[box.id] ?? 0 }} 个项目
           </span>

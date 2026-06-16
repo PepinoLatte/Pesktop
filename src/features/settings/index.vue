@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Boxes, Info, MonitorCog, Palette, SlidersHorizontal } from "@lucide/vue";
+import { Boxes, Info, MonitorCog, Palette } from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import AboutPanel from "./components/AboutPanel.vue";
 import AppearancePanel from "./components/AppearancePanel.vue";
-import BehaviorPanel from "./components/BehaviorPanel.vue";
 import BoxDisplayPanel from "./components/BoxDisplayPanel.vue";
 import BoxesPanel from "./components/BoxesPanel.vue";
 import SettingsHeader from "./components/SettingsHeader.vue";
@@ -36,7 +35,6 @@ const sections: SettingsNavItem[] = [
   { key: "boxes", label: "Box", icon: Boxes },
   { key: "boxDisplay", label: "设置", icon: MonitorCog },
   { key: "appearance", label: "外观", icon: Palette },
-  { key: "behavior", label: "行为", icon: SlidersHorizontal },
   { key: "about", label: "关于", icon: Info },
 ];
 
@@ -212,7 +210,7 @@ function closeSettings(): void {
 
 <template>
   <main class="h-screen w-screen overflow-hidden bg-transparent text-[#17181c] dark:text-[#f4f4f5]">
-    <section class="flex h-full w-full overflow-hidden border border-[#d7dae2] bg-[#f7f7f9] shadow-[0_18px_42px_rgba(20,24,32,0.18)] dark:border-[#2b2e36] dark:bg-[#15161b] dark:shadow-[0_18px_42px_rgba(0,0,0,0.38)]">
+    <section class="flex h-full w-full overflow-hidden bg-[#f7f7f9] shadow-[0_16px_36px_rgba(20,24,32,0.16)] ring-1 ring-inset ring-[#d7dae2] dark:bg-[#15161b] dark:shadow-[0_16px_36px_rgba(0,0,0,0.34)] dark:ring-[#2b2e36]">
       <SettingsSidebar
         :active-section="activeSection"
         :sections="sections"
@@ -239,15 +237,22 @@ function closeSettings(): void {
           <AppearancePanel
             v-if="activeSection === 'appearance'"
             :settings="desktopStore.settings"
-            @item-labels-change="desktopStore.updateShowItemLabels"
-            @theme-change="desktopStore.updateTheme"
+            @box-theme-change="desktopStore.updateBoxTheme"
+            @box-visual-setting-change="desktopStore.updateNumberSetting"
+            @settings-theme-change="desktopStore.updateSettingsTheme"
           />
           <BoxDisplayPanel
             v-else-if="activeSection === 'boxDisplay'"
+            :desktop-items="desktopStore.desktopItems"
             :settings="desktopStore.settings"
             @double-click-open-items-change="desktopStore.updateDoubleClickOpenItems"
+            @item-labels-change="desktopStore.updateShowItemLabels"
             @name-display-mode-change="desktopStore.updateNameDisplayMode"
+            @native-desktop-icon-ignore-paths-change="desktopStore.updateNativeDesktopIconIgnorePaths"
+            @native-desktop-icons-hidden-change="desktopStore.updateNativeDesktopIconsHidden"
             @show-shortcut-arrow-change="desktopStore.updateShowShortcutArrow"
+            @snap-threshold-change="desktopStore.updateSnapThreshold"
+            @snap-to-edges-change="desktopStore.updateSnapToEdges"
           />
           <BoxesPanel
             v-else-if="activeSection === 'boxes'"
@@ -258,12 +263,6 @@ function closeSettings(): void {
             @create-box="createAndOpenBox"
             @open-box="openBoxWindow"
             @refresh="desktopStore.refreshSnapshot"
-          />
-          <BehaviorPanel
-            v-else-if="activeSection === 'behavior'"
-            :settings="desktopStore.settings"
-            @snap-threshold-change="desktopStore.updateSnapThreshold"
-            @snap-to-edges-change="desktopStore.updateSnapToEdges"
           />
           <AboutPanel
             v-else-if="activeSection === 'about'"

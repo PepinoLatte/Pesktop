@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::io;
@@ -14,18 +15,8 @@ pub fn scan_desktop() -> io::Result<DesktopSnapshot> {
         for entry in fs::read_dir(&desktop_path)? {
             let entry = entry?;
             let path = entry.path();
-            let metadata = entry.metadata()?;
 
-            items.push(DesktopItem {
-                id: stable_item_id(&path),
-                name: entry.file_name().to_string_lossy().to_string(),
-                path: path.to_string_lossy().to_string(),
-                extension: path
-                    .extension()
-                    .map(|value| value.to_string_lossy().to_string()),
-                kind: resolve_item_kind(&path, metadata.is_dir()),
-                icon_data_url: resolve_item_icon_data_url(&path),
-            });
+            items.push(create_desktop_item(&path)?);
         }
     }
 
@@ -35,6 +26,48 @@ pub fn scan_desktop() -> io::Result<DesktopSnapshot> {
         desktop_path: desktop_path.to_string_lossy().to_string(),
         items,
     })
+}
+
+/// 按真实路径解析项目元信息，支持 Box 收纳任意磁盘文件时继续复用 Windows Shell 图标逻辑。
+pub fn scan_paths(paths: &[String]) -> io::Result<Vec<DesktopItem>> {
+    let mut seen_paths = HashSet::new();
+    let mut items = Vec::new();
+
+    for raw_path in paths {
+        let path = PathBuf::from(raw_path);
+        let normalized_key = normalize_path_key(&path);
+        if !seen_paths.insert(normalized_key) || !path.exists() {
+            continue;
+        }
+
+        items.push(create_desktop_item(&path)?);
+    }
+
+    Ok(items)
+}
+
+/// 将文件系统路径转换成前端可展示的桌面项目；真实打开方式仍由系统 Shell 处理。
+fn create_desktop_item(path: &Path) -> io::Result<DesktopItem> {
+    let metadata = fs::metadata(path)?;
+
+    Ok(DesktopItem {
+        id: stable_item_id(path),
+        name: resolve_item_name(path),
+        path: path.to_string_lossy().to_string(),
+        extension: path
+            .extension()
+            .map(|value| value.to_string_lossy().to_string()),
+        kind: resolve_item_kind(path, metadata.is_dir()),
+        icon_data_url: resolve_item_icon_data_url(path),
+    })
+}
+
+/// 根目录这类路径没有 file_name，使用完整路径作为展示名可以避免空白项目。
+fn resolve_item_name(path: &Path) -> String {
+    path.file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
 /// 优先使用 Windows 用户桌面路径，拿不到用户目录时才退回当前目录保证命令可返回。
@@ -71,6 +104,11 @@ fn stable_item_id(path: &Path) -> String {
             }
         })
         .collect()
+}
+
+/// Windows 文件系统路径大小写不敏感，批量解析时用归一化键去重但不改变返回的真实路径。
+fn normalize_path_key(path: &Path) -> String {
+    path.to_string_lossy().replace('/', "\\").to_lowercase()
 }
 
 /// 读取系统 Shell 对该路径解析出的默认展示图像，失败时返回空值交给前端占位图标兜底。

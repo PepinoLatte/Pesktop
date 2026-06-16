@@ -3,5 +3,5 @@
 mod scanner;
 mod types;
 
-pub use scanner::scan_desktop;
+pub use scanner::{scan_desktop, scan_paths};
 pub use types::{DesktopItem, DesktopItemKind, DesktopSnapshot};

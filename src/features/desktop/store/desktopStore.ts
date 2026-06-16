@@ -1,17 +1,28 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
-import { getDesktopSnapshot } from "../../../shared/api/desktop";
+import {
+  applyNativeDesktopIconVisibility,
+  getDesktopItemsByPaths,
+  getDesktopSnapshot,
+} from "../../../shared/api/desktop";
 import {
   assignBoxItems,
+  deleteBoxItem,
   deleteBoxRecord,
   initializeStorage,
   loadBoxItems,
   loadBoxes,
   loadSettings,
   saveBox,
+  saveBoxItemOrder,
   saveSetting,
 } from "../../../shared/storage/database";
-import { APP_SETTING_KEYS, DEFAULT_APP_SETTINGS } from "../../../shared/config/appSettings";
+import {
+  APP_SETTING_KEYS,
+  DEFAULT_APP_SETTINGS,
+  sanitizeNumberAppSetting,
+  type AppSettingNumberKey,
+} from "../../../shared/config/appSettings";
 import {
   BOX_WINDOW_PLACEMENT,
   BOX_WINDOW_SIZE,
@@ -26,6 +37,8 @@ import type {
   AppSettings,
   DesktopBox,
   DesktopBoxItem,
+  DesktopBoxItemDropPlacement,
+  DesktopBoxTitlePosition,
   DesktopItem,
   DesktopNameDisplayMode,
   ThemeMode,
@@ -45,6 +58,7 @@ interface UpdateBoxOptions {
 export const useDesktopStore = defineStore("desktop", () => {
   const desktopPath = ref("");
   const items = ref<DesktopItem[]>([]);
+  const desktopItemPathKeys = ref<Set<string>>(new Set());
   const boxes = ref<DesktopBox[]>([]);
   const boxItems = ref<DesktopBoxItem[]>([]);
   const isLoading = ref(true);
@@ -52,15 +66,28 @@ export const useDesktopStore = defineStore("desktop", () => {
   const lastError = ref("");
   const settings = ref<AppSettings>({ ...DEFAULT_APP_SETTINGS });
   const storeInstanceId = crypto.randomUUID();
+  const isBoxWindowContext = new URLSearchParams(window.location.search).has("boxId");
   let stateListenerRegistered = false;
   let themeTransitionTimer: ReturnType<typeof window.setTimeout> | null = null;
 
   /**
-   * 桌面视图只显示尚未归入 Box 的项目；拖入 Box 后通过映射过滤实现“桌面消失”，不移动真实文件。
+   * 桌面目录项目与额外拖入的任意路径分开计算，避免外部磁盘文件被误当成桌面未分组项目。
+   */
+  const desktopItems = computed(() =>
+    items.value.filter((item) => desktopItemPathKeys.value.has(normalizeItemPathKey(item.path))),
+  );
+
+  /**
+   * 桌面视图只显示真实桌面目录中尚未归入 Box 的项目；拖入 Box 后通过映射过滤实现“桌面消失”。
    */
   const unassignedItems = computed(() => {
-    const assignedPaths = new Set(boxItems.value.map((boxItem) => boxItem.itemPath));
-    return items.value.filter((item) => !assignedPaths.has(item.path));
+    const assignedPathKeys = new Set(
+      boxItems.value.map((boxItem) => normalizeItemPathKey(boxItem.itemPath)),
+    );
+
+    return desktopItems.value.filter(
+      (item) => !assignedPathKeys.has(normalizeItemPathKey(item.path)),
+    );
   });
 
   /**
@@ -72,7 +99,9 @@ export const useDesktopStore = defineStore("desktop", () => {
    * 通过真实路径查找桌面项目，保证 Box 映射不依赖易变化的展示名称。
    */
   function findItem(path: string): DesktopItem | undefined {
-    return items.value.find((item) => item.path === path);
+    const pathKey = normalizeItemPathKey(path);
+
+    return items.value.find((item) => normalizeItemPathKey(item.path) === pathKey);
   }
 
   /**
@@ -81,6 +110,7 @@ export const useDesktopStore = defineStore("desktop", () => {
   function getBoxItemPaths(boxId: string): string[] {
     return boxItems.value
       .filter((boxItem) => boxItem.boxId === boxId)
+      .sort((left, right) => left.orderIndex - right.orderIndex)
       .map((boxItem) => boxItem.itemPath);
   }
 
@@ -115,14 +145,21 @@ export const useDesktopStore = defineStore("desktop", () => {
       ]);
 
       desktopPath.value = snapshot.desktopPath;
+      desktopItemPathKeys.value = new Set(
+        snapshot.items.map((item) => normalizeItemPathKey(item.path)),
+      );
       items.value = snapshot.items;
       settings.value = savedSettings;
-      applyTheme(settings.value.theme);
+      applyCurrentWindowTheme();
       boxes.value = (savedBoxes.length > 0 ? savedBoxes : [createDefaultBox()]).map((box) =>
         sanitizeBoxSize(box),
       );
       boxItems.value = savedBoxItems;
+      await ensureItemsAvailable(savedBoxItems.map((boxItem) => boxItem.itemPath));
 
+      if (settings.value.nativeDesktopIconsHidden) {
+        await syncNativeDesktopIconVisibility();
+      }
       await Promise.all(boxes.value.map((box) => saveBox(box)));
       isInitialized.value = true;
     } catch (error) {
@@ -137,8 +174,13 @@ export const useDesktopStore = defineStore("desktop", () => {
    */
   async function refreshSnapshot(shouldBroadcast = true): Promise<void> {
     const snapshot = await getDesktopSnapshot();
-    desktopPath.value = snapshot.desktopPath;
-    items.value = snapshot.items;
+    applyDesktopSnapshot(snapshot);
+    await ensureItemsAvailable(boxItems.value.map((boxItem) => boxItem.itemPath));
+    await pruneNativeDesktopIconIgnorePaths();
+
+    if (settings.value.nativeDesktopIconsHidden) {
+      await syncNativeDesktopIconVisibility();
+    }
 
     if (shouldBroadcast) {
       await broadcastStateChanged("desktop");
@@ -155,11 +197,12 @@ export const useDesktopStore = defineStore("desktop", () => {
       loadSettings(),
     ]);
 
-    const previousTheme = settings.value.theme;
+    const previousTheme = getCurrentWindowTheme();
     boxes.value = savedBoxes.map((savedBox) => sanitizeBoxSize(savedBox));
     boxItems.value = savedBoxItems;
+    await ensureItemsAvailable(savedBoxItems.map((boxItem) => boxItem.itemPath));
     settings.value = savedSettings;
-    applyTheme(savedSettings.theme, previousTheme !== savedSettings.theme);
+    applyCurrentWindowTheme(previousTheme !== getCurrentWindowTheme());
   }
 
   /**
@@ -203,6 +246,7 @@ export const useDesktopStore = defineStore("desktop", () => {
     const nextBox = sanitizeBoxSize({
       id: crypto.randomUUID(),
       title,
+      titlePosition: "top",
       x: BOX_WINDOW_PLACEMENT.initialX + boxes.value.length * BOX_WINDOW_PLACEMENT.cascadeStep,
       y: BOX_WINDOW_PLACEMENT.initialY + boxes.value.length * BOX_WINDOW_PLACEMENT.cascadeStep,
       ...BOX_WINDOW_SIZE.default,
@@ -244,32 +288,114 @@ export const useDesktopStore = defineStore("desktop", () => {
    * 批量映射用于原生文件拖放，保证一次 Drop 只触发一次数据库写入。
    */
   async function assignItemsToBox(itemPaths: string[], boxId: string): Promise<void> {
-    const uniqueItemPaths = Array.from(new Set(itemPaths)).filter(Boolean);
+    const uniqueItemPaths = normalizeUniqueItemPaths(itemPaths);
+    if (!boxId) {
+      lastError.value = "无法收纳项目：目标 Box 无效";
+      return;
+    }
     if (uniqueItemPaths.length === 0) {
       return;
     }
 
     await assignBoxItems(boxId, uniqueItemPaths);
-    boxItems.value = boxItems.value.filter((boxItem) => !uniqueItemPaths.includes(boxItem.itemPath));
+    const uniqueItemPathKeys = new Set(
+      uniqueItemPaths.map((itemPath) => normalizeItemPathKey(itemPath)),
+    );
+    boxItems.value = boxItems.value.filter(
+      (boxItem) => !uniqueItemPathKeys.has(normalizeItemPathKey(boxItem.itemPath)),
+    );
+    const nextOrderStart = boxItems.value.filter((boxItem) => boxItem.boxId === boxId).length;
     boxItems.value.push(
-      ...uniqueItemPaths.map((itemPath) => ({
+      ...uniqueItemPaths.map((itemPath, index) => ({
         boxId,
         itemPath,
+        orderIndex: nextOrderStart + index,
       })),
     );
     await broadcastStateChanged("boxes");
   }
 
   /**
-   * 原生 Windows 桌面拖入时只接收当前桌面目录下的文件，避免 Box 变成任意文件收藏夹。
+   * Box 内拖拽排序只重排关联表，不移动真实桌面文件位置。
+   */
+  async function reorderBoxItem(
+    boxId: string,
+    draggedItemPath: string,
+    targetItemPath: string,
+    placement: DesktopBoxItemDropPlacement,
+  ): Promise<void> {
+    if (draggedItemPath === targetItemPath) {
+      return;
+    }
+
+    const currentPaths = getBoxItemPaths(boxId);
+    const draggedIndex = currentPaths.indexOf(draggedItemPath);
+    const targetIndex = currentPaths.indexOf(targetItemPath);
+    if (draggedIndex === -1 || targetIndex === -1) {
+      return;
+    }
+
+    currentPaths.splice(draggedIndex, 1);
+    const nextTargetIndex = currentPaths.indexOf(targetItemPath);
+    const insertIndex = placement === "after" ? nextTargetIndex + 1 : nextTargetIndex;
+
+    currentPaths.splice(insertIndex, 0, draggedItemPath);
+    applyBoxItemOrder(boxId, currentPaths);
+    await saveBoxItemOrder(boxId, currentPaths);
+    await broadcastStateChanged("boxes");
+  }
+
+  /**
+   * 拖到 Box 空白区域时把项目放到末尾，贴近 Windows 桌面图标的手动排列习惯。
+   */
+  async function moveBoxItemToEnd(boxId: string, itemPath: string): Promise<void> {
+    const currentPaths = getBoxItemPaths(boxId);
+    if (!currentPaths.includes(itemPath) || currentPaths[currentPaths.length - 1] === itemPath) {
+      return;
+    }
+
+    const nextPaths = currentPaths.filter((path) => path !== itemPath);
+    nextPaths.push(itemPath);
+    applyBoxItemOrder(boxId, nextPaths);
+    await saveBoxItemOrder(boxId, nextPaths);
+    await broadcastStateChanged("boxes");
+  }
+
+  /**
+   * 从 Box 中删除单个映射，用于图标拖出窗口后恢复到桌面未归类列表。
+   */
+  async function removeItemFromBox(boxId: string, itemPath: string): Promise<void> {
+    boxItems.value = boxItems.value.filter(
+      (boxItem) => !(boxItem.boxId === boxId && boxItem.itemPath === itemPath),
+    );
+    await deleteBoxItem(boxId, itemPath);
+    await broadcastStateChanged("boxes");
+  }
+
+  /**
+   * 本地先更新排序，避免拖放后等待 SQLite 写入才刷新图标位置。
+   */
+  function applyBoxItemOrder(boxId: string, orderedPaths: string[]): void {
+    const orderMap = new Map(orderedPaths.map((path, index) => [path, index]));
+    boxItems.value = boxItems.value.map((boxItem) =>
+      boxItem.boxId === boxId && orderMap.has(boxItem.itemPath)
+        ? {
+            ...boxItem,
+            orderIndex: orderMap.get(boxItem.itemPath) ?? boxItem.orderIndex,
+          }
+        : boxItem,
+    );
+  }
+
+  /**
+   * 原生拖入的路径可能来自任意磁盘，先让后端按 Windows Shell 解析出图标和名称，再写入 Box 映射。
    */
   async function assignDroppedPathsToBox(paths: string[], boxId: string): Promise<void> {
-    await refreshSnapshot(false);
+    const acceptedPaths = normalizeUniqueItemPaths(paths);
 
-    const desktopItemPaths = new Set(items.value.map((item) => item.path));
-    const acceptedPaths = paths.filter((path) => desktopItemPaths.has(path));
+    await ensureItemsAvailable(acceptedPaths);
 
-    await assignItemsToBox(acceptedPaths, boxId);
+    await assignItemsToBox(acceptedPaths.filter((path) => findItem(path)), boxId);
   }
 
   /**
@@ -301,6 +427,7 @@ export const useDesktopStore = defineStore("desktop", () => {
     return {
       id: crypto.randomUUID(),
       title: "工作",
+      titlePosition: "top",
       x: BOX_WINDOW_PLACEMENT.initialX,
       y: BOX_WINDOW_PLACEMENT.initialY,
       ...BOX_WINDOW_SIZE.default,
@@ -310,10 +437,24 @@ export const useDesktopStore = defineStore("desktop", () => {
   /**
    * 更新主题时同步根节点标识，确保设置页和 Box 窗口一起响应。
    */
-  async function updateTheme(theme: ThemeMode): Promise<void> {
-    settings.value.theme = theme;
-    applyTheme(theme, true);
-    await saveSetting(APP_SETTING_KEYS.theme, theme);
+  async function updateSettingsTheme(theme: ThemeMode): Promise<void> {
+    settings.value.settingsTheme = theme;
+    if (!isBoxWindowContext) {
+      applyTheme(theme, true);
+    }
+    await saveSetting(APP_SETTING_KEYS.settingsTheme, theme);
+    await broadcastStateChanged("settings");
+  }
+
+  /**
+   * Box 窗口主题只影响桌面上的 Box，设置页切换时通过广播让各 Box 自己应用。
+   */
+  async function updateBoxTheme(theme: ThemeMode): Promise<void> {
+    settings.value.boxTheme = theme;
+    if (isBoxWindowContext) {
+      applyTheme(theme, true);
+    }
+    await saveSetting(APP_SETTING_KEYS.boxTheme, theme);
     await broadcastStateChanged("settings");
   }
 
@@ -330,8 +471,45 @@ export const useDesktopStore = defineStore("desktop", () => {
    * 吸附阈值使用像素保存，和 Tauri 窗口移动事件的坐标体系保持一致。
    */
   async function updateSnapThreshold(threshold: number): Promise<void> {
-    settings.value.snapThreshold = threshold;
-    await saveSetting(APP_SETTING_KEYS.snapThreshold, threshold);
+    await updateNumberSetting(APP_SETTING_KEYS.snapThreshold, threshold);
+  }
+
+  /**
+   * 隐藏原生桌面图标时只修改 Windows Hidden 属性，Box 内映射继续保留。
+   */
+  async function updateNativeDesktopIconsHidden(value: boolean): Promise<void> {
+    settings.value.nativeDesktopIconsHidden = value;
+    await saveSetting(APP_SETTING_KEYS.nativeDesktopIconsHidden, value);
+    await syncNativeDesktopIconVisibility(true);
+    await broadcastStateChanged("settings");
+  }
+
+  /**
+   * 忽略列表只保存当前桌面快照中仍存在的路径，避免旧路径永久残留在配置里。
+   */
+  async function updateNativeDesktopIconIgnorePaths(paths: string[]): Promise<void> {
+    const nextPaths = sanitizeNativeDesktopIconIgnorePaths(paths);
+
+    settings.value.nativeDesktopIconIgnorePaths = nextPaths;
+    await saveSetting(APP_SETTING_KEYS.nativeDesktopIconIgnorePaths, nextPaths);
+    await syncNativeDesktopIconVisibility();
+    await broadcastStateChanged("settings");
+  }
+
+  /**
+   * 数值类设置统一做范围校验和跨窗口广播，避免每个滑块各自复制保存逻辑。
+   */
+  async function updateNumberSetting<Key extends AppSettingNumberKey>(
+    key: Key,
+    value: AppSettings[Key],
+  ): Promise<void> {
+    const nextValue = sanitizeNumberAppSetting(key, value);
+
+    settings.value = {
+      ...settings.value,
+      [key]: nextValue,
+    };
+    await saveSetting(APP_SETTING_KEYS[key], nextValue);
     await broadcastStateChanged("settings");
   }
 
@@ -372,6 +550,24 @@ export const useDesktopStore = defineStore("desktop", () => {
   }
 
   /**
+   * Box 标题位置属于单个 Box 的布局属性，修改时只保存当前窗口，不影响其他 Box。
+   */
+  async function updateBoxTitlePosition(
+    boxId: string,
+    value: DesktopBoxTitlePosition,
+  ): Promise<void> {
+    const targetBox = boxes.value.find((item) => item.id === boxId);
+    if (!targetBox || targetBox.titlePosition === value) {
+      return;
+    }
+
+    await updateBox({
+      ...targetBox,
+      titlePosition: value,
+    });
+  }
+
+  /**
    * Box 的最小尺寸与窗口配置保持一致，避免拖动缩放后出现不可操作区域。
    */
   function sanitizeBoxSize(box: DesktopBox): DesktopBox {
@@ -400,6 +596,133 @@ export const useDesktopStore = defineStore("desktop", () => {
   }
 
   /**
+   * 当前窗口按自身角色应用对应主题，避免设置页主题误影响 Box 窗口。
+   */
+  function applyCurrentWindowTheme(shouldAnimate = false): void {
+    applyTheme(getCurrentWindowTheme(), shouldAnimate);
+  }
+
+  /**
+   * 设置页和 Box 窗口共享 Store，但 URL 中的 boxId 能稳定区分当前渲染目标。
+   */
+  function getCurrentWindowTheme(): ThemeMode {
+    return isBoxWindowContext ? settings.value.boxTheme : settings.value.settingsTheme;
+  }
+
+  /**
+   * 刷新桌面快照时保留已经收纳的外部磁盘项目，避免非桌面文件在下次刷新后从 Box 中消失。
+   */
+  function applyDesktopSnapshot(snapshot: { desktopPath: string; items: DesktopItem[] }): void {
+    const nextDesktopPathKeys = new Set(
+      snapshot.items.map((item) => normalizeItemPathKey(item.path)),
+    );
+    const assignedPathKeys = new Set(
+      boxItems.value.map((boxItem) => normalizeItemPathKey(boxItem.itemPath)),
+    );
+    const assignedExternalItems = items.value.filter((item) => {
+      const itemPathKey = normalizeItemPathKey(item.path);
+
+      return assignedPathKeys.has(itemPathKey) && !nextDesktopPathKeys.has(itemPathKey);
+    });
+
+    desktopPath.value = snapshot.desktopPath;
+    desktopItemPathKeys.value = nextDesktopPathKeys;
+    mergeKnownItems([...snapshot.items, ...assignedExternalItems]);
+  }
+
+  /**
+   * 按路径补齐项目详情，支持用户把任意磁盘上的文件拖入 Box 后仍复用 Windows Shell 图标。
+   */
+  async function ensureItemsAvailable(paths: string[]): Promise<void> {
+    const missingPaths = normalizeUniqueItemPaths(paths).filter((path) => !findItem(path));
+    if (missingPaths.length === 0) {
+      return;
+    }
+
+    const resolvedItems = await getDesktopItemsByPaths(missingPaths);
+
+    mergeKnownItems(resolvedItems);
+  }
+
+  /**
+   * 项目列表用路径做稳定主键合并，后端重新解析出的图标可以覆盖旧缓存。
+   */
+  function mergeKnownItems(nextItems: DesktopItem[]): void {
+    const itemMap = new Map(items.value.map((item) => [normalizeItemPathKey(item.path), item]));
+
+    for (const item of nextItems) {
+      itemMap.set(normalizeItemPathKey(item.path), item);
+    }
+
+    items.value = Array.from(itemMap.values());
+  }
+
+  /**
+   * Windows 路径比较不区分大小写，统一归一化后可避免同一路径重复进入 Box。
+   */
+  function normalizeUniqueItemPaths(paths: string[]): string[] {
+    const seenPathKeys = new Set<string>();
+    const uniquePaths: string[] = [];
+
+    for (const path of paths) {
+      const pathKey = normalizeItemPathKey(path);
+      if (!pathKey || seenPathKeys.has(pathKey)) {
+        continue;
+      }
+
+      seenPathKeys.add(pathKey);
+      uniquePaths.push(path);
+    }
+
+    return uniquePaths;
+  }
+
+  /**
+   * 前后端都以原始路径落库，归一化仅用于运行时去重和查找，不改变真实文件路径。
+   */
+  function normalizeItemPathKey(path: string): string {
+    return path.trim().replace(/\//g, "\\").toLowerCase();
+  }
+
+  /**
+   * 原生桌面隐藏状态由后端直接扫描桌面目录并写入属性，前端只传偏好和忽略路径。
+   */
+  async function syncNativeDesktopIconVisibility(force = false): Promise<void> {
+    if (!settings.value.nativeDesktopIconsHidden && !force) {
+      return;
+    }
+
+    await applyNativeDesktopIconVisibility(
+      settings.value.nativeDesktopIconsHidden,
+      settings.value.nativeDesktopIconIgnorePaths,
+    );
+  }
+
+  /**
+   * 忽略路径以真实桌面快照为准，避免用户删除文件后设置页继续显示无效状态。
+   */
+  function sanitizeNativeDesktopIconIgnorePaths(paths: string[]): string[] {
+    return normalizeUniqueItemPaths(paths).filter((path) =>
+      desktopItemPathKeys.value.has(normalizeItemPathKey(path)),
+    );
+  }
+
+  /**
+   * 刷新桌面快照后清理失效忽略项，保证下次应用 Hidden 属性时只处理真实文件。
+   */
+  async function pruneNativeDesktopIconIgnorePaths(): Promise<void> {
+    const nextPaths = sanitizeNativeDesktopIconIgnorePaths(
+      settings.value.nativeDesktopIconIgnorePaths,
+    );
+    if (nextPaths.length === settings.value.nativeDesktopIconIgnorePaths.length) {
+      return;
+    }
+
+    settings.value.nativeDesktopIconIgnorePaths = nextPaths;
+    await saveSetting(APP_SETTING_KEYS.nativeDesktopIconIgnorePaths, nextPaths);
+  }
+
+  /**
    * 主题动画尊重系统的减少动态效果设置，只做短时颜色过渡，不影响拖动和缩放性能。
    */
   function enableThemeTransition(root: HTMLElement): void {
@@ -423,8 +746,8 @@ export const useDesktopStore = defineStore("desktop", () => {
   }
 
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    if (settings.value.theme === "system") {
-      applyTheme(settings.value.theme, true);
+    if (getCurrentWindowTheme() === "system") {
+      applyCurrentWindowTheme(true);
     }
   });
 
@@ -434,6 +757,7 @@ export const useDesktopStore = defineStore("desktop", () => {
     boxes,
     createBox,
     deleteBox,
+    desktopItems,
     desktopPath,
     findItem,
     getBoxItemPaths,
@@ -444,19 +768,27 @@ export const useDesktopStore = defineStore("desktop", () => {
     isLoading,
     items,
     lastError,
+    moveBoxItemToEnd,
     reloadPersistedState,
+    removeItemFromBox,
+    reorderBoxItem,
     refreshSnapshot,
     settings,
     boxItems,
     totalBoxItems,
     unassignedItems,
     updateBox,
+    updateBoxTheme,
+    updateBoxTitlePosition,
     updateDoubleClickOpenItems,
     updateNameDisplayMode,
+    updateNativeDesktopIconIgnorePaths,
+    updateNativeDesktopIconsHidden,
+    updateNumberSetting,
+    updateSettingsTheme,
     updateShowItemLabels,
     updateShowShortcutArrow,
     updateSnapThreshold,
     updateSnapToEdges,
-    updateTheme,
   };
 });

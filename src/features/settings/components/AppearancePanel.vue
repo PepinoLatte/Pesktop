@@ -1,20 +1,41 @@
 <script setup lang="ts">
+import { RotateCcw } from "@lucide/vue";
+import { DEFAULT_APP_SETTINGS } from "../../../shared/config/appSettings";
 import type { AppSettings, ThemeMode } from "../../../shared/types/desktop";
-import { SETTINGS_PANEL_WIDTH, THEME_SEGMENT_OPTIONS } from "../config/settingsUi";
-import SegmentedControl from "./SegmentedControl.vue";
+import {
+  BOX_VISUAL_SETTING_CONTROLS,
+  SETTINGS_PANEL_WIDTH,
+  THEME_SEGMENT_OPTIONS,
+  type BoxVisualSettingKey,
+} from "../config/settingsUi";
+import SegmentedControl from "../../../shared/components/SegmentedControl.vue";
 
 /**
- * 外观面板只暴露当前实现的主题和图标名称设置，避免旧视觉参数回流。
+ * 外观面板承载主题和 Box 视觉密度设置，文件名显示规则交给设置页集中管理。
  */
 const props = defineProps<{
   settings: AppSettings;
 }>();
 
 const emit = defineEmits<{
-  itemLabelsChange: [value: boolean];
-  themeChange: [theme: ThemeMode];
+  boxThemeChange: [theme: ThemeMode];
+  boxVisualSettingChange: [key: BoxVisualSettingKey, value: number];
+  settingsThemeChange: [theme: ThemeMode];
 }>();
 
+/**
+ * Box 外观滑块统一通过数值设置事件保存，避免外观页直接了解数据库细节。
+ */
+function emitBoxVisualSettingChange(key: BoxVisualSettingKey, event: Event): void {
+  emit("boxVisualSettingChange", key, Number((event.target as HTMLInputElement).value));
+}
+
+/**
+ * 单行重置只恢复当前设置项，避免用户调整多个视觉参数后被整体覆盖。
+ */
+function resetBoxVisualSetting(key: BoxVisualSettingKey): void {
+  emit("boxVisualSettingChange", key, DEFAULT_APP_SETTINGS[key]);
+}
 </script>
 
 <template>
@@ -24,42 +45,77 @@ const emit = defineEmits<{
       <p class="mt-1 text-[13px] text-[#6f7480] dark:text-[#a7abb5]">调整设置窗和 Box 的显示偏好。</p>
     </div>
 
-    <div class="overflow-hidden rounded-[14px] border border-[#dfe2e8] bg-[#ffffff] shadow-[0_10px_28px_rgba(20,24,32,0.06)] dark:border-[#292c34] dark:bg-[#181a20] dark:shadow-none">
+    <div class="overflow-hidden rounded-[8px] border border-[#dfe2e8] bg-[#ffffff] shadow-[0_10px_28px_rgba(20,24,32,0.06)] dark:border-[#292c34] dark:bg-[#181a20] dark:shadow-none">
       <div class="grid min-h-[76px] grid-cols-[1fr_auto] items-center gap-6 px-5">
         <div class="min-w-0 pr-4">
-          <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">界面主题</h2>
-          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">用于设置页和 Box 窗口的明暗切换。</p>
+          <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">设置页主题</h2>
+          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">只影响当前设置窗口的明暗显示。</p>
         </div>
 
         <SegmentedControl
-          :model-value="props.settings.theme"
+          :model-value="props.settings.settingsTheme"
           :options="THEME_SEGMENT_OPTIONS"
-          @change="emit('themeChange', $event)"
+          @change="emit('settingsThemeChange', $event)"
         />
       </div>
 
       <div class="h-px bg-[#e7e9ee] dark:bg-[#292c34]" />
 
-      <div class="grid min-h-[72px] grid-cols-[1fr_auto] items-center gap-6 px-5">
+      <div class="grid min-h-[76px] grid-cols-[1fr_auto] items-center gap-6 px-5">
         <div class="min-w-0 pr-4">
-          <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">显示项目名称</h2>
-          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">在 Box 图标下方展示文件名。</p>
+          <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">Box 窗口主题</h2>
+          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">只影响桌面上的 Box 窗口。</p>
         </div>
 
-        <label class="relative block h-7 w-12">
-          <input
-            class="peer sr-only"
-            :checked="props.settings.showItemLabels"
-            type="checkbox"
-            @change="emit('itemLabelsChange', ($event.target as HTMLInputElement).checked)"
-          />
-          <span
-            class="absolute inset-0 rounded-full bg-[#c9cdd6] transition-colors peer-checked:bg-[#ff5c5c] dark:bg-[#3a3d46] dark:peer-checked:bg-[#ff6b6b]"
-          />
-          <span
-            class="absolute left-1 top-1 size-5 rounded-full bg-white shadow-[0_2px_7px_rgba(20,24,32,0.25)] transition-transform peer-checked:translate-x-5"
-          />
-        </label>
+        <SegmentedControl
+          :model-value="props.settings.boxTheme"
+          :options="THEME_SEGMENT_OPTIONS"
+          @change="emit('boxThemeChange', $event)"
+        />
+      </div>
+    </div>
+
+    <div class="mt-4 overflow-hidden rounded-[8px] border border-[#dfe2e8] bg-[#ffffff] shadow-[0_10px_28px_rgba(20,24,32,0.06)] dark:border-[#292c34] dark:bg-[#181a20] dark:shadow-none">
+      <div
+        v-for="(control, index) in BOX_VISUAL_SETTING_CONTROLS"
+        :key="control.key"
+      >
+        <div class="grid min-h-[84px] grid-cols-[1fr_300px] items-center gap-6 px-5">
+          <div class="min-w-0 pr-4">
+            <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">{{ control.label }}</h2>
+            <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">{{ control.description }}</p>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <input
+              class="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[#d8dbe3] accent-[#ff5c5c] dark:bg-[#333640] dark:accent-[#ff6b6b]"
+              :max="control.max"
+              :min="control.min"
+              :step="control.step"
+              type="range"
+              :value="props.settings[control.key]"
+              @input="emitBoxVisualSettingChange(control.key, $event)"
+            />
+            <span class="w-[70px] shrink-0 whitespace-nowrap text-right text-[13px] font-medium text-[#555b66] dark:text-[#c7cad1]">
+              {{ props.settings[control.key] }} {{ control.unit }}
+            </span>
+            <button
+              :aria-label="`重置${control.label}`"
+              class="grid size-8 shrink-0 place-items-center rounded-[6px] text-[#68707d] transition-colors hover:bg-[#eef0f4] hover:text-[#17181c] disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[#68707d] dark:text-[#a7abb5] dark:hover:bg-[#242730] dark:hover:text-[#f4f4f5] dark:disabled:hover:bg-transparent dark:disabled:hover:text-[#a7abb5]"
+              :disabled="props.settings[control.key] === DEFAULT_APP_SETTINGS[control.key]"
+              :title="`重置${control.label}`"
+              type="button"
+              @click="resetBoxVisualSetting(control.key)"
+            >
+              <RotateCcw :size="15" />
+            </button>
+          </div>
+        </div>
+
+        <div
+          v-if="index < BOX_VISUAL_SETTING_CONTROLS.length - 1"
+          class="h-px bg-[#e7e9ee] dark:bg-[#292c34]"
+        />
       </div>
     </div>
   </section>

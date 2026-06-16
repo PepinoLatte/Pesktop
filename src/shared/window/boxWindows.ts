@@ -4,6 +4,11 @@ import type { DesktopBox } from "../types/desktop";
 import { BOX_WINDOW_SIZE } from "../config/desktopLayout";
 
 /**
+ * 系统窗口标题需要保留可识别文本；Box 自身标题仍允许用户保存为空。
+ */
+const UNTITLED_BOX_WINDOW_TITLE = "Dasktop Box";
+
+/**
  * 打开 Box 的策略参数，启动恢复时不抢焦点，用户主动打开时再切到前台。
  */
 export interface OpenBoxWindowOptions {
@@ -41,7 +46,7 @@ export async function openBoxWindow(
   await new Promise<void>((resolve, reject) => {
     const window = new WebviewWindow(label, {
       url: `/?boxId=${encodeURIComponent(box.id)}`,
-      title: box.title,
+      title: box.title || UNTITLED_BOX_WINDOW_TITLE,
       x: box.x,
       y: box.y,
       width: box.width,

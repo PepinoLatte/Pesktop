@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
+import type { CSSProperties } from "vue";
 import { File, FileText, Folder, Link } from "@lucide/vue";
 import { openDesktopItem } from "../../../shared/api/desktop";
-import type { DesktopItem, DesktopNameDisplayMode } from "../../../shared/types/desktop";
+import { DEFAULT_APP_SETTINGS } from "../../../shared/config/appSettings";
+import type {
+  DesktopBoxItemDropPlacement,
+  DesktopItem,
+  DesktopNameDisplayMode,
+} from "../../../shared/types/desktop";
 import { DESKTOP_ICON_VIEW, WINDOWS_SHORTCUT_BADGE } from "../config/desktopIcon";
 
 /**
@@ -10,31 +16,237 @@ import { DESKTOP_ICON_VIEW, WINDOWS_SHORTCUT_BADGE } from "../config/desktopIcon
  */
 const props = defineProps<{
   doubleClickOpen?: boolean;
+  iconSize?: number;
   item: DesktopItem;
+  labelTextSize?: number;
+  labelWidth?: number;
+  dragInsertPosition?: DesktopBoxItemDropPlacement | null;
   nameDisplayMode: DesktopNameDisplayMode;
+  radiusSize?: number;
   showLabel?: boolean;
   showShortcutArrow?: boolean;
 }>();
 
-const displayName = computed(() => formatDisplayName(props.item, props.nameDisplayMode));
-const suppressNextClick = ref(false);
+const emit = defineEmits<{
+  boxPointerDragEnd: [event: PointerEvent, itemPath: string];
+  boxPointerDragMove: [event: PointerEvent, itemPath: string];
+  boxPointerDragStart: [itemPath: string];
+  nativeContextMenu: [event: MouseEvent, item: DesktopItem];
+}>();
 
 /**
- * 拖拽只传递文件路径，真实桌面文件仍然交给系统管理。
+ * pointer 拖拽状态只用于 Box 内排序，避免浏览器原生 DnD 在透明窗口里显示禁用光标。
  */
-function onDragStart(event: DragEvent, item: DesktopItem): void {
-  suppressNextClick.value = true;
-  event.dataTransfer?.setData("text/plain", item.path);
-  event.dataTransfer?.setDragImage(event.currentTarget as Element, 36, 36);
+interface PointerDragState {
+  dragging: boolean;
+  itemPath: string;
+  startX: number;
+  startY: number;
+}
+
+const displayName = computed(() => formatDisplayName(props.item, props.nameDisplayMode));
+const resolvedIconSize = computed(() => props.iconSize ?? DEFAULT_APP_SETTINGS.boxIconSize);
+const resolvedLabelTextSize = computed(
+  () => props.labelTextSize ?? DEFAULT_APP_SETTINGS.boxLabelTextSize,
+);
+const resolvedLabelWidth = computed(() => props.labelWidth ?? DEFAULT_APP_SETTINGS.boxFilenameWidth);
+const resolvedItemWidth = computed(() =>
+  Math.max(
+    resolvedLabelWidth.value,
+    resolvedIconSize.value + DESKTOP_ICON_VIEW.itemInlinePadding * 2,
+  ),
+);
+const resolvedRadius = computed(() => props.radiusSize ?? DEFAULT_APP_SETTINGS.boxCornerRadius);
+const resolvedFallbackIconSize = computed(() =>
+  Math.max(
+    DESKTOP_ICON_VIEW.fallbackIconSize,
+    Math.round(resolvedIconSize.value * DESKTOP_ICON_VIEW.fallbackIconScale),
+  ),
+);
+/**
+ * Windows 桌面标签会给字母下探部位留空间；这里多留 2px，避免 p/g/y 被两行截断裁掉。
+ */
+const labelLineHeight = computed(() => Math.max(14, Math.ceil(resolvedLabelTextSize.value * 1.32)));
+const labelBlockHeight = computed(() => labelLineHeight.value * 2 + 2);
+const shortcutBadgeScale = computed(() =>
+  resolvedIconSize.value / WINDOWS_SHORTCUT_BADGE.referenceIconSize,
+);
+const suppressNextClick = ref(false);
+const isPointerDragging = ref(false);
+let pointerDragState: PointerDragState | null = null;
+
+onUnmounted(() => {
+  cleanupPointerDrag();
+});
+
+const iconButtonStyle = computed(
+  () =>
+    ({
+      borderRadius: `${resolvedRadius.value}px`,
+      gap: props.showLabel === false ? "0px" : `${DESKTOP_ICON_VIEW.labelGap}px`,
+      padding: `${DESKTOP_ICON_VIEW.itemBlockPadding}px ${DESKTOP_ICON_VIEW.itemInlinePadding}px`,
+      width: `${resolvedItemWidth.value}px`,
+    }) as CSSProperties,
+);
+const iconFrameStyle = computed(
+  () =>
+    ({
+      borderRadius: `${resolvedRadius.value}px`,
+      height: `${resolvedIconSize.value}px`,
+      width: `${resolvedIconSize.value}px`,
+    }) as CSSProperties,
+);
+const iconImageStyle = computed(
+  () =>
+    ({
+      maxHeight: `${resolvedIconSize.value}px`,
+      maxWidth: `${resolvedIconSize.value}px`,
+    }) as CSSProperties,
+);
+const labelStyle = computed(
+  () =>
+    ({
+      WebkitBoxOrient: "vertical",
+      WebkitLineClamp: "2",
+      display: "-webkit-box",
+      fontSize: `${resolvedLabelTextSize.value}px`,
+      lineHeight: `${labelLineHeight.value}px`,
+      maxHeight: `${labelBlockHeight.value}px`,
+      paddingBottom: "2px",
+      textOverflow: "ellipsis",
+      width: `${resolvedLabelWidth.value}px`,
+    }) as CSSProperties,
+);
+const shortcutBadgeStyle = computed(
+  () =>
+    ({
+      background: "#ffffff",
+      borderRadius: `${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.overlayRadius)}px`,
+      bottom: `${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.offset)}px`,
+      boxShadow: WINDOWS_SHORTCUT_BADGE.shadow,
+      height: `${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.overlaySize)}px`,
+      left: `${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.offset)}px`,
+      width: `${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.overlaySize)}px`,
+    }) as CSSProperties,
+);
+const shortcutBadgeSvgStyle = computed(
+  () =>
+    ({
+      height: `${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.svgSize)}px`,
+      transform: `translate(${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.svgOffsetX)}px, ${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.svgOffsetY)}px)`,
+      width: `${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.svgSize)}px`,
+    }) as CSSProperties,
+);
+
+/**
+ * 快捷方式角标按参考 64px 图标等比缩放，同时给极小图标保留可辨识的最小尺寸。
+ */
+function scaleShortcutBadgeValue(value: number): number {
+  const scale = Math.min(Math.max(shortcutBadgeScale.value, 0.72), 1.25);
+
+  return Math.round(value * scale);
 }
 
 /**
- * 拖拽结束后延迟一帧恢复点击，避免浏览器在 dragend 后补发 click 导致误打开。
+ * pointer 按下只记录候选拖拽，移动距离超过阈值后才进入排序拖动状态。
  */
-function onDragEnd(): void {
+function onPointerDown(event: PointerEvent, item: DesktopItem): void {
+  if (event.button !== 0 || event.detail > 1) {
+    return;
+  }
+
+  pointerDragState = {
+    dragging: false,
+    itemPath: item.path,
+    startX: event.clientX,
+    startY: event.clientY,
+  };
+  window.addEventListener("pointermove", onPointerMove, { capture: true });
+  window.addEventListener("pointerup", onPointerRelease, { capture: true, once: true });
+  window.addEventListener("pointercancel", onPointerRelease, { capture: true, once: true });
+  window.addEventListener("blur", onPointerWindowBlur, { capture: true, once: true });
+}
+
+/**
+ * pointer 移动时实时通知父级计算插入线；未达到阈值前不影响正常点击打开。
+ */
+function onPointerMove(event: PointerEvent): void {
+  const dragState = pointerDragState;
+  if (!dragState) {
+    return;
+  }
+
+  if (!dragState.dragging && !hasPointerExceededDragThreshold(event, dragState)) {
+    return;
+  }
+
+  if (!dragState.dragging) {
+    dragState.dragging = true;
+    isPointerDragging.value = true;
+    suppressNextClick.value = true;
+    emit("boxPointerDragStart", dragState.itemPath);
+  }
+
+  event.preventDefault();
+  emit("boxPointerDragMove", event, dragState.itemPath);
+}
+
+/**
+ * pointer 释放时提交排序或拖出删除，并在下一帧恢复点击能力。
+ */
+function onPointerRelease(event: PointerEvent): void {
+  const dragState = pointerDragState;
+  const shouldEmitDragEnd = dragState?.dragging === true;
+
+  cleanupPointerDrag();
+  if (dragState && shouldEmitDragEnd) {
+    emit("boxPointerDragEnd", event, dragState.itemPath);
+    window.setTimeout(() => {
+      suppressNextClick.value = false;
+    }, 0);
+  }
+}
+
+/**
+ * 清理 pointer 拖拽监听，避免多次按下后产生重复 move/up 回调。
+ */
+function cleanupPointerDrag(): void {
+  window.removeEventListener("pointermove", onPointerMove, { capture: true });
+  window.removeEventListener("pointerup", onPointerRelease, { capture: true });
+  window.removeEventListener("pointercancel", onPointerRelease, { capture: true });
+  window.removeEventListener("blur", onPointerWindowBlur, { capture: true });
+  pointerDragState = null;
+  isPointerDragging.value = false;
+}
+
+/**
+ * 拖出窗口时父级会处理删除映射，组件这里只清理本地 pointer 状态和点击抑制。
+ */
+function onPointerWindowBlur(): void {
+  cleanupPointerDrag();
   window.setTimeout(() => {
     suppressNextClick.value = false;
   }, 0);
+}
+
+/**
+ * 拖拽阈值使用欧氏距离，斜向移动和横向移动都有一致的触发手感。
+ */
+function hasPointerExceededDragThreshold(
+  event: PointerEvent,
+  dragState: PointerDragState,
+): boolean {
+  const deltaX = event.clientX - dragState.startX;
+  const deltaY = event.clientY - dragState.startY;
+
+  return Math.hypot(deltaX, deltaY) >= DESKTOP_ICON_VIEW.dragStartThreshold;
+}
+
+/**
+ * 右键菜单由父级桥接到 Windows Shell，组件自身不展示浏览器菜单。
+ */
+function onContextMenu(event: MouseEvent): void {
+  emit("nativeContextMenu", event, props.item);
 }
 
 /**
@@ -87,49 +299,66 @@ function formatDisplayName(item: DesktopItem, mode: DesktopNameDisplayMode): str
 
 <template>
   <button
-    class="flex min-w-0 select-none flex-col items-center justify-center gap-1.5 rounded-[8px] bg-transparent p-1.5 text-center text-slate-900 transition-colors hover:bg-white/55 active:bg-white/75 dark:text-white dark:hover:bg-white/10 dark:active:bg-white/20"
-    :class="showLabel === false ? 'h-16' : 'h-[82px]'"
-    draggable="true"
+    class="dasktop-icon-button relative flex min-w-0 select-none flex-col items-center justify-start self-start bg-transparent text-center text-slate-900 transition-colors hover:bg-white/55 active:bg-white/75 dark:text-white dark:hover:bg-white/10 dark:active:bg-white/20"
+    :class="isPointerDragging ? 'opacity-60' : ''"
+    :data-box-item-path="item.path"
+    :style="iconButtonStyle"
     type="button"
     :title="item.path"
-    @dragend="onDragEnd"
-    @dragstart="onDragStart($event, item)"
+    @contextmenu.prevent="onContextMenu"
     @click="handleClick"
     @dblclick.prevent="handleDoubleClick"
+    @pointerdown="onPointerDown($event, item)"
   >
     <span
-      class="relative grid size-11 place-items-center text-slate-700 dark:text-slate-100"
+      v-if="dragInsertPosition"
+      aria-hidden="true"
+      class="pointer-events-none absolute bottom-1 top-1 z-10 w-[2px] rounded-full bg-[#2f6bff] shadow-[0_0_0_1px_rgba(255,255,255,0.86),0_0_10px_rgba(47,107,255,0.48)] dark:shadow-[0_0_0_1px_rgba(15,23,42,0.9),0_0_10px_rgba(83,149,255,0.58)]"
+      :class="dragInsertPosition === 'before' ? '-left-1.5' : '-right-1.5'"
+    />
+    <span
+      class="relative grid place-items-center text-slate-700 dark:text-slate-100"
+      :style="iconFrameStyle"
     >
       <img
         v-if="item.iconDataUrl"
         :alt="item.name"
-        class="max-h-11 max-w-11 object-contain drop-shadow-[0_4px_8px_rgba(15,23,42,0.16)]"
+        class="object-contain drop-shadow-[0_4px_8px_rgba(15,23,42,0.16)]"
         draggable="false"
         :src="item.iconDataUrl"
+        :style="iconImageStyle"
       />
-      <Folder v-else-if="item.kind === 'folder'" :size="DESKTOP_ICON_VIEW.fallbackIconSize" />
-      <Link v-else-if="item.kind === 'shortcut'" :size="DESKTOP_ICON_VIEW.fallbackIconSize" />
-      <FileText v-else-if="item.extension" :size="DESKTOP_ICON_VIEW.fallbackIconSize" />
-      <File v-else :size="DESKTOP_ICON_VIEW.fallbackIconSize" />
+      <Folder v-else-if="item.kind === 'folder'" :size="resolvedFallbackIconSize" />
+      <Link v-else-if="item.kind === 'shortcut'" :size="resolvedFallbackIconSize" />
+      <FileText v-else-if="item.extension" :size="resolvedFallbackIconSize" />
+      <File v-else :size="resolvedFallbackIconSize" />
       <span
         v-if="item.kind === 'shortcut' && showShortcutArrow !== false"
-        class="absolute bottom-0 left-0 grid size-4 place-items-center rounded-[2px] border border-white bg-white shadow-[0_1px_3px_rgba(15,23,42,0.22)]"
+        class="absolute grid place-items-center"
+        :style="shortcutBadgeStyle"
       >
-        <svg aria-hidden="true" class="size-[15px]" :viewBox="WINDOWS_SHORTCUT_BADGE.viewBox">
+        <svg
+          aria-hidden="true"
+          fill="none"
+          :stroke="WINDOWS_SHORTCUT_BADGE.strokeColor"
+          :stroke-linecap="'round'"
+          :stroke-linejoin="'round'"
+          :stroke-width="WINDOWS_SHORTCUT_BADGE.strokeWidth"
+          :style="shortcutBadgeSvgStyle"
+          :viewBox="WINDOWS_SHORTCUT_BADGE.viewBox"
+        >
           <path
-            :d="WINDOWS_SHORTCUT_BADGE.backgroundPath"
-            :fill="WINDOWS_SHORTCUT_BADGE.backgroundColor"
-          />
-          <path
-            :d="WINDOWS_SHORTCUT_BADGE.arrowPath"
-            :fill="WINDOWS_SHORTCUT_BADGE.arrowColor"
+            v-for="path in WINDOWS_SHORTCUT_BADGE.arrowPaths"
+            :key="path"
+            :d="path"
           />
         </svg>
       </span>
     </span>
     <span
       v-if="showLabel !== false"
-      class="line-clamp-2 w-full overflow-hidden [overflow-wrap:anywhere] text-[10.5px] leading-[1.18] text-slate-700 dark:text-slate-200"
+      class="overflow-hidden [overflow-wrap:anywhere] text-slate-700 dark:text-slate-200"
+      :style="labelStyle"
     >
       {{ displayName }}
     </span>

@@ -7,7 +7,6 @@ export type SettingsSection =
   | "boxes"
   | "boxDisplay"
   | "appearance"
-  | "behavior"
   | "about";
 
 /**

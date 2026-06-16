@@ -3,12 +3,12 @@
  */
 export const BOX_WINDOW_SIZE = {
   default: {
-    width: 340,
-    height: 280,
+    width: 320,
+    height: 320,
   },
   min: {
     width: 240,
-    height: 184,
+    height: 240,
   },
 } as const;
 
@@ -25,8 +25,9 @@ export const BOX_WINDOW_PLACEMENT = {
  * Box 菜单尺寸用于约束菜单位置，防止透明窗口外区域不可点击。
  */
 export const BOX_CONTEXT_MENU_LAYOUT = {
-  width: 190,
-  height: 128,
+  width: 204,
+  height: 190,
+  triggerGap: 14,
   viewportPadding: 8,
 } as const;
 

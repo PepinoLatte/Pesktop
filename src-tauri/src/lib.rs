@@ -8,8 +8,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_sql::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
+            commands::apply_native_desktop_icon_visibility,
+            commands::get_desktop_items_by_paths,
             commands::get_desktop_snapshot,
-            commands::open_desktop_item
+            commands::open_desktop_item,
+            commands::show_native_item_context_menu
         ])
         .run(tauri::generate_context!())
         .expect("failed to run dasktop");

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import type { CSSProperties } from "vue";
 import { MoreHorizontal, RefreshCw, Settings, Trash2 } from "@lucide/vue";
 import {
   LogicalPosition,
@@ -12,7 +13,15 @@ import {
 } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import DesktopIcon from "./components/DesktopIcon.vue";
+import { DESKTOP_ICON_VIEW } from "./config/desktopIcon";
 import { useDesktopStore } from "./store/desktopStore";
+import SegmentedControl from "../../shared/components/SegmentedControl.vue";
+import type {
+  DesktopBoxItemDropPlacement,
+  DesktopBoxTitlePosition,
+  DesktopItem,
+} from "../../shared/types/desktop";
+import { showNativeItemContextMenu } from "../../shared/api/desktop";
 import { openSettingsWindow } from "../../shared/window/boxWindows";
 import {
   BOX_CONTEXT_MENU_LAYOUT,
@@ -51,6 +60,14 @@ interface PhysicalWorkArea {
   width: number;
   x: number;
   y: number;
+}
+
+/**
+ * Box 内空隙拖拽命中结果，父级用它在最近图标左右两侧绘制插入线。
+ */
+interface BoxGridDragInsertTarget {
+  path: string;
+  placement: DesktopBoxItemDropPlacement;
 }
 
 let isApplyingWindowPosition = false;
@@ -104,12 +121,49 @@ const resizeHandles: Array<{
   { direction: "SouthEast", className: "bottom-[-4px] right-[-4px] size-4 cursor-nwse-resize" },
 ];
 
+/**
+ * Box 菜单里的标题位置使用紧凑分段控件，既保留动画反馈，也避免菜单出现两行重复按钮。
+ */
+const BOX_TITLE_POSITION_OPTIONS: Array<{
+  label: string;
+  value: DesktopBoxTitlePosition;
+}> = [
+  { label: "上方", value: "top" },
+  { label: "下方", value: "bottom" },
+];
+const BOX_TITLE_POSITION_OPTION_WIDTH = 74;
 const contextMenu = ref({ open: false, x: 0, y: 0 });
 const isEditingTitle = ref(false);
+const draggingBoxItemPath = ref<string | null>(null);
+const dragInsertTargetPath = ref<string | null>(null);
+const dragInsertPlacement = ref<DesktopBoxItemDropPlacement | null>(null);
 const titleDraft = ref("");
 const titleInputRef = ref<HTMLInputElement | null>(null);
 const box = computed(() => desktopStore.boxes.find((item) => item.id === props.boxId));
 const boxItems = computed(() => (box.value ? desktopStore.getBoxItems(box.value.id) : []));
+const boxGridRef = ref<HTMLElement | null>(null);
+const boxItemWidth = computed(() =>
+  Math.max(
+    desktopStore.settings.boxFilenameWidth,
+    desktopStore.settings.boxIconSize + DESKTOP_ICON_VIEW.itemInlinePadding * 2,
+  ),
+);
+const boxSurfaceStyle = computed(
+  () =>
+    ({
+      "--dasktop-box-background-opacity": `${desktopStore.settings.boxBackgroundOpacity / 100}`,
+      "--dasktop-box-radius": `${desktopStore.settings.boxCornerRadius}px`,
+      borderRadius: "var(--dasktop-box-radius)",
+    }) as CSSProperties,
+);
+const boxGridStyle = computed(
+  () =>
+    ({
+      columnGap: `${desktopStore.settings.boxIconGapX}px`,
+      gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${boxItemWidth.value}px), ${boxItemWidth.value}px))`,
+      rowGap: `${desktopStore.settings.boxIconGapY}px`,
+    }) as CSSProperties,
+);
 
 onMounted(async () => {
   await desktopStore.initialize();
@@ -120,6 +174,15 @@ onMounted(async () => {
       await handleWindowMoved(payload.x, payload.y);
     }),
   );
+
+  unlistenFns.push(
+    await currentWindow.onFocusChanged(({ payload }) => {
+      if (!payload) {
+        handleWindowBlur();
+      }
+    }),
+  );
+  window.addEventListener("blur", handleWindowBlur);
 
   unlistenFns.push(await currentWindow.onResized(() => scheduleResizePersist()));
 
@@ -143,6 +206,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopManualDragging(false);
   clearResizePersistState();
+  window.removeEventListener("blur", handleWindowBlur);
   for (const unlisten of unlistenFns) {
     unlisten();
   }
@@ -170,6 +234,28 @@ async function handleWindowMoved(x: number, y: number): Promise<void> {
   }
 
   await persistWindowPositionFromPhysical(x, y);
+}
+
+/**
+ * 窗口失焦时关闭菜单；如果正拖着 Box 图标离开窗口，则按拖出 Box 删除映射处理。
+ */
+function handleWindowBlur(): void {
+  closeContextMenu();
+  void removeDraggingBoxItemAfterWindowBlur();
+}
+
+/**
+ * pointer 拖出 WebView 后可能收不到 pointerup，用窗口失焦作为删除映射的兜底信号。
+ */
+async function removeDraggingBoxItemAfterWindowBlur(): Promise<void> {
+  const itemPath = draggingBoxItemPath.value;
+  if (!box.value || !itemPath) {
+    return;
+  }
+
+  draggingBoxItemPath.value = null;
+  clearBoxItemDragIndicator();
+  await desktopStore.removeItemFromBox(box.value.id, itemPath);
 }
 
 /**
@@ -204,14 +290,14 @@ function startTitleEditing(event: MouseEvent): void {
 }
 
 /**
- * 保存标题时保留非空约束，避免用户误删名称后 Box 在设置页中不可识别。
+ * 保存标题时允许空文本，设置页会用兜底名称识别该 Box，不强迫用户显示标题。
  */
 async function commitTitleEditing(): Promise<void> {
   if (!box.value || !isEditingTitle.value) {
     return;
   }
 
-  const nextTitle = titleDraft.value.trim() || box.value.title;
+  const nextTitle = titleDraft.value.trim();
   isEditingTitle.value = false;
 
   if (nextTitle === box.value.title) {
@@ -247,22 +333,197 @@ function startResizing(direction: ResizeDirection, event: MouseEvent): void {
 }
 
 /**
- * 更多菜单限制在当前 Box 窗口内，避免菜单跑出透明窗口区域后不可点击。
+ * 更多菜单相对按钮向左下方错开，并限制在当前窗口内，避免贴着点击点或被窗口边缘裁切。
  */
 function openContextMenu(event: MouseEvent): void {
-  const { height, viewportPadding, width } = BOX_CONTEXT_MENU_LAYOUT;
+  if (contextMenu.value.open) {
+    return;
+  }
+
+  const { height, triggerGap, viewportPadding, width } = BOX_CONTEXT_MENU_LAYOUT;
+  const preferredX = event.clientX - width + triggerGap * 2;
+  const preferredY =
+    event.clientY + triggerGap + height > window.innerHeight - viewportPadding
+      ? event.clientY - height - triggerGap
+      : event.clientY + triggerGap;
 
   contextMenu.value = {
     open: true,
-    x: Math.min(
-      Math.max(event.clientX, viewportPadding),
-      Math.max(window.innerWidth - width, viewportPadding),
-    ),
+    x: Math.min(Math.max(preferredX, viewportPadding), window.innerWidth - width - viewportPadding),
     y: Math.min(
-      Math.max(event.clientY, viewportPadding),
-      Math.max(window.innerHeight - height, viewportPadding),
+      Math.max(preferredY, viewportPadding),
+      window.innerHeight - height - viewportPadding,
     ),
   };
+}
+
+/**
+ * Box 图标 pointer 拖拽开始时关闭菜单，并记录当前正在排序的项目路径。
+ */
+function startBoxItemPointerDrag(itemPath: string): void {
+  draggingBoxItemPath.value = itemPath;
+  clearBoxItemDragIndicator();
+  closeContextMenu();
+}
+
+/**
+ * pointer 拖过 Box 内容区时展示插入竖线，让用户在释放前知道排序位置。
+ */
+function moveBoxItemPointerDrag(event: PointerEvent, itemPath: string): void {
+  if (draggingBoxItemPath.value !== itemPath || !boxGridRef.value) {
+    clearBoxItemDragIndicator();
+    return;
+  }
+
+  const insertTarget = resolveBoxGridDragInsertTarget(
+    event.clientX,
+    event.clientY,
+    boxGridRef.value,
+  );
+  if (!insertTarget) {
+    clearBoxItemDragIndicator();
+    return;
+  }
+
+  dragInsertTargetPath.value = insertTarget.path;
+  dragInsertPlacement.value = insertTarget.placement;
+}
+
+/**
+ * 外部文件拖入 Box 时声明当前区域可接收文件；内部排序已改用 pointer 拖拽。
+ */
+function handleBoxGridDragOver(event: DragEvent): void {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "copy";
+  }
+}
+
+/**
+ * DOM drop 只处理外部文件路径；Box 内部排序由 pointer up 提交，避免浏览器 DnD 禁用光标。
+ */
+async function handleBoxGridDrop(event: DragEvent): Promise<void> {
+  if (!box.value) {
+    return;
+  }
+
+  await desktopStore.handleItemDrop(event, box.value.id);
+}
+
+/**
+ * pointer 拖拽结束时提交排序；如果释放点已离开 Box 窗口，则删除映射让图标回到桌面。
+ */
+async function finishBoxItemPointerDrag(event: PointerEvent, itemPath: string): Promise<void> {
+  if (!box.value || draggingBoxItemPath.value !== itemPath) {
+    draggingBoxItemPath.value = null;
+    clearBoxItemDragIndicator();
+    return;
+  }
+
+  const shouldRemove = !isPointerInsideCurrentWindow(event);
+  const insertTargetPath = dragInsertTargetPath.value;
+  const insertPlacement = dragInsertPlacement.value;
+
+  draggingBoxItemPath.value = null;
+  clearBoxItemDragIndicator();
+  if (shouldRemove) {
+    await desktopStore.removeItemFromBox(box.value.id, itemPath);
+    return;
+  }
+
+  if (insertTargetPath && insertPlacement) {
+    await desktopStore.reorderBoxItem(box.value.id, itemPath, insertTargetPath, insertPlacement);
+    return;
+  }
+
+  await desktopStore.moveBoxItemToEnd(box.value.id, itemPath);
+}
+
+/**
+ * 清理排序提示线，避免拖拽离开窗口或落到空白区后保留旧位置。
+ */
+function clearBoxItemDragIndicator(): void {
+  dragInsertTargetPath.value = null;
+  dragInsertPlacement.value = null;
+}
+
+/**
+ * 指针位于图标间隙时，根据同一行最近的图标推导插入方向，避免排序提示线在空隙中消失。
+ */
+function resolveBoxGridDragInsertTarget(
+  clientX: number,
+  clientY: number,
+  container: HTMLElement,
+): BoxGridDragInsertTarget | null {
+  const iconElements = Array.from(
+    container.querySelectorAll<HTMLElement>("[data-box-item-path]"),
+  );
+  let nearestTarget: (BoxGridDragInsertTarget & { distance: number }) | null = null;
+
+  for (const iconElement of iconElements) {
+    const targetPath = iconElement.dataset.boxItemPath;
+    if (!targetPath || targetPath === draggingBoxItemPath.value) {
+      continue;
+    }
+
+    const rect = iconElement.getBoundingClientRect();
+    const verticalDistance =
+      clientY < rect.top ? rect.top - clientY : Math.max(clientY - rect.bottom, 0);
+    if (verticalDistance > DESKTOP_ICON_VIEW.dragInsertRowTolerance) {
+      continue;
+    }
+
+    const centerX = rect.left + rect.width / 2;
+    const distance = Math.abs(clientX - centerX) + verticalDistance * 3;
+    if (nearestTarget && nearestTarget.distance <= distance) {
+      continue;
+    }
+
+    nearestTarget = {
+      distance,
+      path: targetPath,
+      placement: clientX > centerX ? "after" : "before",
+    };
+  }
+
+  return nearestTarget
+    ? {
+        path: nearestTarget.path,
+        placement: nearestTarget.placement,
+      }
+    : null;
+}
+
+/**
+ * 浏览器拖拽事件的 client 坐标可以判断是否仍在当前透明 Box 窗口内。
+ */
+function isPointerInsideCurrentWindow(event: PointerEvent): boolean {
+  return (
+    event.clientX > 0 &&
+    event.clientY > 0 &&
+    event.clientX < window.innerWidth &&
+    event.clientY < window.innerHeight
+  );
+}
+
+/**
+ * Windows Shell 右键菜单由后端直接接管，前端只负责传递屏幕坐标和目标路径。
+ */
+function openNativeItemContextMenu(event: MouseEvent, item: DesktopItem): void {
+  closeContextMenu();
+  void showNativeItemContextMenu(item.path, event.screenX, event.screenY).catch((error) => {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+  });
+}
+
+/**
+ * Box 标题位置从更多菜单直接切换，适合用户在整理时即时调整窗口布局。
+ */
+async function updateTitlePositionFromMenu(position: DesktopBoxTitlePosition): Promise<void> {
+  if (!box.value) {
+    return;
+  }
+
+  await desktopStore.updateBoxTitlePosition(box.value.id, position);
 }
 
 /**
@@ -678,13 +939,13 @@ function resolveManualDragPosition(
 </script>
 
 <template>
-  <main class="h-screen w-screen overflow-hidden bg-transparent p-0">
+  <main class="h-screen w-screen overflow-hidden bg-transparent p-0" @click="closeContextMenu">
     <article
       v-if="box"
-      class="relative flex h-full w-full flex-col overflow-hidden rounded-[8px] border border-white/45 bg-white/10 text-slate-950 dark:border-[#3b3f49] dark:bg-[#101114]/30 dark:text-white"
-      @click="closeContextMenu"
-      @dragover.prevent
-      @drop="desktopStore.handleItemDrop($event, box.id)"
+      class="dasktop-box-surface relative flex h-full w-full flex-col overflow-hidden text-slate-950 shadow-[0_10px_28px_rgba(15,23,42,0.10)] dark:text-white dark:shadow-[0_10px_28px_rgba(0,0,0,0.24)]"
+      :style="boxSurfaceStyle"
+      @dragover.prevent="handleBoxGridDragOver"
+      @drop.prevent="handleBoxGridDrop"
     >
       <span
         v-for="handle in resizeHandles"
@@ -695,7 +956,8 @@ function resolveManualDragPosition(
       />
 
       <header
-        class="relative flex h-10 shrink-0 select-none items-center justify-center border-b border-white/35 bg-white/10 px-3 dark:border-[#30333c] dark:bg-[#1a1c22]/40"
+        class="relative flex h-10 shrink-0 select-none items-center justify-center px-3"
+        :class="box.titlePosition === 'bottom' ? 'order-2' : 'order-0'"
         @mousedown.left="startDragging"
         @dblclick.stop.prevent
       >
@@ -715,7 +977,7 @@ function resolveManualDragPosition(
         />
         <span
           v-else
-          class="max-w-[68%] truncate text-center text-[13px] font-semibold text-slate-900 dark:text-white"
+          class="h-7 min-w-12 max-w-[68%] truncate text-center text-[13px] font-semibold leading-7 text-slate-900 dark:text-white"
           title="双击编辑 Box 名称"
           @dblclick="startTitleEditing"
           @mousedown.stop
@@ -733,60 +995,86 @@ function resolveManualDragPosition(
         </button>
       </header>
 
-      <div class="grid min-h-0 flex-1 auto-rows-[82px] grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-1 overflow-auto p-2.5">
+      <div
+        ref="boxGridRef"
+        class="dasktop-scrollarea dasktop-box-scrollarea grid min-h-0 flex-1 overflow-auto p-2.5"
+        :class="
+          boxItems.length === 0
+            ? 'content-center place-items-center justify-center'
+            : 'content-start items-start justify-start'
+        "
+        :style="boxGridStyle"
+      >
         <DesktopIcon
           v-for="item in boxItems"
           :key="item.path"
           :double-click-open="desktopStore.settings.doubleClickOpenItems"
+          :drag-insert-position="dragInsertTargetPath === item.path ? dragInsertPlacement : null"
+          :icon-size="desktopStore.settings.boxIconSize"
           :item="item"
+          :label-text-size="desktopStore.settings.boxLabelTextSize"
+          :label-width="desktopStore.settings.boxFilenameWidth"
           :name-display-mode="desktopStore.settings.nameDisplayMode"
+          :radius-size="desktopStore.settings.boxCornerRadius"
           :show-label="desktopStore.settings.showItemLabels"
           :show-shortcut-arrow="desktopStore.settings.showShortcutArrow"
+          @box-pointer-drag-end="finishBoxItemPointerDrag"
+          @box-pointer-drag-move="moveBoxItemPointerDrag"
+          @box-pointer-drag-start="startBoxItemPointerDrag"
+          @native-context-menu="openNativeItemContextMenu"
         />
 
         <div
           v-if="boxItems.length === 0"
-          class="col-span-full grid min-h-[120px] place-items-center px-5 text-center"
+          class="col-span-full flex min-h-[120px] w-full flex-col items-center justify-center px-5 text-center"
         >
-          <div>
-            <strong class="text-[13px] font-semibold text-slate-900 dark:text-white">这个 Box 还是空的</strong>
-            <p class="mt-1 text-[12px] leading-5 text-slate-600 dark:text-slate-300">把桌面文件拖进来就能开始整理。</p>
-          </div>
+          <strong class="block text-center text-[13px] font-semibold text-slate-900 dark:text-white">这个 Box 还是空的</strong>
+          <p class="mt-1 max-w-[180px] text-center text-[12px] leading-5 text-slate-600 dark:text-slate-300">把桌面文件拖进来就能开始整理。</p>
         </div>
       </div>
-
-      <nav
-        v-if="contextMenu.open"
-        class="fixed z-50 grid min-w-[176px] overflow-hidden rounded-[10px] border border-[#d9dce3] bg-[#fbfbfd] p-1 text-slate-800 shadow-[0_18px_45px_rgba(15,23,42,0.24)] dark:border-[#30333c] dark:bg-[#202228] dark:text-slate-100"
-        :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
-        @click.stop
-      >
-        <button
-          class="flex h-8 items-center rounded-[7px] px-3 text-left text-[12px] transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
-          type="button"
-          @click="openSettingsFromMenu"
-        >
-          <Settings class="mr-2 text-slate-500 dark:text-slate-400" :size="14" />
-          打开设置
-        </button>
-        <button
-          class="flex h-8 items-center rounded-[7px] px-3 text-left text-[12px] transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
-          type="button"
-          @click="refreshDesktopFromMenu"
-        >
-          <RefreshCw class="mr-2 text-slate-500 dark:text-slate-400" :size="14" />
-          刷新桌面
-        </button>
-        <span class="my-1 h-px bg-[#e4e6eb] dark:bg-[#30333c]" />
-        <button
-          class="flex h-8 items-center rounded-[7px] px-3 text-left text-[12px] text-red-600 transition-colors hover:bg-[#fff0f0] dark:text-red-400 dark:hover:bg-[#3a2528]"
-          type="button"
-          @click="deleteCurrentBox"
-        >
-          <Trash2 class="mr-2" :size="14" />
-          删除 Box
-        </button>
-      </nav>
     </article>
+
+    <nav
+      v-if="box && contextMenu.open"
+      class="dasktop-box-menu fixed z-[100] grid min-w-[176px] overflow-hidden rounded-[10px] border border-[#d9dce3] bg-[#fbfbfd] p-1 text-slate-800 shadow-[0_18px_45px_rgba(15,23,42,0.24)] dark:border-[#30333c] dark:bg-[#202228] dark:text-slate-100"
+      :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+      @click.stop
+    >
+      <button
+        class="flex h-8 items-center rounded-[7px] px-3 text-left text-[12px] transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
+        type="button"
+        @click="openSettingsFromMenu"
+      >
+        <Settings class="mr-2 text-slate-500 dark:text-slate-400" :size="14" />
+        打开设置
+      </button>
+      <button
+        class="flex h-8 items-center rounded-[7px] px-3 text-left text-[12px] transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
+        type="button"
+        @click="refreshDesktopFromMenu"
+      >
+        <RefreshCw class="mr-2 text-slate-500 dark:text-slate-400" :size="14" />
+        刷新桌面
+      </button>
+      <span class="my-1 h-px bg-[#e4e6eb] dark:bg-[#30333c]" />
+      <div class="grid gap-2 px-2 py-1.5">
+        <span class="text-[11px] font-medium text-slate-500 dark:text-slate-400">标题位置</span>
+        <SegmentedControl
+          :model-value="box.titlePosition"
+          :option-width-px="BOX_TITLE_POSITION_OPTION_WIDTH"
+          :options="BOX_TITLE_POSITION_OPTIONS"
+          @change="updateTitlePositionFromMenu"
+        />
+      </div>
+      <span class="my-1 h-px bg-[#e4e6eb] dark:bg-[#30333c]" />
+      <button
+        class="flex h-8 items-center rounded-[7px] px-3 text-left text-[12px] text-red-600 transition-colors hover:bg-[#fff0f0] dark:text-red-400 dark:hover:bg-[#3a2528]"
+        type="button"
+        @click="deleteCurrentBox"
+      >
+        <Trash2 class="mr-2" :size="14" />
+        删除 Box
+      </button>
+    </nav>
   </main>
 </template>
