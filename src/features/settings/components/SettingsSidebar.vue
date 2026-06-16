@@ -1,0 +1,67 @@
+<script setup lang="ts">
+import { Boxes } from "@lucide/vue";
+import type { SettingsNavItem, SettingsSection } from "../types";
+
+/**
+ * 设置侧栏只渲染当前版本的设置入口，旧占位菜单不再保留。
+ */
+defineProps<{
+  activeSection: SettingsSection;
+  sections: readonly SettingsNavItem[];
+}>();
+
+const emit = defineEmits<{
+  sectionChange: [section: SettingsSection];
+}>();
+
+</script>
+
+<template>
+  <aside class="flex h-full w-[264px] shrink-0 flex-col border-r border-[#dfe2e8] bg-[#f2f3f6] dark:border-[#292c34] dark:bg-[#17181e]">
+    <div class="flex items-center gap-3 px-5 pb-5 pt-6">
+      <span
+        class="grid size-10 shrink-0 place-items-center rounded-[10px] bg-[#1d1f26] text-white shadow-[0_10px_24px_rgba(21,24,32,0.18)] dark:bg-[#f4f4f5] dark:text-[#17181c]"
+      >
+        <Boxes :size="20" />
+      </span>
+      <div class="min-w-0">
+        <div class="truncate text-[17px] font-semibold tracking-[0] text-[#17181c] dark:text-[#f4f4f5]">Dasktop</div>
+        <div class="mt-0.5 text-[12px] text-[#6f7480] dark:text-[#9ca0aa]">桌面 Box 设置</div>
+      </div>
+    </div>
+
+    <nav class="flex-1 px-3 pb-4">
+      <div class="grid gap-1">
+        <button
+          v-for="section in sections"
+          :key="section.key"
+          class="flex h-10 items-center gap-3 rounded-[9px] px-3 text-left text-[13px] font-medium transition-colors"
+          :data-theme-instant="activeSection === section.key ? 'true' : undefined"
+          :class="
+            activeSection === section.key
+              ? 'bg-[#ffffff] text-[#17181c] shadow-[0_5px_16px_rgba(20,24,32,0.08)] dark:bg-[#24262e] dark:text-[#f4f4f5] dark:shadow-none'
+              : 'text-[#606672] hover:bg-[#ffffff] hover:text-[#17181c] dark:text-[#9ca0aa] dark:hover:bg-[#202229] dark:hover:text-[#f4f4f5]'
+          "
+          type="button"
+          @click="emit('sectionChange', section.key)"
+        >
+          <span
+            class="grid size-7 shrink-0 place-items-center rounded-[8px]"
+            :class="
+              activeSection === section.key
+                ? 'bg-[#ff5c5c] text-white'
+                : 'bg-[#e3e5eb] text-[#68707d] dark:bg-[#2a2d35] dark:text-[#a7abb5]'
+            "
+          >
+            <component :is="section.icon" :size="15" />
+          </span>
+          <span>{{ section.label }}</span>
+        </button>
+      </div>
+    </nav>
+
+    <div class="border-t border-[#dfe2e8] px-5 py-4 text-[12px] text-[#7a7f8b] dark:border-[#292c34] dark:text-[#858a95]">
+      Windows 原生桌面右键保留
+    </div>
+  </aside>
+</template>
