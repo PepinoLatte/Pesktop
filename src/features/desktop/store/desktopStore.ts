@@ -2,33 +2,34 @@ import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import { getDesktopSnapshot } from "../../../shared/api/desktop";
 import {
+  assignBoxItems,
   deleteBoxRecord,
   initializeStorage,
+  loadBoxItems,
   loadBoxes,
   loadSettings,
   saveBox,
   saveSetting,
 } from "../../../shared/storage/database";
+import { APP_SETTING_KEYS, DEFAULT_APP_SETTINGS } from "../../../shared/config/appSettings";
+import {
+  BOX_WINDOW_PLACEMENT,
+  BOX_WINDOW_SIZE,
+  THEME_TRANSITION_CONFIG,
+} from "../../../shared/config/desktopLayout";
 import {
   listenDesktopStateChanged,
   notifyDesktopStateChanged,
   type DesktopStateChangeScope,
 } from "../../../shared/events/desktopEvents";
-import type { AppSettings, DesktopBox, DesktopItem, ThemeMode } from "../../../shared/types/desktop";
-
-/**
- * 默认尺寸需要保证能容纳标题栏、空状态和最小拖拽热区。
- */
-const DEFAULT_BOX_SIZE = {
-  width: 340,
-  height: 280,
-};
-
-/**
- * 主题过渡类只在用户主动切换或系统主题变化时短暂启用，避免启动时出现不必要的闪动。
- */
-const THEME_TRANSITION_CLASS = "theme-transition";
-const THEME_TRANSITION_TIMEOUT_MS = 260;
+import type {
+  AppSettings,
+  DesktopBox,
+  DesktopBoxItem,
+  DesktopItem,
+  DesktopNameDisplayMode,
+  ThemeMode,
+} from "../../../shared/types/desktop";
 
 /**
  * 更新 Box 时允许调用方控制是否清洗尺寸和广播事件，缩放等高频场景需要避免跨窗口刷新抖动。
@@ -45,29 +46,51 @@ export const useDesktopStore = defineStore("desktop", () => {
   const desktopPath = ref("");
   const items = ref<DesktopItem[]>([]);
   const boxes = ref<DesktopBox[]>([]);
+  const boxItems = ref<DesktopBoxItem[]>([]);
   const isLoading = ref(true);
   const isInitialized = ref(false);
   const lastError = ref("");
-  const settings = ref<AppSettings>({
-    theme: "system",
-    snapToEdges: true,
-    snapThreshold: 20,
-    showItemLabels: true,
-  });
+  const settings = ref<AppSettings>({ ...DEFAULT_APP_SETTINGS });
   const storeInstanceId = crypto.randomUUID();
   let stateListenerRegistered = false;
   let themeTransitionTimer: ReturnType<typeof window.setTimeout> | null = null;
 
+  /**
+   * 桌面视图只显示尚未归入 Box 的项目；拖入 Box 后通过映射过滤实现“桌面消失”，不移动真实文件。
+   */
   const unassignedItems = computed(() => {
-    const assignedPaths = new Set(boxes.value.flatMap((box) => box.itemPaths));
+    const assignedPaths = new Set(boxItems.value.map((boxItem) => boxItem.itemPath));
     return items.value.filter((item) => !assignedPaths.has(item.path));
   });
+
+  /**
+   * 所有 Box 的项目总数直接来自关联表，避免窗口布局数据承担统计职责。
+   */
+  const totalBoxItems = computed(() => boxItems.value.length);
 
   /**
    * 通过真实路径查找桌面项目，保证 Box 映射不依赖易变化的展示名称。
    */
   function findItem(path: string): DesktopItem | undefined {
     return items.value.find((item) => item.path === path);
+  }
+
+  /**
+   * 通过关联表读取目标 Box 的路径列表，保持窗口布局对象只承载几何信息。
+   */
+  function getBoxItemPaths(boxId: string): string[] {
+    return boxItems.value
+      .filter((boxItem) => boxItem.boxId === boxId)
+      .map((boxItem) => boxItem.itemPath);
+  }
+
+  /**
+   * Box 渲染时从桌面快照反查项目详情，桌面文件不存在时自动不显示悬空映射。
+   */
+  function getBoxItems(boxId: string): DesktopItem[] {
+    return getBoxItemPaths(boxId)
+      .map((path) => findItem(path))
+      .filter((item) => item !== undefined);
   }
 
   /**
@@ -84,9 +107,10 @@ export const useDesktopStore = defineStore("desktop", () => {
     try {
       await initializeStorage();
       registerStateListener();
-      const [snapshot, savedBoxes, savedSettings] = await Promise.all([
+      const [snapshot, savedBoxes, savedBoxItems, savedSettings] = await Promise.all([
         getDesktopSnapshot(),
         loadBoxes(),
+        loadBoxItems(),
         loadSettings(),
       ]);
 
@@ -97,6 +121,7 @@ export const useDesktopStore = defineStore("desktop", () => {
       boxes.value = (savedBoxes.length > 0 ? savedBoxes : [createDefaultBox()]).map((box) =>
         sanitizeBoxSize(box),
       );
+      boxItems.value = savedBoxItems;
 
       await Promise.all(boxes.value.map((box) => saveBox(box)));
       isInitialized.value = true;
@@ -124,10 +149,15 @@ export const useDesktopStore = defineStore("desktop", () => {
    * 设置窗重新获得焦点时从 SQLite 读取最新状态，解决多个独立 Box 窗口各自持有 Store 的问题。
    */
   async function reloadPersistedState(): Promise<void> {
-    const [savedBoxes, savedSettings] = await Promise.all([loadBoxes(), loadSettings()]);
+    const [savedBoxes, savedBoxItems, savedSettings] = await Promise.all([
+      loadBoxes(),
+      loadBoxItems(),
+      loadSettings(),
+    ]);
 
     const previousTheme = settings.value.theme;
     boxes.value = savedBoxes.map((savedBox) => sanitizeBoxSize(savedBox));
+    boxItems.value = savedBoxItems;
     settings.value = savedSettings;
     applyTheme(savedSettings.theme, previousTheme !== savedSettings.theme);
   }
@@ -173,10 +203,9 @@ export const useDesktopStore = defineStore("desktop", () => {
     const nextBox = sanitizeBoxSize({
       id: crypto.randomUUID(),
       title,
-      x: 96 + boxes.value.length * 28,
-      y: 96 + boxes.value.length * 28,
-      ...DEFAULT_BOX_SIZE,
-      itemPaths: [],
+      x: BOX_WINDOW_PLACEMENT.initialX + boxes.value.length * BOX_WINDOW_PLACEMENT.cascadeStep,
+      y: BOX_WINDOW_PLACEMENT.initialY + boxes.value.length * BOX_WINDOW_PLACEMENT.cascadeStep,
+      ...BOX_WINDOW_SIZE.default,
     });
 
     boxes.value.push(nextBox);
@@ -220,19 +249,14 @@ export const useDesktopStore = defineStore("desktop", () => {
       return;
     }
 
-    const nextBoxes = boxes.value.map((box) => ({
-      ...box,
-      itemPaths: box.itemPaths.filter((path) => !uniqueItemPaths.includes(path)),
-    }));
-    const targetBox = nextBoxes.find((box) => box.id === boxId);
-
-    if (!targetBox) {
-      return;
-    }
-
-    targetBox.itemPaths.push(...uniqueItemPaths);
-    boxes.value = nextBoxes;
-    await Promise.all(nextBoxes.map((box) => saveBox(box)));
+    await assignBoxItems(boxId, uniqueItemPaths);
+    boxItems.value = boxItems.value.filter((boxItem) => !uniqueItemPaths.includes(boxItem.itemPath));
+    boxItems.value.push(
+      ...uniqueItemPaths.map((itemPath) => ({
+        boxId,
+        itemPath,
+      })),
+    );
     await broadcastStateChanged("boxes");
   }
 
@@ -253,6 +277,7 @@ export const useDesktopStore = defineStore("desktop", () => {
    */
   async function deleteBox(boxId: string): Promise<void> {
     boxes.value = boxes.value.filter((box) => box.id !== boxId);
+    boxItems.value = boxItems.value.filter((boxItem) => boxItem.boxId !== boxId);
     await deleteBoxRecord(boxId);
     await broadcastStateChanged("boxes");
   }
@@ -276,10 +301,9 @@ export const useDesktopStore = defineStore("desktop", () => {
     return {
       id: crypto.randomUUID(),
       title: "工作",
-      x: 96,
-      y: 96,
-      ...DEFAULT_BOX_SIZE,
-      itemPaths: [],
+      x: BOX_WINDOW_PLACEMENT.initialX,
+      y: BOX_WINDOW_PLACEMENT.initialY,
+      ...BOX_WINDOW_SIZE.default,
     };
   }
 
@@ -289,7 +313,7 @@ export const useDesktopStore = defineStore("desktop", () => {
   async function updateTheme(theme: ThemeMode): Promise<void> {
     settings.value.theme = theme;
     applyTheme(theme, true);
-    await saveSetting("theme", theme);
+    await saveSetting(APP_SETTING_KEYS.theme, theme);
     await broadcastStateChanged("settings");
   }
 
@@ -298,7 +322,7 @@ export const useDesktopStore = defineStore("desktop", () => {
    */
   async function updateSnapToEdges(enabled: boolean): Promise<void> {
     settings.value.snapToEdges = enabled;
-    await saveSetting("snapToEdges", enabled);
+    await saveSetting(APP_SETTING_KEYS.snapToEdges, enabled);
     await broadcastStateChanged("settings");
   }
 
@@ -307,7 +331,7 @@ export const useDesktopStore = defineStore("desktop", () => {
    */
   async function updateSnapThreshold(threshold: number): Promise<void> {
     settings.value.snapThreshold = threshold;
-    await saveSetting("snapThreshold", threshold);
+    await saveSetting(APP_SETTING_KEYS.snapThreshold, threshold);
     await broadcastStateChanged("settings");
   }
 
@@ -316,7 +340,34 @@ export const useDesktopStore = defineStore("desktop", () => {
    */
   async function updateShowItemLabels(value: boolean): Promise<void> {
     settings.value.showItemLabels = value;
-    await saveSetting("showItemLabels", value);
+    await saveSetting(APP_SETTING_KEYS.showItemLabels, value);
+    await broadcastStateChanged("settings");
+  }
+
+  /**
+   * 快捷方式箭头只影响 Dasktop 的视觉提示，不改 Windows 快捷方式文件本身。
+   */
+  async function updateShowShortcutArrow(value: boolean): Promise<void> {
+    settings.value.showShortcutArrow = value;
+    await saveSetting(APP_SETTING_KEYS.showShortcutArrow, value);
+    await broadcastStateChanged("settings");
+  }
+
+  /**
+   * 打开方式只影响 Dasktop 图标的点击交互，不改变系统默认打开程序。
+   */
+  async function updateDoubleClickOpenItems(value: boolean): Promise<void> {
+    settings.value.doubleClickOpenItems = value;
+    await saveSetting(APP_SETTING_KEYS.doubleClickOpenItems, value);
+    await broadcastStateChanged("settings");
+  }
+
+  /**
+   * 文件名显示模式用于统一控制 Box 内后缀呈现，避免同一路径在多个 Box 中展示不一致。
+   */
+  async function updateNameDisplayMode(value: DesktopNameDisplayMode): Promise<void> {
+    settings.value.nameDisplayMode = value;
+    await saveSetting(APP_SETTING_KEYS.nameDisplayMode, value);
     await broadcastStateChanged("settings");
   }
 
@@ -326,8 +377,8 @@ export const useDesktopStore = defineStore("desktop", () => {
   function sanitizeBoxSize(box: DesktopBox): DesktopBox {
     return {
       ...box,
-      width: Math.max(box.width, 240),
-      height: Math.max(box.height, 184),
+      width: Math.max(box.width, BOX_WINDOW_SIZE.min.width),
+      height: Math.max(box.height, BOX_WINDOW_SIZE.min.height),
     };
   }
 
@@ -360,15 +411,15 @@ export const useDesktopStore = defineStore("desktop", () => {
       window.clearTimeout(themeTransitionTimer);
     }
 
-    root.classList.add(THEME_TRANSITION_CLASS);
+    root.classList.add(THEME_TRANSITION_CONFIG.className);
     /**
      * 强制浏览器先计算一次旧主题样式，随后切换 dark class 时才能拿到明确的过渡起点。
      */
     void root.offsetHeight;
     themeTransitionTimer = window.setTimeout(() => {
-      root.classList.remove(THEME_TRANSITION_CLASS);
+      root.classList.remove(THEME_TRANSITION_CONFIG.className);
       themeTransitionTimer = null;
-    }, THEME_TRANSITION_TIMEOUT_MS);
+    }, THEME_TRANSITION_CONFIG.timeoutMs);
   }
 
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
@@ -385,6 +436,8 @@ export const useDesktopStore = defineStore("desktop", () => {
     deleteBox,
     desktopPath,
     findItem,
+    getBoxItemPaths,
+    getBoxItems,
     handleItemDrop,
     initialize,
     isInitialized,
@@ -394,9 +447,14 @@ export const useDesktopStore = defineStore("desktop", () => {
     reloadPersistedState,
     refreshSnapshot,
     settings,
+    boxItems,
+    totalBoxItems,
     unassignedItems,
     updateBox,
+    updateDoubleClickOpenItems,
+    updateNameDisplayMode,
     updateShowItemLabels,
+    updateShowShortcutArrow,
     updateSnapThreshold,
     updateSnapToEdges,
     updateTheme,

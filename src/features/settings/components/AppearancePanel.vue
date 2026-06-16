@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { Component } from "vue";
-import { Monitor, Moon, Sun } from "@lucide/vue";
 import type { AppSettings, ThemeMode } from "../../../shared/types/desktop";
+import { SETTINGS_PANEL_WIDTH, THEME_SEGMENT_OPTIONS } from "../config/settingsUi";
+import SegmentedControl from "./SegmentedControl.vue";
 
 /**
  * 外观面板只暴露当前实现的主题和图标名称设置，避免旧视觉参数回流。
@@ -15,22 +15,10 @@ const emit = defineEmits<{
   themeChange: [theme: ThemeMode];
 }>();
 
-/**
- * 主题选项直接映射持久化枚举，避免 UI 和 Store 出现额外状态。
- */
-const themeOptions: Array<{
-  icon: Component;
-  label: string;
-  value: ThemeMode;
-}> = [
-  { icon: Sun, label: "浅色", value: "light" },
-  { icon: Monitor, label: "跟随系统", value: "system" },
-  { icon: Moon, label: "深色", value: "dark" },
-];
 </script>
 
 <template>
-  <section class="mx-auto w-full max-w-[780px] px-8 py-7">
+  <section class="mx-auto w-full px-8 py-7" :class="SETTINGS_PANEL_WIDTH.default">
     <div class="mb-6">
       <h1 class="text-[24px] font-semibold tracking-[0] text-[#17181c] dark:text-[#f4f4f5]">外观</h1>
       <p class="mt-1 text-[13px] text-[#6f7480] dark:text-[#a7abb5]">调整设置窗和 Box 的显示偏好。</p>
@@ -43,23 +31,11 @@ const themeOptions: Array<{
           <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">用于设置页和 Box 窗口的明暗切换。</p>
         </div>
 
-        <div class="flex rounded-[10px] bg-[#eceef3] p-1 dark:bg-[#242730]">
-          <button
-            v-for="option in themeOptions"
-            :key="option.value"
-            class="flex h-8 min-w-[92px] items-center justify-center gap-2 rounded-[8px] px-3 text-[12px] font-medium transition-colors"
-            :class="
-              props.settings.theme === option.value
-                ? 'bg-[#ffffff] text-[#17181c] shadow-[0_4px_12px_rgba(20,24,32,0.10)] dark:bg-[#f4f4f5] dark:text-[#17181c]'
-                : 'text-[#686e7b] hover:text-[#17181c] dark:text-[#a7abb5] dark:hover:text-[#f4f4f5]'
-            "
-            type="button"
-            @click="emit('themeChange', option.value)"
-          >
-            <component :is="option.icon" :size="15" />
-            <span>{{ option.label }}</span>
-          </button>
-        </div>
+        <SegmentedControl
+          :model-value="props.settings.theme"
+          :options="THEME_SEGMENT_OPTIONS"
+          @change="emit('themeChange', $event)"
+        />
       </div>
 
       <div class="h-px bg-[#e7e9ee] dark:bg-[#292c34]" />

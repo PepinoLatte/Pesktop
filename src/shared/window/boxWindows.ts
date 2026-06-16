@@ -1,6 +1,7 @@
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
 import type { DesktopBox } from "../types/desktop";
+import { BOX_WINDOW_SIZE } from "../config/desktopLayout";
 
 /**
  * 打开 Box 的策略参数，启动恢复时不抢焦点，用户主动打开时再切到前台。
@@ -45,8 +46,8 @@ export async function openBoxWindow(
       y: box.y,
       width: box.width,
       height: box.height,
-      minWidth: 240,
-      minHeight: 184,
+      minWidth: BOX_WINDOW_SIZE.min.width,
+      minHeight: BOX_WINDOW_SIZE.min.height,
       decorations: false,
       dragDropEnabled: true,
       focus: shouldFocus,

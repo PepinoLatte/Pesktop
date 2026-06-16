@@ -14,6 +14,10 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import DesktopIcon from "./components/DesktopIcon.vue";
 import { useDesktopStore } from "./store/desktopStore";
 import { openSettingsWindow } from "../../shared/window/boxWindows";
+import {
+  BOX_CONTEXT_MENU_LAYOUT,
+  BOX_WINDOW_INTERACTION_TIMING,
+} from "../../shared/config/desktopLayout";
 
 const props = defineProps<{
   boxId: string;
@@ -25,11 +29,11 @@ const unlistenFns: UnlistenFn[] = [];
 /**
  * 程序主动定位后的短锁用于过滤 setPosition 自己触发的移动事件。
  */
-const WINDOW_POSITION_APPLY_LOCK_MS = 80;
+const WINDOW_POSITION_APPLY_LOCK_MS = BOX_WINDOW_INTERACTION_TIMING.positionApplyLockMs;
 /**
  * 系统缩放拖拽可能吞掉 WebView 的 mouseup，短暂静止后保存最终边界作为兜底。
  */
-const RESIZE_PERSIST_SETTLE_MS = 180;
+const RESIZE_PERSIST_SETTLE_MS = BOX_WINDOW_INTERACTION_TIMING.resizePersistSettleMs;
 
 /**
  * 物理坐标用于和 Tauri 窗口移动事件保持同一坐标体系，高 DPI 下再单独换算逻辑坐标。
@@ -105,13 +109,7 @@ const isEditingTitle = ref(false);
 const titleDraft = ref("");
 const titleInputRef = ref<HTMLInputElement | null>(null);
 const box = computed(() => desktopStore.boxes.find((item) => item.id === props.boxId));
-const boxItems = computed(() =>
-  box.value
-    ? box.value.itemPaths
-        .map((path) => desktopStore.findItem(path))
-        .filter((item) => item !== undefined)
-    : [],
-);
+const boxItems = computed(() => (box.value ? desktopStore.getBoxItems(box.value.id) : []));
 
 onMounted(async () => {
   await desktopStore.initialize();
@@ -252,13 +250,18 @@ function startResizing(direction: ResizeDirection, event: MouseEvent): void {
  * 更多菜单限制在当前 Box 窗口内，避免菜单跑出透明窗口区域后不可点击。
  */
 function openContextMenu(event: MouseEvent): void {
-  const menuWidth = 190;
-  const menuHeight = 128;
+  const { height, viewportPadding, width } = BOX_CONTEXT_MENU_LAYOUT;
 
   contextMenu.value = {
     open: true,
-    x: Math.min(Math.max(event.clientX, 8), Math.max(window.innerWidth - menuWidth, 8)),
-    y: Math.min(Math.max(event.clientY, 8), Math.max(window.innerHeight - menuHeight, 8)),
+    x: Math.min(
+      Math.max(event.clientX, viewportPadding),
+      Math.max(window.innerWidth - width, viewportPadding),
+    ),
+    y: Math.min(
+      Math.max(event.clientY, viewportPadding),
+      Math.max(window.innerHeight - height, viewportPadding),
+    ),
   };
 }
 
@@ -701,7 +704,7 @@ function resolveManualDragPosition(
           ref="titleInputRef"
           v-model="titleDraft"
           aria-label="编辑 Box 名称"
-          class="h-7 max-w-[68%] rounded-[6px] border border-[#d7dae2] bg-white px-2 text-center text-[13px] font-semibold text-slate-900 outline-none ring-0 transition focus:border-[#ff5c5c] focus:shadow-[0_0_0_3px_rgba(255,92,92,0.16)] dark:border-[#3a3d46] dark:bg-[#202228] dark:text-white"
+          class="h-7 w-[68%] max-w-[220px] rounded-[6px] bg-white/60 px-2 text-center text-[13px] font-semibold text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:bg-white/85 dark:bg-white/10 dark:text-white dark:focus:bg-white/15"
           maxlength="32"
           type="text"
           @blur="commitTitleEditing"
@@ -734,8 +737,11 @@ function resolveManualDragPosition(
         <DesktopIcon
           v-for="item in boxItems"
           :key="item.path"
+          :double-click-open="desktopStore.settings.doubleClickOpenItems"
           :item="item"
+          :name-display-mode="desktopStore.settings.nameDisplayMode"
           :show-label="desktopStore.settings.showItemLabels"
+          :show-shortcut-arrow="desktopStore.settings.showShortcutArrow"
         />
 
         <div

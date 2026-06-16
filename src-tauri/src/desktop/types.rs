@@ -19,6 +19,7 @@ pub struct DesktopItem {
     pub path: String,
     pub extension: Option<String>,
     pub kind: DesktopItemKind,
+    pub icon_data_url: Option<String>,
 }
 
 /// 桌面快照由真实桌面目录扫描得出，前端据此重绘 UI。

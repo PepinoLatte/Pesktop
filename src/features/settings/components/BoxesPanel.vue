@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { ArrowUpRight, FolderPlus, RefreshCw } from "@lucide/vue";
 import type { DesktopBox } from "../../../shared/types/desktop";
+import { SETTINGS_PANEL_WIDTH } from "../config/settingsUi";
 
 /**
  * Box 面板只做创建、打开和刷新入口，具体窗口行为由 desktop feature 处理。
  */
 defineProps<{
   boxes: DesktopBox[];
+  boxItemCounts: Record<string, number>;
   totalItems: number;
   unassignedItems: number;
 }>();
@@ -19,7 +21,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <section class="mx-auto w-full max-w-[820px] px-8 py-7">
+  <section class="mx-auto w-full px-8 py-7" :class="SETTINGS_PANEL_WIDTH.wide">
     <div class="mb-6 flex items-end justify-between gap-6">
       <div class="min-w-0">
         <h1 class="text-[24px] font-semibold tracking-[0] text-[#17181c] dark:text-[#f4f4f5]">Box</h1>
@@ -62,7 +64,7 @@ const emit = defineEmits<{
         <span class="min-w-0">
           <strong class="block truncate text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">{{ box.title }}</strong>
           <span class="mt-1 block text-[12px] text-[#707684] dark:text-[#9ca0aa]">
-            {{ box.width }} × {{ box.height }} · {{ box.itemPaths.length }} 个项目
+            {{ box.width }} × {{ box.height }} · {{ boxItemCounts[box.id] ?? 0 }} 个项目
           </span>
         </span>
         <ArrowUpRight class="text-[#9aa0ab] dark:text-[#7b808b]" :size="17" />

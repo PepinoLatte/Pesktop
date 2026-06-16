@@ -4,6 +4,11 @@
 export type DesktopItemKind = "file" | "folder" | "shortcut" | "unknown";
 
 /**
+ * Box 图标名称显示模式由全局设置控制，避免不同窗口之间出现同一文件命名规则不一致。
+ */
+export type DesktopNameDisplayMode = "full" | "hideShortcutExtension" | "hideAllExtensions";
+
+/**
  * 自绘桌面图标模型，path 是所有持久化映射的稳定主键。
  */
 export interface DesktopItem {
@@ -12,6 +17,10 @@ export interface DesktopItem {
   path: string;
   extension: string | null;
   kind: DesktopItemKind;
+  /**
+   * Windows Shell 解析出的原生图标，Box 和桌面列表复用同一份数据以避免拖入后视觉不一致。
+   */
+  iconDataUrl: string | null;
 }
 
 /**
@@ -24,7 +33,14 @@ export interface DesktopBox {
   y: number;
   width: number;
   height: number;
-  itemPaths: string[];
+}
+
+/**
+ * Box 与桌面项目的关联独立建模，便于按 Box 或路径快速查询、删除和去重。
+ */
+export interface DesktopBoxItem {
+  boxId: string;
+  itemPath: string;
 }
 
 /**
@@ -48,4 +64,7 @@ export interface AppSettings {
   snapToEdges: boolean;
   snapThreshold: number;
   showItemLabels: boolean;
+  showShortcutArrow: boolean;
+  doubleClickOpenItems: boolean;
+  nameDisplayMode: DesktopNameDisplayMode;
 }

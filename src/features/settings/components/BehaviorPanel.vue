@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { AppSettings } from "../../../shared/types/desktop";
+import { SETTINGS_PANEL_WIDTH, SNAP_THRESHOLD_INPUT } from "../config/settingsUi";
 
 /**
  * 行为面板只维护窗口交互偏好，不接管 Windows 桌面行为。
@@ -15,7 +16,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <section class="mx-auto w-full max-w-[780px] px-8 py-7">
+  <section class="mx-auto w-full px-8 py-7" :class="SETTINGS_PANEL_WIDTH.default">
     <div class="mb-6">
       <h1 class="text-[24px] font-semibold tracking-[0] text-[#17181c] dark:text-[#f4f4f5]">行为</h1>
       <p class="mt-1 text-[13px] text-[#6f7480] dark:text-[#a7abb5]">控制 Box 在桌面上的移动方式。</p>
@@ -55,9 +56,9 @@ const emit = defineEmits<{
         <div class="flex items-center gap-3">
           <input
             class="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[#d8dbe3] accent-[#ff5c5c] dark:bg-[#333640] dark:accent-[#ff6b6b]"
-            max="64"
-            min="8"
-            step="1"
+            :max="SNAP_THRESHOLD_INPUT.max"
+            :min="SNAP_THRESHOLD_INPUT.min"
+            :step="SNAP_THRESHOLD_INPUT.step"
             type="range"
             :value="settings.snapThreshold"
             @input="emit('snapThresholdChange', Number(($event.target as HTMLInputElement).value))"

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { SETTINGS_PANEL_WIDTH } from "../config/settingsUi";
+
 /**
  * 关于面板只展示运行信息，避免把设置页做成产品宣传页。
  */
@@ -8,7 +10,7 @@ defineProps<{
 </script>
 
 <template>
-  <section class="mx-auto w-full max-w-[780px] px-8 py-7">
+  <section class="mx-auto w-full px-8 py-7" :class="SETTINGS_PANEL_WIDTH.default">
     <div class="mb-6">
       <h1 class="text-[24px] font-semibold tracking-[0] text-[#17181c] dark:text-[#f4f4f5]">关于</h1>
       <p class="mt-1 text-[13px] text-[#6f7480] dark:text-[#a7abb5]">当前桌面扩展的运行信息。</p>

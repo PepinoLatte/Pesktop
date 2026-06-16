@@ -5,6 +5,7 @@ import type { Component } from "vue";
  */
 export type SettingsSection =
   | "boxes"
+  | "boxDisplay"
   | "appearance"
   | "behavior"
   | "about";

@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { Boxes, Info, Palette, SlidersHorizontal } from "@lucide/vue";
+import { Boxes, Info, MonitorCog, Palette, SlidersHorizontal } from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import AboutPanel from "./components/AboutPanel.vue";
 import AppearancePanel from "./components/AppearancePanel.vue";
 import BehaviorPanel from "./components/BehaviorPanel.vue";
+import BoxDisplayPanel from "./components/BoxDisplayPanel.vue";
 import BoxesPanel from "./components/BoxesPanel.vue";
 import SettingsHeader from "./components/SettingsHeader.vue";
 import SettingsSidebar from "./components/SettingsSidebar.vue";
 import { useDesktopStore } from "../desktop/store/desktopStore";
 import { openBoxWindow } from "../../shared/window/boxWindows";
+import { SETTINGS_WINDOW_SYNC_TIMING } from "../../shared/config/desktopLayout";
 import type { SettingsNavItem, SettingsSection } from "./types";
 
 const currentWindow = getCurrentWindow();
@@ -18,12 +20,21 @@ const desktopStore = useDesktopStore();
 const activeSection = ref<SettingsSection>("boxes");
 const startupError = ref("");
 const unlistenFns: UnlistenFn[] = [];
+/**
+ * 设置窗获得焦点时不立刻刷新桌面快照，避免 Shell 缩略图扫描卡住标题栏拖动首帧。
+ */
+const FOCUS_SYNC_DELAY_MS = SETTINGS_WINDOW_SYNC_TIMING.focusSyncDelayMs;
+const DRAG_RELEASE_FALLBACK_MS = SETTINGS_WINDOW_SYNC_TIMING.dragReleaseFallbackMs;
+let focusSyncTimer: ReturnType<typeof window.setTimeout> | null = null;
+let isDraggingSettingsWindow = false;
+let dragReleaseCleanup: (() => void) | null = null;
 
 /**
  * 设置页只保留当前真实可用的配置入口，旧占位导航不再兼容。
  */
 const sections: SettingsNavItem[] = [
   { key: "boxes", label: "Box", icon: Boxes },
+  { key: "boxDisplay", label: "设置", icon: MonitorCog },
   { key: "appearance", label: "外观", icon: Palette },
   { key: "behavior", label: "行为", icon: SlidersHorizontal },
   { key: "about", label: "关于", icon: Info },
@@ -32,20 +43,23 @@ const sections: SettingsNavItem[] = [
 const activeTitle = computed(
   () => sections.find((section) => section.key === activeSection.value)?.label ?? "设置",
 );
-const totalItems = computed(() =>
-  desktopStore.boxes.reduce((count, box) => count + box.itemPaths.length, 0),
+const totalItems = computed(() => desktopStore.totalBoxItems);
+const boxItemCounts = computed(() =>
+  Object.fromEntries(
+    desktopStore.boxes.map((box) => [box.id, desktopStore.getBoxItemPaths(box.id).length]),
+  ),
 );
 
 onMounted(async () => {
   await desktopStore.initialize();
   unlistenFns.push(
-    await currentWindow.onFocusChanged(async ({ payload }) => {
+    await currentWindow.onFocusChanged(({ payload }) => {
       if (!payload) {
+        clearFocusSyncTimer();
         return;
       }
 
-      await desktopStore.reloadPersistedState();
-      await desktopStore.refreshSnapshot(false);
+      scheduleFocusSync();
     }),
   );
 
@@ -58,6 +72,8 @@ onMounted(async () => {
  * 组件销毁时注销窗口事件，避免开发热更新后重复刷新状态。
  */
 onUnmounted(() => {
+  clearFocusSyncTimer();
+  clearDragReleaseListeners();
   for (const unlisten of unlistenFns) {
     unlisten();
   }
@@ -96,7 +112,80 @@ function startDragging(event: MouseEvent): void {
     return;
   }
 
+  isDraggingSettingsWindow = true;
+  clearFocusSyncTimer();
+  bindDragReleaseListeners();
   void currentWindow.startDragging();
+}
+
+/**
+ * 焦点同步延迟执行，让用户点击标题栏拖动时先进入系统拖动流程，再刷新 SQLite 和桌面快照。
+ */
+function scheduleFocusSync(): void {
+  clearFocusSyncTimer();
+  focusSyncTimer = window.setTimeout(() => {
+    focusSyncTimer = null;
+    void syncSettingsWindowState();
+  }, FOCUS_SYNC_DELAY_MS);
+}
+
+/**
+ * 聚焦后同步持久化状态和桌面快照；拖动中收到兜底触发时继续后延，避免刷新抢占拖动。
+ */
+async function syncSettingsWindowState(): Promise<void> {
+  if (isDraggingSettingsWindow) {
+    scheduleFocusSync();
+    return;
+  }
+
+  await desktopStore.reloadPersistedState();
+  await desktopStore.refreshSnapshot(false);
+}
+
+/**
+ * 清理焦点同步计时器，避免隐藏或拖动窗口时仍然启动一次昂贵的桌面扫描。
+ */
+function clearFocusSyncTimer(): void {
+  if (!focusSyncTimer) {
+    return;
+  }
+
+  window.clearTimeout(focusSyncTimer);
+  focusSyncTimer = null;
+}
+
+/**
+ * 监听拖动释放后再恢复设置同步；原生拖动吞掉释放事件时用短兜底恢复。
+ */
+function bindDragReleaseListeners(): void {
+  clearDragReleaseListeners();
+
+  const fallbackTimer = window.setTimeout(finishDragging, DRAG_RELEASE_FALLBACK_MS);
+  function finishDragging(): void {
+    isDraggingSettingsWindow = false;
+    clearDragReleaseListeners();
+    scheduleFocusSync();
+  }
+
+  window.addEventListener("mouseup", finishDragging, { capture: true, once: true });
+  window.addEventListener("pointerup", finishDragging, { capture: true, once: true });
+  document.addEventListener("mouseup", finishDragging, { capture: true, once: true });
+  document.addEventListener("pointerup", finishDragging, { capture: true, once: true });
+  dragReleaseCleanup = () => {
+    window.clearTimeout(fallbackTimer);
+    window.removeEventListener("mouseup", finishDragging, { capture: true });
+    window.removeEventListener("pointerup", finishDragging, { capture: true });
+    document.removeEventListener("mouseup", finishDragging, { capture: true });
+    document.removeEventListener("pointerup", finishDragging, { capture: true });
+  };
+}
+
+/**
+ * 拖动释放监听每次只保留一组，防止多次按住标题栏后重复安排同步。
+ */
+function clearDragReleaseListeners(): void {
+  dragReleaseCleanup?.();
+  dragReleaseCleanup = null;
 }
 
 /**
@@ -153,9 +242,17 @@ function closeSettings(): void {
             @item-labels-change="desktopStore.updateShowItemLabels"
             @theme-change="desktopStore.updateTheme"
           />
+          <BoxDisplayPanel
+            v-else-if="activeSection === 'boxDisplay'"
+            :settings="desktopStore.settings"
+            @double-click-open-items-change="desktopStore.updateDoubleClickOpenItems"
+            @name-display-mode-change="desktopStore.updateNameDisplayMode"
+            @show-shortcut-arrow-change="desktopStore.updateShowShortcutArrow"
+          />
           <BoxesPanel
             v-else-if="activeSection === 'boxes'"
             :boxes="desktopStore.boxes"
+            :box-item-counts="boxItemCounts"
             :total-items="totalItems"
             :unassigned-items="desktopStore.unassignedItems.length"
             @create-box="createAndOpenBox"
