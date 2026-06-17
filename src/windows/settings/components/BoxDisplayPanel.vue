@@ -5,10 +5,7 @@ import {
   DEFAULT_APP_SETTINGS,
 } from "@/entities/appSettings/defaults";
 import type { AppSettings } from "@/entities/appSettings/types";
-import type {
-  DesktopItem,
-  DesktopNameDisplayMode,
-} from "@/entities/desktopItem/types";
+import type { DesktopNameDisplayMode } from "@/entities/desktopItem/types";
 import SegmentedControl from "@/shared/ui/SegmentedControl.vue";
 
 /**
@@ -34,7 +31,6 @@ const SNAP_THRESHOLD_INPUT = {
  * Box 显示面板维护所有 Box 共享的项目呈现和打开规则，外观数值项统一交给外观面板。
  */
 const props = defineProps<{
-  desktopItems: DesktopItem[];
   /**
    * 设置页父级统一下发内容宽度，避免各面板各自维护页面密度。
    */
@@ -46,7 +42,6 @@ const emit = defineEmits<{
   doubleClickOpenItemsChange: [value: boolean];
   itemLabelsChange: [value: boolean];
   nameDisplayModeChange: [value: DesktopNameDisplayMode];
-  nativeDesktopIconIgnorePathsChange: [paths: string[]];
   nativeDesktopIconsHiddenChange: [value: boolean];
   showShortcutArrowChange: [value: boolean];
   snapThresholdChange: [value: number];
@@ -65,24 +60,6 @@ function emitSnapThresholdChange(event: Event): void {
  */
 function resetSnapThreshold(): void {
   emit("snapThresholdChange", DEFAULT_APP_SETTINGS.snapThreshold);
-}
-
-/**
- * 忽略列表用真实路径做稳定键，避免重名桌面文件勾选状态互相覆盖。
- */
-function isNativeDesktopIconIgnored(itemPath: string): boolean {
-  return props.settings.nativeDesktopIconIgnorePaths.includes(itemPath);
-}
-
-/**
- * 切换单个忽略项时重新生成数组，保持 Pinia 和 SQLite 都能识别到设置变化。
- */
-function toggleNativeDesktopIconIgnorePath(itemPath: string, checked: boolean): void {
-  const nextPaths = checked
-    ? [...props.settings.nativeDesktopIconIgnorePaths, itemPath]
-    : props.settings.nativeDesktopIconIgnorePaths.filter((path) => path !== itemPath);
-
-  emit("nativeDesktopIconIgnorePathsChange", Array.from(new Set(nextPaths)));
 }
 </script>
 
@@ -241,8 +218,8 @@ function toggleNativeDesktopIconIgnorePath(itemPath: string, checked: boolean): 
     <div class="mt-4 overflow-hidden rounded-[8px] border border-[#dfe2e8] bg-[#ffffff] shadow-[0_10px_28px_rgba(20,24,32,0.06)] dark:border-[#292c34] dark:bg-[#181a20] dark:shadow-none">
       <div class="grid min-h-[72px] grid-cols-[1fr_auto] items-center gap-6 px-5">
         <div class="min-w-0 pr-4">
-          <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">Windows 桌面图标</h2>
-          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">使用 Windows 隐藏属性隐藏原生桌面文件，Box 中的项目不受影响。</p>
+          <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">隐藏系统桌面图标</h2>
+          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">运行 Dasktop 时隐藏 Explorer 原生桌面图标层，关闭后恢复显示。</p>
         </div>
 
         <label class="relative block h-7 w-12">
@@ -259,43 +236,6 @@ function toggleNativeDesktopIconIgnorePath(itemPath: string, checked: boolean): 
             class="absolute left-1 top-1 size-5 rounded-full bg-white shadow-[0_2px_7px_rgba(20,24,32,0.25)] transition-transform peer-checked:translate-x-5"
           />
         </label>
-      </div>
-
-      <div class="h-px bg-[#e7e9ee] dark:bg-[#292c34]" />
-
-      <div class="px-5 py-4">
-        <div class="mb-3 flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">保留在系统桌面</h2>
-            <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">勾选后，即使开启隐藏也不会隐藏这些原生桌面图标。</p>
-          </div>
-          <span class="shrink-0 text-[12px] font-medium text-[#707684] dark:text-[#9ca0aa]">
-            {{ props.settings.nativeDesktopIconIgnorePaths.length }} / {{ props.desktopItems.length }}
-          </span>
-        </div>
-
-        <div class="dasktop-scrollarea max-h-[220px] overflow-auto rounded-[8px] bg-[#f7f8fb] p-1 dark:bg-[#121419]">
-          <label
-            v-for="item in props.desktopItems"
-            :key="item.path"
-            class="flex min-h-9 cursor-pointer items-center gap-3 rounded-[7px] px-3 text-[12px] text-[#343842] transition-colors hover:bg-white dark:text-[#dfe2e8] dark:hover:bg-[#20232b]"
-          >
-            <input
-              class="size-4 shrink-0 accent-[#ff5c5c] dark:accent-[#ff6b6b]"
-              :checked="isNativeDesktopIconIgnored(item.path)"
-              type="checkbox"
-              @change="toggleNativeDesktopIconIgnorePath(item.path, ($event.target as HTMLInputElement).checked)"
-            />
-            <span class="min-w-0 flex-1 truncate" :title="item.path">{{ item.name }}</span>
-          </label>
-
-          <div
-            v-if="props.desktopItems.length === 0"
-            class="px-3 py-8 text-center text-[12px] text-[#707684] dark:text-[#9ca0aa]"
-          >
-            当前没有可配置的桌面项目。
-          </div>
-        </div>
       </div>
     </div>
   </section>

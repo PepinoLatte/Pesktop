@@ -1,9 +1,9 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import {
-  applyNativeDesktopIconVisibility,
   getDesktopItemsByPaths,
   getDesktopSnapshot,
+  setNativeDesktopIconsHidden,
 } from "@/entities/desktopItem/api";
 import {
   assignBoxItems,
@@ -164,9 +164,7 @@ export const useDesktopStore = defineStore("desktop", () => {
       boxItems.value = savedBoxItems;
       await ensureItemsAvailable(savedBoxItems.map((boxItem) => boxItem.itemPath));
 
-      if (settings.value.nativeDesktopIconsHidden) {
-        await syncNativeDesktopIconVisibility();
-      }
+      await applyNativeDesktopIconVisibility();
       await Promise.all(boxes.value.map((box) => saveBox(box)));
       isInitialized.value = true;
     } catch (error) {
@@ -210,11 +208,8 @@ export const useDesktopStore = defineStore("desktop", () => {
     const snapshot = await getDesktopSnapshot();
     applyDesktopSnapshot(snapshot);
     await ensureItemsAvailable(boxItems.value.map((boxItem) => boxItem.itemPath));
-    await pruneNativeDesktopIconIgnorePaths();
 
-    if (settings.value.nativeDesktopIconsHidden) {
-      await syncNativeDesktopIconVisibility();
-    }
+    await applyNativeDesktopIconVisibility();
 
     if (shouldBroadcast) {
       await broadcastStateChanged("desktop");
@@ -237,6 +232,7 @@ export const useDesktopStore = defineStore("desktop", () => {
     await ensureItemsAvailable(savedBoxItems.map((boxItem) => boxItem.itemPath));
     settings.value = savedSettings;
     applyCurrentWindowTheme(previousTheme !== getCurrentWindowTheme());
+    await applyNativeDesktopIconVisibility();
   }
 
   /**
@@ -509,24 +505,12 @@ export const useDesktopStore = defineStore("desktop", () => {
   }
 
   /**
-   * 隐藏原生桌面图标时只修改 Windows Hidden 属性，Box 内映射继续保留。
+   * 隐藏原生桌面图标直接切换 Explorer 桌面图标层，避免修改文件属性或图标坐标。
    */
   async function updateNativeDesktopIconsHidden(value: boolean): Promise<void> {
     settings.value.nativeDesktopIconsHidden = value;
     await saveSetting(APP_SETTING_KEYS.nativeDesktopIconsHidden, value);
-    await syncNativeDesktopIconVisibility(true);
-    await broadcastStateChanged("settings");
-  }
-
-  /**
-   * 忽略列表只保存当前桌面快照中仍存在的路径，避免旧路径永久残留在配置里。
-   */
-  async function updateNativeDesktopIconIgnorePaths(paths: string[]): Promise<void> {
-    const nextPaths = sanitizeNativeDesktopIconIgnorePaths(paths);
-
-    settings.value.nativeDesktopIconIgnorePaths = nextPaths;
-    await saveSetting(APP_SETTING_KEYS.nativeDesktopIconIgnorePaths, nextPaths);
-    await syncNativeDesktopIconVisibility();
+    await setNativeDesktopIconsHidden(value);
     await broadcastStateChanged("settings");
   }
 
@@ -791,41 +775,14 @@ export const useDesktopStore = defineStore("desktop", () => {
   }
 
   /**
-   * 原生桌面隐藏状态由后端直接扫描桌面目录并写入属性，前端只传偏好和忽略路径。
+   * 原生桌面隐藏是运行时全局开关，Explorer 重启或窗口重新聚焦后需要重新应用。
    */
-  async function syncNativeDesktopIconVisibility(force = false): Promise<void> {
-    if (!settings.value.nativeDesktopIconsHidden && !force) {
+  async function applyNativeDesktopIconVisibility(): Promise<void> {
+    if (!settings.value.nativeDesktopIconsHidden) {
       return;
     }
 
-    await applyNativeDesktopIconVisibility(
-      settings.value.nativeDesktopIconsHidden,
-      settings.value.nativeDesktopIconIgnorePaths,
-    );
-  }
-
-  /**
-   * 忽略路径以真实桌面快照为准，避免用户删除文件后设置页继续显示无效状态。
-   */
-  function sanitizeNativeDesktopIconIgnorePaths(paths: string[]): string[] {
-    return normalizeUniqueItemPaths(paths).filter((path) =>
-      desktopItemPathKeys.value.has(normalizeItemPathKey(path)),
-    );
-  }
-
-  /**
-   * 刷新桌面快照后清理失效忽略项，保证下次应用 Hidden 属性时只处理真实文件。
-   */
-  async function pruneNativeDesktopIconIgnorePaths(): Promise<void> {
-    const nextPaths = sanitizeNativeDesktopIconIgnorePaths(
-      settings.value.nativeDesktopIconIgnorePaths,
-    );
-    if (nextPaths.length === settings.value.nativeDesktopIconIgnorePaths.length) {
-      return;
-    }
-
-    settings.value.nativeDesktopIconIgnorePaths = nextPaths;
-    await saveSetting(APP_SETTING_KEYS.nativeDesktopIconIgnorePaths, nextPaths);
+    await setNativeDesktopIconsHidden(true);
   }
 
   /**
@@ -893,7 +850,6 @@ export const useDesktopStore = defineStore("desktop", () => {
     updateBoxTitlePosition,
     updateDoubleClickOpenItems,
     updateNameDisplayMode,
-    updateNativeDesktopIconIgnorePaths,
     updateNativeDesktopIconsHidden,
     updateNumberSetting,
     updateSettingsTheme,

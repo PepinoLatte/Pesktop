@@ -178,7 +178,7 @@ const {
 });
 
 /**
- * resize 能力同时受锁定、收缩态和图标拖拽状态影响，模板只根据这个最终判定显示热区。
+ * resize 能力同时受锁定、收缩态和 Box 图标拖拽状态影响；外部文件拖入只展示落点，不锁住缩放热区。
  */
 const canResizeBox = computed(
   () =>
@@ -454,7 +454,7 @@ function openNativeItemContextMenu(event: MouseEvent, item: DesktopItem): void {
           :key="item.path"
           :double-click-open="desktopStore.settings.doubleClickOpenItems"
           :drag-interaction-disabled="isBoxItemDragActive"
-          :dragging="draggingBoxItemPath === item.path"
+          :dragging="isBoxItemDragActive && draggingBoxItemPath === item.path"
           :icon-size="desktopStore.settings.boxIconSize"
           :item="item"
           :label-text-size="desktopStore.settings.boxLabelTextSize"

@@ -20,13 +20,9 @@ export interface AppSettings {
   snapToEdges: boolean;
   snapThreshold: number;
   /**
-   * 是否给 Windows 桌面目录项目写入隐藏属性，从系统桌面隐藏原生图标。
+   * 是否在 Dasktop 运行时隐藏全部 Windows 原生桌面图标。
    */
   nativeDesktopIconsHidden: boolean;
-  /**
-   * 隐藏原生桌面图标时仍保留显示的桌面项目路径。
-   */
-  nativeDesktopIconIgnorePaths: string[];
   showItemLabels: boolean;
   showShortcutArrow: boolean;
   doubleClickOpenItems: boolean;

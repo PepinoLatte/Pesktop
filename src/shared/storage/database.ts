@@ -291,12 +291,6 @@ function sanitizeSettingValue<Key extends keyof AppSettings>(
       : DEFAULT_APP_SETTINGS.nameDisplayMode) as AppSettings[Key];
   }
 
-  if (key === APP_SETTING_KEYS.nativeDesktopIconIgnorePaths) {
-    return (Array.isArray(value)
-      ? value.filter((itemPath): itemPath is string => typeof itemPath === "string")
-      : DEFAULT_APP_SETTINGS.nativeDesktopIconIgnorePaths) as AppSettings[Key];
-  }
-
   if (isNumericSettingKey(key)) {
     return sanitizeNumberAppSetting(key, value) as AppSettings[Key];
   }

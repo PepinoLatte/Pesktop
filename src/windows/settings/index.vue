@@ -266,13 +266,11 @@ function closeSettings(): void {
           />
           <BoxDisplayPanel
             v-else-if="activeSection === 'boxDisplay'"
-            :desktop-items="desktopStore.desktopItems"
             :panel-width="SETTINGS_PANEL_WIDTH.default"
             :settings="desktopStore.settings"
             @double-click-open-items-change="desktopStore.updateDoubleClickOpenItems"
             @item-labels-change="desktopStore.updateShowItemLabels"
             @name-display-mode-change="desktopStore.updateNameDisplayMode"
-            @native-desktop-icon-ignore-paths-change="desktopStore.updateNativeDesktopIconIgnorePaths"
             @native-desktop-icons-hidden-change="desktopStore.updateNativeDesktopIconsHidden"
             @show-shortcut-arrow-change="desktopStore.updateShowShortcutArrow"
             @snap-threshold-change="desktopStore.updateSnapThreshold"

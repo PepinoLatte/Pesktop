@@ -27,9 +27,7 @@ pub mod keys {
     pub const DOUBLE_CLICK_OPEN_ITEMS: &str = "doubleClickOpenItems";
     /// Box 内文件名后缀显示策略。
     pub const NAME_DISPLAY_MODE: &str = "nameDisplayMode";
-    /// 隐藏原生桌面图标时保留显示的路径列表。
-    pub const NATIVE_DESKTOP_ICON_IGNORE_PATHS: &str = "nativeDesktopIconIgnorePaths";
-    /// 是否使用 Windows 隐藏属性隐藏原生桌面图标。
+    /// 是否在 Dasktop 运行时隐藏全部 Windows 原生桌面图标。
     pub const NATIVE_DESKTOP_ICONS_HIDDEN: &str = "nativeDesktopIconsHidden";
     /// 设置页主题模式。
     pub const SETTINGS_THEME: &str = "settingsTheme";

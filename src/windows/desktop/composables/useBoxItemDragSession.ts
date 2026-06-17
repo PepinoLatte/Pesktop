@@ -77,8 +77,14 @@ export function useBoxItemDragSession(options: {
   const desktopStore = useDesktopStore();
   const draggingBoxItemPath = ref<string | null>(null);
   const draggingBoxItemSessionId = ref<string | null>(null);
+  const draggingBoxItemSourceBoxId = ref<string | null>(null);
   const dragInsertLineStyle = ref<CSSProperties | null>(null);
-  const isBoxItemDragActive = computed(() => Boolean(draggingBoxItemPath.value));
+  /**
+   * 只有 Box 图标拖拽需要临时关闭点击和缩放；Windows 外部文件拖入只展示拖影和落点，避免原生 leave 竞态卡住交互。
+   */
+  const isBoxItemDragActive = computed(() =>
+    Boolean(draggingBoxItemPath.value && draggingBoxItemSourceBoxId.value),
+  );
   let boxItemGlobalDragState: BoxItemGlobalDragState | null = null;
   let boxItemDragPollTimer: ReturnType<typeof window.setInterval> | null = null;
   let isBoxItemDragPollTickPending = false;
@@ -92,12 +98,14 @@ export function useBoxItemDragSession(options: {
   let externalFileDragReleaseSessionId = "";
   const acceptedBoxItemDragSessions = new Set<string>();
   const ignoredExternalDragSessions = new Set<string>();
+  const settledBoxItemDragSessions = new Set<string>();
 
   /**
    * Box 图标 pointer 拖拽开始时创建跨窗口会话，并启动全局鼠标轮询和拖影窗口。
    */
   function startBoxItemPointerDrag(event: PointerEvent, itemPath: string): void {
     draggingBoxItemPath.value = itemPath;
+    draggingBoxItemSourceBoxId.value = options.box.value?.id ?? null;
     clearBoxItemDragIndicator();
     options.closeContextMenu();
     void beginBoxItemGlobalDrag(event, itemPath);
@@ -151,6 +159,7 @@ export function useBoxItemDragSession(options: {
   function clearDraggingBoxItemState(): void {
     draggingBoxItemPath.value = null;
     draggingBoxItemSessionId.value = null;
+    draggingBoxItemSourceBoxId.value = null;
   }
 
   /**
@@ -161,6 +170,15 @@ export function useBoxItemDragSession(options: {
       draggingBoxItemPath.value === payload.item.path &&
       (!draggingBoxItemSessionId.value || draggingBoxItemSessionId.value === payload.sessionId)
     );
+  }
+
+  /**
+   * 记录当前窗口正在展示的拖拽载荷；外部文件拖入没有来源 Box，不能驱动禁用点击和缩放的状态。
+   */
+  function applyDraggingBoxItemPayload(payload: BoxItemDragPayload): void {
+    draggingBoxItemPath.value = payload.item.path;
+    draggingBoxItemSessionId.value = payload.sessionId;
+    draggingBoxItemSourceBoxId.value = payload.sourceBoxId || null;
   }
 
   /**
@@ -281,6 +299,7 @@ export function useBoxItemDragSession(options: {
         insertTarget.placement,
       );
     }
+    markBoxItemDragSessionSettled(dragState.sessionId);
     await emitExternalFileDragPhase("drop", screenPoint.x, screenPoint.y, dragState.sessionId);
     ignoreExternalDragSession(dragState.sessionId);
     externalFileDragState = null;
@@ -300,6 +319,7 @@ export function useBoxItemDragSession(options: {
     externalFileDragState = null;
     clearDraggingBoxItemState();
     if (dragState) {
+      markBoxItemDragSessionSettled(dragState.sessionId);
       ignoreExternalDragSession(dragState.sessionId);
     }
     if (optionsValue.deferHoverClearUntilRelease && dragState) {
@@ -392,6 +412,63 @@ export function useBoxItemDragSession(options: {
     window.setTimeout(() => {
       ignoredExternalDragSessions.delete(sessionId);
     }, BOX_ITEM_DRAG_INTERACTION.externalReleaseFallbackMs);
+  }
+
+  /**
+   * Drop/cancel 到达后可能仍有旧的 start/move 处理函数卡在异步坐标换算中；结束标记用于阻止旧事件回写交互状态。
+   */
+  function markBoxItemDragSessionSettled(sessionId: string): void {
+    settledBoxItemDragSessions.add(sessionId);
+    window.setTimeout(() => {
+      settledBoxItemDragSessions.delete(sessionId);
+    }, BOX_ITEM_DRAG_INTERACTION.externalReleaseFallbackMs);
+  }
+
+  /**
+   * 已结束会话只拦截非终态事件，Drop/cancel 本身仍需要进入清理分支完成收尾。
+   */
+  function isSettledBoxItemDragMovePayload(payload: BoxItemDragPayload): boolean {
+    return (
+      settledBoxItemDragSessions.has(payload.sessionId) &&
+      (payload.phase === "start" || payload.phase === "move")
+    );
+  }
+
+  /**
+   * 外部原生拖放和 IPC 事件顺序不稳定；已取消或已结束的旧载荷不能再改变 Box 视觉状态。
+   */
+  function shouldIgnoreBoxItemDragPayload(payload: BoxItemDragPayload): boolean {
+    return (
+      isSettledBoxItemDragMovePayload(payload) ||
+      (!payload.sourceBoxId &&
+        payload.phase !== "cancel" &&
+        ignoredExternalDragSessions.has(payload.sessionId))
+    );
+  }
+
+  /**
+   * 清理旧载荷遗留的插入线和拖拽标记；等待鼠标释放时保留 hover，避免 Box 收缩打断 Windows 原生拖放。
+   */
+  function clearIgnoredBoxItemDragPayloadVisuals(payload: BoxItemDragPayload): void {
+    const shouldClearPayloadVisuals =
+      !draggingBoxItemSessionId.value || draggingBoxItemSessionId.value === payload.sessionId;
+    const isWaitingForExternalRelease =
+      !payload.sourceBoxId && externalFileDragReleaseSessionId === payload.sessionId;
+
+    if (shouldClearPayloadVisuals && isCurrentBoxItemDragPayload(payload)) {
+      clearDraggingBoxItemState();
+    }
+    if (!shouldClearPayloadVisuals) {
+      return;
+    }
+
+    clearBoxItemDragIndicator();
+    if (isWaitingForExternalRelease) {
+      return;
+    }
+
+    options.setDragHoveringBox(false);
+    options.refreshCollapsedPreviewCloseSchedule();
   }
 
   /**
@@ -586,6 +663,7 @@ export function useBoxItemDragSession(options: {
 
     dragState.finishing = true;
     clearBoxItemDragPolling();
+    markBoxItemDragSessionSettled(dragState.sessionId);
     await emitBoxItemDragPhase("drop", screenX, screenY);
     window.setTimeout(() => {
       if (
@@ -612,6 +690,7 @@ export function useBoxItemDragSession(options: {
     options.refreshCollapsedPreviewCloseSchedule();
 
     if (dragState) {
+      markBoxItemDragSessionSettled(dragState.sessionId);
       void notifyBoxItemDrag({
         item: dragState.item,
         phase: "cancel",
@@ -672,22 +751,12 @@ export function useBoxItemDragSession(options: {
       ignoreExternalDragSession(payload.sessionId);
     }
 
-    if (
-      !payload.sourceBoxId &&
-      payload.phase !== "cancel" &&
-      ignoredExternalDragSessions.has(payload.sessionId)
-    ) {
-      const shouldClearIgnoredPayloadVisuals =
-        !draggingBoxItemSessionId.value || draggingBoxItemSessionId.value === payload.sessionId;
+    if (payload.phase === "cancel") {
+      markBoxItemDragSessionSettled(payload.sessionId);
+    }
 
-      if (shouldClearIgnoredPayloadVisuals && isCurrentBoxItemDragPayload(payload)) {
-        clearDraggingBoxItemState();
-      }
-      if (shouldClearIgnoredPayloadVisuals) {
-        clearBoxItemDragIndicator();
-        options.setDragHoveringBox(false);
-        options.refreshCollapsedPreviewCloseSchedule();
-      }
+    if (shouldIgnoreBoxItemDragPayload(payload)) {
+      clearIgnoredBoxItemDragPayloadVisuals(payload);
       return;
     }
 
@@ -711,6 +780,14 @@ export function useBoxItemDragSession(options: {
       payload.screenX,
       payload.screenY,
     );
+    if (payload.phase === "drop") {
+      markBoxItemDragSessionSettled(payload.sessionId);
+    }
+    if (shouldIgnoreBoxItemDragPayload(payload)) {
+      clearIgnoredBoxItemDragPayloadVisuals(payload);
+      return;
+    }
+
     if (!localPoint.inside) {
       if (isCurrentBoxItemDragPayload(payload)) {
         clearDraggingBoxItemState();
@@ -735,8 +812,7 @@ export function useBoxItemDragSession(options: {
 
     applyBoxItemDragIndicator(insertTarget);
     if (payload.phase !== "drop") {
-      draggingBoxItemPath.value = payload.item.path;
-      draggingBoxItemSessionId.value = payload.sessionId;
+      applyDraggingBoxItemPayload(payload);
       return;
     }
 

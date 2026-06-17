@@ -1,16 +1,10 @@
 use crate::desktop::{scan_desktop, scan_paths, DesktopItem, DesktopSnapshot};
-use std::collections::HashSet;
 use std::path::Path;
 
 #[cfg(target_os = "windows")]
 use windows::core::{PCSTR, PCWSTR};
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
-#[cfg(target_os = "windows")]
-use windows::Win32::Storage::FileSystem::{
-    GetFileAttributesW, SetFileAttributesW, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_NORMAL,
-    FILE_FLAGS_AND_ATTRIBUTES, INVALID_FILE_ATTRIBUTES,
-};
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_APARTMENTTHREADED};
 #[cfg(target_os = "windows")]
@@ -19,8 +13,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Shell::{
-    IContextMenu, IShellFolder, CMINVOKECOMMANDINFO, CMF_NORMAL, SHBindToParent,
-    SHParseDisplayName, ShellExecuteW,
+    IContextMenu, IShellFolder, SHBindToParent, SHParseDisplayName, ShellExecuteW, CMF_NORMAL,
+    CMINVOKECOMMANDINFO,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -67,24 +61,10 @@ pub fn show_native_item_context_menu(
     show_native_context_menu_for_path(&window, item_path, screen_x, screen_y)
 }
 
-/// 按设置给真实 Windows 桌面文件写入隐藏属性；Box 中的映射和文件本体不会被删除。
+/// 切换 Windows Explorer 原生桌面图标层可见性；真实文件和图标坐标不会被修改。
 #[tauri::command]
-pub fn apply_native_desktop_icon_visibility(
-    hidden: bool,
-    ignored_paths: Vec<String>,
-) -> Result<(), String> {
-    let snapshot = scan_desktop().map_err(|error| error.to_string())?;
-    let ignored_path_set = ignored_paths
-        .into_iter()
-        .map(|path| normalize_path_key(&path))
-        .collect::<HashSet<_>>();
-
-    for item in snapshot.items {
-        let should_hide = hidden && !ignored_path_set.contains(&normalize_path_key(&item.path));
-        set_path_hidden_attribute(Path::new(&item.path), should_hide)?;
-    }
-
-    Ok(())
+pub fn set_native_desktop_icons_hidden(hidden: bool) -> Result<(), String> {
+    crate::desktop::set_native_desktop_icons_hidden(hidden)
 }
 
 /// 读取系统级左键状态，跨 WebView 拖拽释放时不依赖当前窗口能否收到鼠标事件。
@@ -226,52 +206,7 @@ unsafe fn show_context_menu_from_pidl(
         .map_err(|error| format!("系统无法执行该菜单命令：{error}"))
 }
 
-/// Windows 文件属性隐藏位可以让 Explorer 用原生方式隐藏桌面文件，同时保留文件本体。
-#[cfg(target_os = "windows")]
-fn set_path_hidden_attribute(path: &Path, should_hide: bool) -> Result<(), String> {
-    if !path.exists() {
-        return Ok(());
-    }
-
-    let wide_path = to_wide_path(path);
-    let current_attributes = unsafe { GetFileAttributesW(PCWSTR(wide_path.as_ptr())) };
-    if current_attributes == INVALID_FILE_ATTRIBUTES {
-        return Err(format!("无法读取桌面项目属性：{}", path.display()));
-    }
-
-    let mut next_attributes = if should_hide {
-        current_attributes | FILE_ATTRIBUTE_HIDDEN.0
-    } else {
-        current_attributes & !FILE_ATTRIBUTE_HIDDEN.0
-    };
-    if next_attributes == 0 {
-        next_attributes = FILE_ATTRIBUTE_NORMAL.0;
-    }
-    if next_attributes == current_attributes {
-        return Ok(());
-    }
-
-    unsafe {
-        SetFileAttributesW(
-            PCWSTR(wide_path.as_ptr()),
-            FILE_FLAGS_AND_ATTRIBUTES(next_attributes),
-        )
-        .map_err(|error| format!("无法更新桌面项目隐藏属性：{error}"))
-    }
-}
-
-/// 非 Windows 平台没有 Explorer 桌面隐藏属性，保持显式错误避免静默失效。
-#[cfg(not(target_os = "windows"))]
-fn set_path_hidden_attribute(_path: &Path, _should_hide: bool) -> Result<(), String> {
-    Err("当前平台暂不支持隐藏原生桌面图标".to_string())
-}
-
-/// 路径比较在 Windows 上大小写不敏感，忽略列表用归一化字符串避免同一路径重复。
-fn normalize_path_key(path: &str) -> String {
-    path.trim().replace('/', "\\").to_lowercase()
-}
-
-/// Windows API 接收 UTF-16 零结尾路径，所有 Shell 和文件属性命令共用此转换。
+/// Windows Shell API 接收 UTF-16 零结尾路径，打开和右键菜单命令共用此转换。
 #[cfg(target_os = "windows")]
 fn to_wide_path(path: &Path) -> Vec<u16> {
     path.to_string_lossy()

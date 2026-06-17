@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from "vue";
 import type { CSSProperties } from "vue";
+import { cursorPosition } from "@tauri-apps/api/window";
 import { DEFAULT_APP_SETTINGS } from "@/entities/appSettings/defaults";
-import { openDesktopItem } from "@/entities/desktopItem/api";
+import { BOX_ITEM_DRAG_INTERACTION } from "@/entities/desktopBox/layout";
+import { isPrimaryMouseButtonPressed, openDesktopItem } from "@/entities/desktopItem/api";
 import { formatDesktopItemDisplayName } from "@/entities/desktopItem/displayName";
 import type { DesktopItem, DesktopNameDisplayMode } from "@/entities/desktopItem/types";
 import { DESKTOP_ICON_VIEW } from "../config/desktopIcon";
@@ -43,6 +45,9 @@ const emit = defineEmits<{
 interface PointerDragState {
   dragging: boolean;
   itemPath: string;
+  startEvent: PointerEvent;
+  startScreenX: number;
+  startScreenY: number;
   startX: number;
   startY: number;
 }
@@ -70,6 +75,8 @@ const labelBlockHeight = computed(() => labelLineHeight.value * 2 + 2);
 const suppressNextClick = ref(false);
 const isPointerDragging = ref(false);
 let pointerDragState: PointerDragState | null = null;
+let pointerCandidatePollTimer: ReturnType<typeof window.setInterval> | null = null;
+let isPointerCandidatePollPending = false;
 
 onUnmounted(() => {
   cleanupPointerDrag();
@@ -109,6 +116,9 @@ function onPointerDown(event: PointerEvent, item: DesktopItem): void {
   pointerDragState = {
     dragging: false,
     itemPath: item.path,
+    startEvent: event,
+    startScreenX: event.screenX,
+    startScreenY: event.screenY,
     startX: event.clientX,
     startY: event.clientY,
   };
@@ -116,6 +126,7 @@ function onPointerDown(event: PointerEvent, item: DesktopItem): void {
   window.addEventListener("pointerup", onPointerRelease, { capture: true, once: true });
   window.addEventListener("pointercancel", onPointerRelease, { capture: true, once: true });
   window.addEventListener("blur", onPointerWindowBlur, { capture: true, once: true });
+  startPointerCandidatePolling();
 }
 
 /**
@@ -131,12 +142,7 @@ function onPointerMove(event: PointerEvent): void {
     return;
   }
 
-  if (!dragState.dragging) {
-    dragState.dragging = true;
-    isPointerDragging.value = true;
-    suppressNextClick.value = true;
-    emit("boxPointerDragStart", event, dragState.itemPath);
-  }
+  startPointerDragFromCandidate(dragState, event);
 
   event.preventDefault();
 }
@@ -163,6 +169,7 @@ function onPointerRelease(event: PointerEvent): void {
  * 清理 pointer 拖拽监听，避免多次按下后产生重复 move/up 回调。
  */
 function cleanupPointerDrag(): void {
+  clearPointerCandidatePolling();
   window.removeEventListener("pointermove", onPointerMove, { capture: true });
   window.removeEventListener("pointerup", onPointerRelease, { capture: true });
   window.removeEventListener("pointercancel", onPointerRelease, { capture: true });
@@ -172,13 +179,120 @@ function cleanupPointerDrag(): void {
 }
 
 /**
+ * 候选拖拽阶段也轮询全局鼠标，避免透明 WebView 在快速移出图标后收不到阈值前的 move/up。
+ */
+function startPointerCandidatePolling(): void {
+  clearPointerCandidatePolling();
+  pointerCandidatePollTimer = window.setInterval(() => {
+    void pollPointerCandidate();
+  }, BOX_ITEM_DRAG_INTERACTION.pollIntervalMs);
+}
+
+/**
+ * 轮询候选拖拽的移动距离和释放状态；真正拖拽开始后仍用它兜底清理本地图标状态。
+ */
+async function pollPointerCandidate(): Promise<void> {
+  const dragState = pointerDragState;
+  if (!dragState || isPointerCandidatePollPending) {
+    return;
+  }
+
+  isPointerCandidatePollPending = true;
+  try {
+    const [cursor, isPressed] = await Promise.all([
+      cursorPosition(),
+      isPrimaryMouseButtonPressed(),
+    ]);
+    if (pointerDragState !== dragState) {
+      return;
+    }
+
+    if (!isPressed) {
+      const wasDragging = dragState.dragging;
+      cleanupPointerDrag();
+      if (wasDragging) {
+        window.setTimeout(() => {
+          suppressNextClick.value = false;
+        }, 0);
+      }
+      return;
+    }
+
+    if (
+      !dragState.dragging &&
+      hasScreenPointerExceededDragThreshold(cursor.x, cursor.y, dragState)
+    ) {
+      startPointerDragFromCandidate(dragState, dragState.startEvent);
+    }
+  } finally {
+    isPointerCandidatePollPending = false;
+  }
+}
+
+/**
+ * 清理候选拖拽轮询，避免一次 pointerdown 残留多个全局鼠标读取任务。
+ */
+function clearPointerCandidatePolling(): void {
+  if (!pointerCandidatePollTimer) {
+    return;
+  }
+
+  window.clearInterval(pointerCandidatePollTimer);
+  pointerCandidatePollTimer = null;
+  isPointerCandidatePollPending = false;
+}
+
+/**
+ * 候选拖拽跨过阈值后只启动一次真实 Box 拖拽，会继续复用原来的拖影和跨 Box 事件链路。
+ */
+function startPointerDragFromCandidate(
+  dragState: PointerDragState,
+  event: PointerEvent,
+): void {
+  if (dragState.dragging) {
+    return;
+  }
+
+  dragState.dragging = true;
+  isPointerDragging.value = true;
+  suppressNextClick.value = true;
+  emit("boxPointerDragStart", event, dragState.itemPath);
+}
+
+/**
  * 拖出窗口时全局拖拽轮询仍会继续，组件这里只清理本地 pointer 状态和点击抑制。
  */
 function onPointerWindowBlur(): void {
-  cleanupPointerDrag();
-  window.setTimeout(() => {
-    suppressNextClick.value = false;
-  }, 0);
+  const dragState = pointerDragState;
+  if (!dragState) {
+    return;
+  }
+
+  void isPrimaryMouseButtonPressed()
+    .then((isPressed) => {
+      if (pointerDragState !== dragState) {
+        return;
+      }
+
+      if (isPressed) {
+        return;
+      }
+
+      cleanupPointerDrag();
+      window.setTimeout(() => {
+        suppressNextClick.value = false;
+      }, 0);
+    })
+    .catch(() => {
+      if (pointerDragState !== dragState) {
+        return;
+      }
+
+      cleanupPointerDrag();
+      window.setTimeout(() => {
+        suppressNextClick.value = false;
+      }, 0);
+    });
 }
 
 /**
@@ -190,6 +304,20 @@ function hasPointerExceededDragThreshold(
 ): boolean {
   const deltaX = event.clientX - dragState.startX;
   const deltaY = event.clientY - dragState.startY;
+
+  return Math.hypot(deltaX, deltaY) >= DESKTOP_ICON_VIEW.dragStartThreshold;
+}
+
+/**
+ * 全局轮询使用屏幕坐标判断阈值，覆盖鼠标过快离开 WebView 后没有 DOM pointermove 的边界。
+ */
+function hasScreenPointerExceededDragThreshold(
+  screenX: number,
+  screenY: number,
+  dragState: PointerDragState,
+): boolean {
+  const deltaX = screenX - dragState.startScreenX;
+  const deltaY = screenY - dragState.startScreenY;
 
   return Math.hypot(deltaX, deltaY) >= DESKTOP_ICON_VIEW.dragStartThreshold;
 }

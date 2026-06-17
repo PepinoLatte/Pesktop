@@ -39,15 +39,11 @@ export function showNativeItemContextMenu(
 }
 
 /**
- * 使用 Windows 文件 Hidden 属性控制真实桌面图标显示，忽略列表中的路径保持原生桌面可见。
+ * 通过 Explorer 桌面图标层窗口切换全部 Windows 原生桌面图标显示状态。
  */
-export function applyNativeDesktopIconVisibility(
-  hidden: boolean,
-  ignoredPaths: string[],
-): Promise<void> {
-  return invoke("apply_native_desktop_icon_visibility", {
+export function setNativeDesktopIconsHidden(hidden: boolean): Promise<void> {
+  return invoke("set_native_desktop_icons_hidden", {
     hidden,
-    ignoredPaths,
   });
 }
 
