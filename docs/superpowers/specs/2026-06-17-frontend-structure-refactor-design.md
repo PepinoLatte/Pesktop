@@ -138,6 +138,31 @@ src/
 3. **`shared/types/desktop.ts` 拆分**：拆成三个 entities types 文件后，所有引用按符号归属改 import 来源（DesktopItem/DesktopNameDisplayMode → desktopItem；DesktopBox/DesktopBoxTitlePosition/DesktopSnapshot → desktopBox；AppSettings/ThemeMode → appSettings）。
 4. **`dragPreviewWindow.ts` 拆分位置**：组件侧用到的 `DRAG_PREVIEW_WINDOW_READY_EVENT` 与窗口创建逻辑同放 `lifecycle.ts`，DragPreviewWindow.vue 从 `./lifecycle` import。
 
+## 实现约束（项目规范）
+
+本次重构涉及大量文件搬迁、改写与内联，执行时必须遵守以下项目规范。
+
+### 文件编码
+
+- 读取、编辑、创建项目文件时必须使用 UTF-8 编码。
+- 如果终端、工具或系统区域设置导致中文显示异常，必须优先怀疑读取/显示链路，不得直接认定源文件内容损坏。
+- 涉及中文内容的修改应保持 UTF-8，不引入 GBK、ANSI 或其他本地编码。
+
+### 注释规范
+
+- 所有新增和修改的代码都必须补充符合阿里巴巴注释风格的注释。
+- 注释应说明业务意图、设计原因、边界条件和非显而易见的实现逻辑，避免“赋值给变量”这类流水账注释。
+- TypeScript、Vue 的公共类型、Store、组合式逻辑、跨模块函数和复杂交互必须使用 JSDoc。
+- Rust 的 public struct、enum、function、module 和复杂逻辑必须使用 rustdoc 或必要的行内说明。
+- TODO 注释必须写清楚责任、原因和后续处理方向，不允许留下模糊占位。
+- 本次内联/搬迁时，原文件中已有的高质量中文注释必须随代码迁移保留，不得丢弃。
+
+### 兼容与迁移
+
+- 项目当前未上线，功能调整时不需要保留旧逻辑、旧字段、旧配置或旧数据结构的兼容分支。
+- 旧逻辑必须直接删除，不做历史迁移脚本，不写兼容读取，不保留废弃配置入口。
+- 对应到本次重构：搬迁后的旧文件、内联后被掏空的 `settingsUi.ts` / `settings/types.ts` 必须直接删除，不保留转发（re-export）入口或空壳文件。
+
 ## 验证
 
 - 全部改动完成后运行 `pnpm exec vue-tsc --noEmit`，确认无语法与类型错误。
