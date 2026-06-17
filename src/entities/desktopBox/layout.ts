@@ -35,8 +35,8 @@ export const BOX_TITLE_OPACITY = {
  * 闲置可见度显示要快速响应 hover，隐藏稍慢一点，避免自动收起后视觉上突然消失。
  */
 export const BOX_IDLE_OPACITY_ANIMATION = {
-  hideDurationMs: 480,
-  showDurationMs: 280,
+  hideDurationMs: 420,
+  showDurationMs: 420,
 } as const;
 
 /**
