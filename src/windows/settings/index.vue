@@ -15,13 +15,17 @@ import {
   setTrayNativeDesktopIconsHiddenChecked,
 } from "@/entities/appSettings/api";
 import { useDesktopStore } from "@/entities/desktopBox/store";
-import { closeBoxWindow, openBoxWindow } from "@/entities/desktopBox/windows";
+import { closeBoxWindow, openBoxWindow, showBoxWindow } from "@/entities/desktopBox/windows";
 import { SETTINGS_WINDOW_SYNC_TIMING } from "@/entities/desktopBox/layout";
 import {
   listenAutostartChanged,
   listenTrayCreateBox,
   listenTrayToggleNativeDesktopIconsHidden,
 } from "@/shared/ipc/appTray";
+import {
+  createDesktopStartupSnapshotServer,
+  listenBoxWindowReady,
+} from "@/shared/ipc/desktop";
 import type { Component } from "vue";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 
@@ -58,6 +62,7 @@ const unlistenFns: UnlistenFn[] = [];
  */
 const FOCUS_SYNC_DELAY_MS = SETTINGS_WINDOW_SYNC_TIMING.focusSyncDelayMs;
 const DRAG_RELEASE_FALLBACK_MS = SETTINGS_WINDOW_SYNC_TIMING.dragReleaseFallbackMs;
+const BOX_STARTUP_READY_WAIT_MS = 8_000;
 let focusSyncTimer: ReturnType<typeof window.setTimeout> | null = null;
 let isDraggingSettingsWindow = false;
 let dragReleaseCleanup: (() => void) | null = null;
@@ -129,20 +134,148 @@ onUnmounted(() => {
 });
 
 /**
- * 设置页启动时打开现有 Box，随后隐藏设置窗，让桌面扩展本体先出现。
+ * 设置页启动时批量打开现有 Box，避免窗口数量多时串行等待拖慢桌面恢复。
  */
 async function openAllBoxes(): Promise<boolean> {
   startupError.value = "";
+  const startupBoxes = [...desktopStore.boxes];
+  if (startupBoxes.length === 0) {
+    return true;
+  }
 
   try {
-    for (const box of desktopStore.boxes) {
-      await openBoxWindow(box, { focus: false });
+    const [readyTracker, startupSnapshotServer] = await Promise.all([
+      createBoxWindowReadyTracker(),
+      createDesktopStartupSnapshotServer(desktopStore.createStartupSnapshot()),
+    ]);
+
+    try {
+      const openResults = await Promise.allSettled(
+        startupBoxes.map((box) =>
+          openBoxWindow(box, {
+            focus: false,
+            startupSnapshotToken: startupSnapshotServer.token,
+            visible: false,
+          }),
+        ),
+      );
+      const openedBoxes = startupBoxes.filter(
+        (_, index) => openResults[index]?.status === "fulfilled",
+      );
+      const failedOpenResults = openResults.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      await readyTracker.waitFor(
+        openedBoxes.map((box) => box.id),
+        BOX_STARTUP_READY_WAIT_MS,
+      );
+      const showResults = await Promise.allSettled(
+        openedBoxes.map((box) => showBoxWindow(box, { focus: false })),
+      );
+      const failedShowResults = showResults.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      const failedResults = [...failedOpenResults, ...failedShowResults];
+
+      if (failedResults.length === 0) {
+        return true;
+      }
+
+      startupError.value = formatBatchOpenBoxError(failedResults);
+      return false;
+    } finally {
+      readyTracker.dispose();
+      startupSnapshotServer.dispose();
     }
-    return true;
   } catch (error) {
     startupError.value = error instanceof Error ? error.message : String(error);
     return false;
   }
+}
+
+/**
+ * 启动恢复时先监听 ready，再创建隐藏 Box，避免 ready 事件早于监听注册导致统一显示卡住。
+ */
+async function createBoxWindowReadyTracker(): Promise<{
+  dispose: () => void;
+  waitFor: (boxIds: string[], timeoutMs: number) => Promise<boolean>;
+}> {
+  const readyBoxIds = new Set<string>();
+  const waiters: Array<() => void> = [];
+  const unlisten = await listenBoxWindowReady(({ payload }) => {
+    readyBoxIds.add(payload.boxId);
+    for (const waiter of [...waiters]) {
+      waiter();
+    }
+  });
+
+  return {
+    dispose: () => {
+      unlisten();
+      waiters.splice(0);
+    },
+    waitFor: (boxIds, timeoutMs) =>
+      waitForReadyBoxIds(boxIds, timeoutMs, readyBoxIds, waiters),
+  };
+}
+
+/**
+ * 等待目标 Box 首帧准备完成；超时后继续展示窗口，防止异常窗口永久隐藏。
+ */
+function waitForReadyBoxIds(
+  boxIds: string[],
+  timeoutMs: number,
+  readyBoxIds: Set<string>,
+  waiters: Array<() => void>,
+): Promise<boolean> {
+  const targetBoxIds = Array.from(new Set(boxIds));
+  if (areAllBoxesReady(targetBoxIds, readyBoxIds)) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise<boolean>((resolve) => {
+    let isSettled = false;
+    const settle = (isReady: boolean): void => {
+      if (isSettled) {
+        return;
+      }
+
+      isSettled = true;
+      window.clearTimeout(timeoutTimer);
+      const waiterIndex = waiters.indexOf(waiter);
+      if (waiterIndex >= 0) {
+        waiters.splice(waiterIndex, 1);
+      }
+      resolve(isReady);
+    };
+    const waiter = (): void => {
+      if (areAllBoxesReady(targetBoxIds, readyBoxIds)) {
+        settle(true);
+      }
+    };
+    const timeoutTimer = window.setTimeout(() => settle(false), timeoutMs);
+
+    waiters.push(waiter);
+    waiter();
+  });
+}
+
+/**
+ * 空列表视为已准备，方便没有成功打开窗口时直接进入错误处理分支。
+ */
+function areAllBoxesReady(boxIds: string[], readyBoxIds: Set<string>): boolean {
+  return boxIds.every((boxId) => readyBoxIds.has(boxId));
+}
+
+/**
+ * 批量打开失败时保留第一条真实错误，并提示失败数量，避免大量窗口错误淹没设置页。
+ */
+function formatBatchOpenBoxError(failedResults: PromiseRejectedResult[]): string {
+  const [firstFailure] = failedResults;
+  const firstMessage =
+    firstFailure.reason instanceof Error ? firstFailure.reason.message : String(firstFailure.reason);
+
+  return `${failedResults.length} 个 Box 启动失败：${firstMessage}`;
 }
 
 /**

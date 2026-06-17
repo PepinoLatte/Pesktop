@@ -33,6 +33,8 @@ import {
 import {
   listenDesktopStateChanged,
   notifyDesktopStateChanged,
+  requestDesktopStartupSnapshot,
+  type DesktopStartupSnapshot,
   type DesktopStateChangeScope,
 } from "@/shared/ipc/desktop";
 import type { AppSettings, ThemeMode } from "@/entities/appSettings/types";
@@ -172,6 +174,48 @@ export const useDesktopStore = defineStore("desktop", () => {
     } finally {
       isLoading.value = false;
     }
+  }
+
+  /**
+   * Box 窗口启动时优先读取主窗口准备好的快照，避免每个窗口重复扫描桌面和读取 SQLite。
+   */
+  async function initializeFromStartupSnapshot(token: string): Promise<boolean> {
+    if (isInitialized.value) {
+      return true;
+    }
+
+    const snapshot = await requestDesktopStartupSnapshot(token);
+    if (!snapshot) {
+      return false;
+    }
+
+    isLoading.value = true;
+    lastError.value = "";
+
+    try {
+      registerStateListener();
+      hydrateStartupSnapshot(snapshot);
+      isInitialized.value = true;
+      return true;
+    } catch (error) {
+      lastError.value = error instanceof Error ? error.message : String(error);
+      return false;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  /**
+   * 设置页已经持有完整桌面状态，批量打开 Box 前导出给新窗口复用。
+   */
+  function createStartupSnapshot(): DesktopStartupSnapshot {
+    return {
+      boxItems: boxItems.value.map((boxItem) => ({ ...boxItem })),
+      boxes: boxes.value.map((box) => ({ ...box })),
+      desktopItems: items.value.map((item) => ({ ...item })),
+      desktopPath: desktopPath.value,
+      settings: { ...settings.value },
+    };
   }
 
   /**
@@ -730,6 +774,21 @@ export const useDesktopStore = defineStore("desktop", () => {
   }
 
   /**
+   * 快照水合只填充内存状态，不写数据库；真实持久化仍由主窗口初始化和后续操作负责。
+   */
+  function hydrateStartupSnapshot(snapshot: DesktopStartupSnapshot): void {
+    desktopPath.value = snapshot.desktopPath;
+    desktopItemPathKeys.value = new Set(
+      snapshot.desktopItems.map((item) => normalizeItemPathKey(item.path)),
+    );
+    items.value = snapshot.desktopItems;
+    settings.value = snapshot.settings;
+    boxes.value = snapshot.boxes.map((box) => sanitizeBoxSize(box));
+    boxItems.value = snapshot.boxItems;
+    applyCurrentWindowTheme();
+  }
+
+  /**
    * 按路径补齐项目详情，支持用户把任意磁盘上的文件拖入 Box 后仍复用 Windows Shell 图标。
    */
   async function ensureItemsAvailable(paths: string[]): Promise<void> {
@@ -832,11 +891,13 @@ export const useDesktopStore = defineStore("desktop", () => {
     desktopItems,
     desktopPath,
     findItem,
+    createStartupSnapshot,
     getBoxCollapseAnimationMs,
     getBoxItemPaths,
     getBoxItems,
     handleItemDrop,
     initialize,
+    initializeFromStartupSnapshot,
     initializeBoxMenu,
     isInitialized,
     isLoading,

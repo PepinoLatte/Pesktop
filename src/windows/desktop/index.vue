@@ -17,12 +17,14 @@ import { showNativeItemContextMenu } from "@/entities/desktopItem/api";
 import { listenBoxItemDrag, listenBoxItemDragAccepted } from "@/shared/ipc/boxItemDrag";
 import { preloadBoxContextMenuWindow } from "@/entities/desktopBox/windows";
 import { listenBoxContextMenuState } from "@/shared/ipc/boxContextMenu";
+import { notifyBoxWindowReady } from "@/shared/ipc/desktop";
 import { BOX_WINDOW_INTERACTION_TIMING } from "@/entities/desktopBox/layout";
 
 const props = defineProps<{
   boxId: string;
 }>();
 
+const searchParams = new URLSearchParams(window.location.search);
 const desktopStore = useDesktopStore();
 const currentWindow = getCurrentWindow();
 const unlistenFns: UnlistenFn[] = [];
@@ -270,7 +272,9 @@ watch(
  * 挂载时先恢复窗口几何和收缩尺寸，再注册跨窗口 IPC 与原生拖放监听，避免早到事件读到未初始化状态。
  */
 onMounted(async () => {
-  await desktopStore.initialize();
+  if (!(await initializeDesktopStoreForBoxWindow())) {
+    await desktopStore.initialize();
+  }
   await syncWindowBoundsFromStore();
   await applyCollapseWindowSize(false);
   await nextTick();
@@ -336,7 +340,26 @@ onMounted(async () => {
       cancelExternalFileDrag({ deferHoverClearUntilRelease: true });
     }),
   );
+
+  /**
+   * ready 放在核心监听注册之后，批量启动统一显示时 Box 已经能响应拖拽、菜单和原生 Drop。
+   */
+  void notifyBoxWindowReady(props.boxId).catch((error) => {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+  });
 });
+
+/**
+ * 启动恢复时优先使用主窗口共享快照；用户单独打开 Box 或快照缺失时回退到完整初始化。
+ */
+async function initializeDesktopStoreForBoxWindow(): Promise<boolean> {
+  const startupSnapshotToken = searchParams.get("startupSnapshot");
+  if (!startupSnapshotToken) {
+    return false;
+  }
+
+  return desktopStore.initializeFromStartupSnapshot(startupSnapshotToken);
+}
 
 /**
  * 卸载时按拖拽、窗口、菜单、动画、监听的顺序清理，防止异步回调在窗口关闭后继续写状态。

@@ -28,6 +28,14 @@ const UNTITLED_BOX_WINDOW_TITLE = "Dasktop Box";
  */
 export interface OpenBoxWindowOptions {
   focus?: boolean;
+  /**
+   * 批量启动时由主窗口传入共享快照 token，Box 窗口可直接 hydrate Store。
+   */
+  startupSnapshotToken?: string;
+  /**
+   * 启动批量恢复时先隐藏创建，等待所有 Box 首帧准备好后再统一展示。
+   */
+  visible?: boolean;
 }
 
 /**
@@ -72,13 +80,16 @@ export async function openBoxWindow(
   const label = boxWindowLabel(box.id);
   const existingWindow = await WebviewWindow.getByLabel(label);
   const shouldFocus = options.focus ?? true;
+  const shouldShowInitially = options.visible ?? true;
 
   if (existingWindow) {
     await existingWindow.setPosition(new LogicalPosition(box.x, box.y));
     await existingWindow.setSize(new LogicalSize(box.width, box.height));
     await existingWindow.setResizable(!box.locked && !box.collapsed);
-    await existingWindow.show();
-    if (shouldFocus) {
+    if (shouldShowInitially) {
+      await existingWindow.show();
+    }
+    if (shouldShowInitially && shouldFocus) {
       await existingWindow.setFocus();
     }
     return;
@@ -86,7 +97,7 @@ export async function openBoxWindow(
 
   await new Promise<void>((resolve, reject) => {
     const window = new WebviewWindow(label, {
-      url: `/?boxId=${encodeURIComponent(box.id)}`,
+      url: resolveBoxWindowUrl(box.id, options.startupSnapshotToken),
       title: box.title || UNTITLED_BOX_WINDOW_TITLE,
       x: box.x,
       y: box.y,
@@ -102,17 +113,50 @@ export async function openBoxWindow(
       resizable: !box.locked && !box.collapsed,
       skipTaskbar: true,
       preventOverflow: true,
-      visible: true,
+      visible: shouldShowInitially,
     });
 
     void window.once("tauri://created", async () => {
-      if (!shouldFocus) {
+      if (shouldShowInitially && !shouldFocus) {
         await window.show();
       }
       resolve();
     });
     void window.once<unknown>("tauri://error", (error) => reject(error.payload));
   });
+}
+
+/**
+ * 批量启动恢复结束后统一显示 Box，减少窗口逐个创建时的视觉跳动。
+ */
+export async function showBoxWindow(
+  box: DesktopBox,
+  options: Pick<OpenBoxWindowOptions, "focus"> = {},
+): Promise<void> {
+  const existingWindow = await WebviewWindow.getByLabel(boxWindowLabel(box.id));
+  if (!existingWindow) {
+    return;
+  }
+
+  await existingWindow.show();
+  if (options.focus ?? false) {
+    await existingWindow.setFocus();
+  }
+}
+
+/**
+ * Box URL 只携带轻量 token，真实启动数据放在跨 WebView storage，避免 URL 过长。
+ */
+function resolveBoxWindowUrl(boxId: string, startupSnapshotToken?: string): string {
+  const searchParams = new URLSearchParams({
+    boxId,
+  });
+
+  if (startupSnapshotToken) {
+    searchParams.set("startupSnapshot", startupSnapshotToken);
+  }
+
+  return `/?${searchParams.toString()}`;
 }
 
 /**
