@@ -1,4 +1,4 @@
-import { computed, ref, type ComputedRef, type Ref } from "vue";
+import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 import type { CSSProperties } from "vue";
 import { animate } from "motion";
 import type { DesktopBox } from "@/entities/desktopBox/types";
@@ -77,7 +77,7 @@ export function useBoxCollapsePreview(options: {
     options.isManualDraggingBox() ||
     options.isResizeHandleHovered() ||
     options.isResizingBox() ||
-    isCollapsedPreviewOpen.value
+    Boolean(options.box.value?.collapsed && isCollapsedPreviewOpen.value)
       ? 1
       : (options.box.value?.titleOpacity ?? BOX_TITLE_OPACITY.max) / 100,
   );
@@ -143,6 +143,20 @@ export function useBoxCollapsePreview(options: {
   let collapsePreviewCloseTimer: ReturnType<typeof window.setTimeout> | null = null;
   let collapseSizeApplyLockTimer: ReturnType<typeof window.setTimeout> | null = null;
   let lastAppliedWindowHeight: number | null = null;
+
+  /**
+   * 自动收起关闭后必须释放临时展开状态，否则旧的预览入口会持续把闲置透明度覆盖为完全可见。
+   */
+  watch(
+    () => options.box.value?.collapsed,
+    (isCollapsed) => {
+      if (isCollapsed) {
+        return;
+      }
+
+      closeCollapsedPreview();
+    },
+  );
 
   /**
    * 根据收缩展示状态调整真实窗口高度，避免透明空白窗口挡住桌面点击。
@@ -406,6 +420,14 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
+   * 收起预览状态只在自动收起模式内有效，退出该模式或延迟关闭时需要一起清理计时器和标记位。
+   */
+  function closeCollapsedPreview(): void {
+    clearCollapsedPreviewCloseTimer();
+    isCollapsedPreviewOpen.value = false;
+  }
+
+  /**
    * 交互命中 Box 时使用同一套展开入口；拖拽命中也按普通鼠标进入处理，不再维护独立拖拽展开状态。
    */
   function openCollapsedPreviewForActiveInteraction(): void {
@@ -471,7 +493,7 @@ export function useBoxCollapsePreview(options: {
     collapsePreviewCloseTimer = window.setTimeout(() => {
       collapsePreviewCloseTimer = null;
       if (!shouldKeepCollapsedPreviewOpen()) {
-        isCollapsedPreviewOpen.value = false;
+        closeCollapsedPreview();
       }
     }, BOX_WINDOW_INTERACTION_TIMING.collapsePreviewCloseDelayMs);
   }
