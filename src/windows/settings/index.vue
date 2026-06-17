@@ -260,6 +260,7 @@ function closeSettings(): void {
             v-if="activeSection === 'appearance'"
             :panel-width="SETTINGS_PANEL_WIDTH.default"
             :settings="desktopStore.settings"
+            @box-visual-setting-change="desktopStore.updateNumberSetting"
             @box-theme-change="desktopStore.updateBoxTheme"
             @settings-theme-change="desktopStore.updateSettingsTheme"
           />
@@ -268,7 +269,6 @@ function closeSettings(): void {
             :desktop-items="desktopStore.desktopItems"
             :panel-width="SETTINGS_PANEL_WIDTH.default"
             :settings="desktopStore.settings"
-            @box-visual-setting-change="desktopStore.updateNumberSetting"
             @double-click-open-items-change="desktopStore.updateDoubleClickOpenItems"
             @item-labels-change="desktopStore.updateShowItemLabels"
             @name-display-mode-change="desktopStore.updateNameDisplayMode"

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
-import { Eye, Lock, RefreshCw, Settings, Trash2, Unlock } from "@lucide/vue";
+import { Eye, RefreshCw, Settings, Trash2 } from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { animate } from "motion";
@@ -382,7 +382,7 @@ async function deleteCurrentBox(): Promise<void> {
     >
       <div class="grid grid-cols-2 gap-1">
         <button
-          class="flex h-8 items-center justify-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
+          class="flex items-center justify-center gap-1.5 rounded-[8px] px-2 py-1 text-[12px] font-medium transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
           type="button"
           @click="openSettingsFromMenu"
         >
@@ -390,7 +390,7 @@ async function deleteCurrentBox(): Promise<void> {
           设置
         </button>
         <button
-          class="flex h-8 items-center justify-center gap-1.5 rounded-[8px] px-2 text-[12px] font-medium transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
+          class="flex items-center justify-center gap-1.5 rounded-[8px] px-2 py-1 text-[12px] font-medium transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
           type="button"
           @click="refreshDesktopFromMenu"
         >
@@ -426,17 +426,15 @@ async function deleteCurrentBox(): Promise<void> {
           type="button"
           @click="toggleBoxLockedFromMenu"
         >
-          <Lock v-if="box.locked" class="mr-2 text-slate-500 dark:text-slate-400" :size="14" />
-          <Unlock v-else class="mr-2 text-slate-500 dark:text-slate-400" :size="14" />
           <span class="grid min-w-0 flex-1">
-            <span class="truncate">{{ box.locked ? "解除锁定" : "锁定布局" }}</span>
+            <span class="truncate text-base">{{ box.locked ? "解除锁定" : "锁定布局" }}</span>
             <span class="text-[10px] text-slate-500 dark:text-slate-400">
               {{ box.locked ? "当前位置不可移动缩放" : "允许移动和缩放" }}
             </span>
           </span>
         </button>
       </div>
-      <div class="grid gap-1.5 px-1.5 py-0.5">
+      <div class="grid gap-1.5 px-2 py-0.5">
         <div class="flex items-center justify-between gap-3 text-[11px] font-medium text-slate-500 dark:text-slate-400">
           <span class="inline-flex items-center">
             <Eye class="mr-1.5" :size="13" />
@@ -456,7 +454,7 @@ async function deleteCurrentBox(): Promise<void> {
       </div>
       <span class="my-0.5 h-px bg-[#e4e6eb] dark:bg-[#30333c]" />
       <button
-        class="flex h-8 items-center rounded-[7px] px-2.5 text-left text-[12px] text-red-600 transition-colors hover:bg-[#fff0f0] dark:text-red-400 dark:hover:bg-[#3a2528]"
+        class="flex items-center rounded-[7px] px-2.5 py-1 text-left text-[12px] text-red-600 transition-colors hover:bg-[#fff0f0] dark:text-red-400 dark:hover:bg-[#3a2528]"
         type="button"
         @click="deleteCurrentBox"
       >
