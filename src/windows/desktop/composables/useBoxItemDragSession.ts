@@ -87,8 +87,6 @@ export function useBoxItemDragSession(options: {
    * 外部拖拽 enter 需要异步解析文件信息；版本号用于让已经 leave 的旧 enter 结果失效。
    */
   let externalFileDragRequestVersion = 0;
-  let externalFileDragBoundsProbeTimer: ReturnType<typeof window.setInterval> | null = null;
-  let externalFileDragOutsideStableTicks = 0;
   let externalFileDragReleaseProbeTimer: ReturnType<typeof window.setInterval> | null = null;
   let externalFileDragReleaseProbeStartedAt = 0;
   let externalFileDragReleaseSessionId = "";
@@ -210,7 +208,6 @@ export function useBoxItemDragSession(options: {
       sessionId,
       usesScreenPosition: isScreenPosition,
     };
-    startExternalFileDragBoundsProbe(sessionId);
     void openDragPreviewWindow()
       .then(() => emitExternalFileDragPhase("move", screenPoint.x, screenPoint.y, sessionId))
       .catch((error) => {
@@ -287,7 +284,6 @@ export function useBoxItemDragSession(options: {
     await emitExternalFileDragPhase("drop", screenPoint.x, screenPoint.y, dragState.sessionId);
     ignoreExternalDragSession(dragState.sessionId);
     externalFileDragState = null;
-    clearExternalFileDragBoundsProbe();
     clearExternalFileDragReleaseProbe();
     options.setDragHoveringBox(false);
     await options.syncPointerHoverFromScreenPoint(screenPoint.x, screenPoint.y);
@@ -302,7 +298,6 @@ export function useBoxItemDragSession(options: {
     externalFileDragRequestVersion += 1;
     const dragState = externalFileDragState;
     externalFileDragState = null;
-    clearExternalFileDragBoundsProbe();
     clearDraggingBoxItemState();
     if (dragState) {
       ignoreExternalDragSession(dragState.sessionId);
@@ -359,47 +354,6 @@ export function useBoxItemDragSession(options: {
           finishExternalFileDragReleaseProbe(sessionId);
         });
     }, BOX_ITEM_DRAG_INTERACTION.externalReleasePollIntervalMs);
-  }
-
-  /**
-   * 快速拖出窗口时 WebView 可能漏发 leave；轮询全局鼠标位置作为外部拖拽清理兜底。
-   */
-  function startExternalFileDragBoundsProbe(sessionId: string): void {
-    clearExternalFileDragBoundsProbe();
-    externalFileDragOutsideStableTicks = 0;
-    externalFileDragBoundsProbeTimer = window.setInterval(() => {
-      void cursorPosition()
-        .then((cursor) => options.resolveBoxItemDragLocalPoint(cursor.x, cursor.y))
-        .then((localPoint) => {
-          if (!externalFileDragState || externalFileDragState.sessionId !== sessionId) {
-            return;
-          }
-
-          if (localPoint.inside) {
-            externalFileDragOutsideStableTicks = 0;
-            return;
-          }
-
-          externalFileDragOutsideStableTicks += 1;
-          if (externalFileDragOutsideStableTicks >= 2) {
-            cancelExternalFileDrag({ deferHoverClearUntilRelease: true });
-          }
-        })
-        .catch(() => undefined);
-    }, BOX_ITEM_DRAG_INTERACTION.pollIntervalMs);
-  }
-
-  /**
-   * 停止外部拖拽窗口边界兜底，避免会话结束后继续轮询全局鼠标。
-   */
-  function clearExternalFileDragBoundsProbe(): void {
-    if (!externalFileDragBoundsProbeTimer) {
-      return;
-    }
-
-    window.clearInterval(externalFileDragBoundsProbeTimer);
-    externalFileDragBoundsProbeTimer = null;
-    externalFileDragOutsideStableTicks = 0;
   }
 
   /**
