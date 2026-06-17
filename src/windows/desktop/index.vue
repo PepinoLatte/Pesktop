@@ -393,8 +393,9 @@ function openNativeItemContextMenu(event: MouseEvent, item: DesktopItem): void {
         />
       </template>
 
+      <!-- 标题层级高于内容区，避免底部收缩时图标网格的过渡帧遮住标题文字。 -->
       <header
-        class="relative flex h-10 shrink-0 select-none items-center justify-center px-3 transition-opacity duration-150 ease-out"
+        class="relative z-30 flex h-10 shrink-0 select-none items-center justify-center px-3 transition-opacity duration-150 ease-out"
         :class="boxTitleOrderClass"
         :style="boxTitleAreaStyle"
         @mousedown.left="startDragging"

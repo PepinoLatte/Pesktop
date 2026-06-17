@@ -27,6 +27,11 @@ interface BoxPointerLocalPoint {
 }
 
 /**
+ * 图标网格默认使用 Tailwind p-2.5；底部标题收缩时只动态压缩上下内边距，避免影响展开态横向留白。
+ */
+const BOX_GRID_VERTICAL_PADDING_PX = 10;
+
+/**
  * Box 收缩预览组合式逻辑集中管理临时展开、收起动画和闲置透明度，不直接持久化 Box 数据。
  */
 export function useBoxCollapsePreview(options: {
@@ -55,6 +60,15 @@ export function useBoxCollapsePreview(options: {
     Boolean(options.box.value?.collapsed && !isCollapsedPreviewOpen.value),
   );
   const collapsedWindowHeight = computed(() => BOX_TITLE_VISIBILITY.expandedHeight);
+  /**
+   * 标题在下方时，内容区高度跟随可视高度变化，让标题自身从下往上收到顶部入口。
+   */
+  const isBottomTitleMovingDuringCollapse = computed(() =>
+    Boolean(
+      options.box.value?.titlePosition === "bottom" &&
+        (isCollapseAnimating.value || isBoxCollapsedToTitle.value),
+    ),
+  );
   const boxIdleOpacity = computed(() =>
     isBoxHovered.value ||
     isDragHoveringBox.value ||
@@ -86,10 +100,8 @@ export function useBoxCollapsePreview(options: {
   );
   const boxBodyStyle = computed(
     () => {
-      const isBottomTitle = options.box.value?.titlePosition === "bottom";
       const animatedHeight = boxSurfaceVisualHeight.value;
-      const isCollapsingBottomTitle =
-        isBottomTitle && (isCollapseAnimating.value || isBoxCollapsedToTitle.value);
+      const isCollapsingBottomTitle = isBottomTitleMovingDuringCollapse.value;
       const bodyHeight =
         !isCollapsingBottomTitle
           ? undefined
@@ -98,11 +110,18 @@ export function useBoxCollapsePreview(options: {
                 BOX_TITLE_VISIBILITY.expandedHeight,
               0,
             );
+      const verticalPadding =
+        bodyHeight === undefined
+          ? undefined
+          : Math.min(BOX_GRID_VERTICAL_PADDING_PX, bodyHeight / 2);
 
       return {
         flex: isCollapsingBottomTitle ? "0 0 auto" : undefined,
         height: bodyHeight === undefined ? undefined : `${bodyHeight}px`,
+        minHeight: isCollapsingBottomTitle ? "0px" : undefined,
         opacity: isBoxCollapsedToTitle.value ? "0" : "1",
+        paddingBottom: verticalPadding === undefined ? undefined : `${verticalPadding}px`,
+        paddingTop: verticalPadding === undefined ? undefined : `${verticalPadding}px`,
         pointerEvents: isBoxCollapsedToTitle.value ? "none" : "auto",
         transform: isBoxCollapsedToTitle.value ? "translateY(-6px)" : "translateY(0)",
       } as CSSProperties;
@@ -123,6 +142,7 @@ export function useBoxCollapsePreview(options: {
   let boxOpacityTween: ReturnType<typeof animate> | null = null;
   let collapsePreviewCloseTimer: ReturnType<typeof window.setTimeout> | null = null;
   let collapseSizeApplyLockTimer: ReturnType<typeof window.setTimeout> | null = null;
+  let lastAppliedWindowHeight: number | null = null;
 
   /**
    * 根据收缩展示状态调整真实窗口高度，避免透明空白窗口挡住桌面点击。
@@ -142,35 +162,33 @@ export function useBoxCollapsePreview(options: {
     const targetWidth = options.box.value.width;
     const targetFrame = resolveCollapseWindowFrame(targetWidth, targetHeight);
     const animationMs = shouldAnimate ? options.getBoxCollapseAnimationMs() : 0;
+    const canAnimate = shouldAnimate && !shouldReduceMotion();
 
     setCollapseSizeApplyLock(animationMs);
 
-    if (!shouldAnimate) {
+    if (!canAnimate) {
       boxSurfaceVisualHeight.value = null;
-      await options.applyWindowFrame(targetFrame);
+      isCollapseAnimating.value = false;
+      await applyCollapseFrame(targetFrame);
       return;
     }
 
+    boxSurfaceVisualHeight.value = resolveOptimisticAnimationStartHeight();
+    isCollapseAnimating.value = true;
     const currentWindowHeight = await options.resolveCurrentWindowHeight();
     const startHeight = boxSurfaceVisualHeight.value ?? currentWindowHeight;
     const heightDistance = targetHeight - startHeight;
 
     if (Math.abs(heightDistance) < 1) {
       boxSurfaceVisualHeight.value = null;
-      await options.applyWindowFrame(targetFrame);
+      isCollapseAnimating.value = false;
+      await applyCollapseFrame(targetFrame);
       return;
     }
 
-    if (shouldReduceMotion()) {
-      boxSurfaceVisualHeight.value = null;
-      await options.applyWindowFrame(targetFrame);
-      return;
-    }
-
-    isCollapseAnimating.value = true;
     boxSurfaceVisualHeight.value = startHeight;
     if (targetHeight > currentWindowHeight) {
-      await options.applyWindowFrame(targetFrame);
+      await applyCollapseFrame(targetFrame);
     }
 
     const tweenState = {
@@ -247,7 +265,39 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 收缩态统一保留完整 Box 顶部的标题高度，即使标题配置在下方也向上收缩，避免视觉方向反转。
+   * 状态切换到“只保留标题”后，Vue 会先计算一次布局；提前给出动画起点可避免底部标题先塌到顶部再弹回。
+   */
+  function resolveOptimisticAnimationStartHeight(): number {
+    const currentBox = options.box.value;
+
+    if (!currentBox) {
+      return collapsedWindowHeight.value;
+    }
+
+    if (boxSurfaceVisualHeight.value !== null) {
+      return boxSurfaceVisualHeight.value;
+    }
+
+    if (isBoxCollapsedToTitle.value) {
+      return lastAppliedWindowHeight !== null &&
+        lastAppliedWindowHeight <= collapsedWindowHeight.value + 1
+        ? lastAppliedWindowHeight
+        : currentBox.height;
+    }
+
+    if (
+      currentBox.collapsed &&
+      lastAppliedWindowHeight !== null &&
+      lastAppliedWindowHeight <= collapsedWindowHeight.value + 1
+    ) {
+      return lastAppliedWindowHeight;
+    }
+
+    return currentBox.height;
+  }
+
+  /**
+   * 收缩态统一保留 Box 顶部标题入口，底部标题通过内部布局从下往上移动到这个入口。
    */
   function resolveCollapseWindowFrame(width: number, height: number): LogicalWindowFrame {
     if (!options.box.value) {
@@ -268,6 +318,14 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
+   * 所有收缩尺寸写入都在这里记录最终高度，后续动画可用它判断当前窗口是完整态还是标题态。
+   */
+  async function applyCollapseFrame(frame: LogicalWindowFrame): Promise<void> {
+    await options.applyWindowFrame(frame);
+    lastAppliedWindowHeight = frame.height;
+  }
+
+  /**
    * 收缩动画完成后一次性同步真实窗口高度，避免动画过程中暴露 Windows 原生直角边界。
    */
   function finishCollapseWindowResize(
@@ -275,7 +333,7 @@ export function useBoxCollapsePreview(options: {
     targetFrame: LogicalWindowFrame,
   ): void {
     boxSurfaceVisualHeight.value = targetFrame.height;
-    void options.applyWindowFrame(targetFrame).finally(() => {
+    void applyCollapseFrame(targetFrame).finally(() => {
       if (activeCollapseAnimationVersion !== collapseAnimationVersion) {
         return;
       }
