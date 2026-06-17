@@ -1,0 +1,430 @@
+我先看一下当前的前端结构再给建议。
+
+Globpattern: "src/**/*.{vue,ts,js}"
+Found 31 files
+Bash List top-level frontend directories
+IN
+ls src/ src/shared/ src/features/ 2>&1
+
+OUT
+src/:
+App.vue
+app
+assets
+features
+main.ts
+shared
+vite-env.d.ts
+
+src/features/:
+desktop
+settings
+
+src/shared/:
+api
+components
+config
+events
+storage
+types
+window
+当前结构已经是 feature-based（features/ + shared/），底子不错。我看主要有三个值得动的点，按优先级排：
+
+1. shared/ 在膨胀成杂物间 — 已经有 api / components / config / events / storage / types / window 七个目录，未来还会更多。可以考虑两种方向：
+
+引入轻量 FSD 分层：entities/（领域模型，如 Box、DesktopIcon）→ features/（用户操作）→ widgets/（组合视图）→ shared/（纯工具）。适合项目要长期演进。
+或者按"平台 vs 业务"切：shared/tauri/（events + window + api 这些 Tauri 桥接）和 shared/ui/（纯 UI 工具），保持扁平。
+2. 跨 feature 的耦合点没有清晰边界 — 比如 shared/types/desktop.ts、shared/config/desktopLayout.ts 其实是 desktop 这个 feature 的领域类型，被放到 shared 是因为 settings 那边也要用。这种情况说明缺一层 entities/ 来放可被多个 feature 共享的领域模型，比塞进 shared 更准确。
+
+2.5. features/desktop/ 已经偏胖 — 里面同时有 store/ + components/ + config/ + utils/ + 多个 Window 相关组件。如果 Box 系统继续扩展，可以考虑把 BoxContextMenuWindow / DragPreviewWindow 这类独立的 Tauri 窗口抽到 widgets/ 或单独的 windows/ 顶层目录，因为它们其实是独立运行实例，不只是 desktop 的子组件。
+
+主要 tradeoff：FSD 分层规范性强但前期会有"为了分层而分层"的负担，2 个 feature 的体量上 ROI 不高；按平台/业务切更轻，但长期可能还要再调一次。
+
+要不要我先看看 shared/ 里哪些文件实际跨 feature 被引用了？这样能用真实依赖图来决定该走哪条路，而不是凭直觉拆。
+
+可以的，然后给我一个你觉得不错的目录结构图给我
+好的，我先把 shared/ 里每个模块被谁引用的真实情况摸清楚。
+
+Bash List all files in shared subdirectories
+IN
+ls src/shared/api src/shared/components src/shared/config src/shared/events src/shared/storage src/shared/types src/shared/window 2>&1
+
+OUT
+src/shared/api:
+desktop.ts
+
+src/shared/components:
+SegmentedControl.vue
+
+src/shared/config:
+appSettings.ts
+desktopLayout.ts
+
+src/shared/events:
+boxContextMenuEvents.ts
+boxItemDragEvents.ts
+desktopEvents.ts
+
+src/shared/storage:
+database.ts
+
+src/shared/types:
+desktop.ts
+
+src/shared/window:
+boxWindows.ts
+dragPreviewWindow.ts
+Grep "from ['"]@?/?shared/" (in src)
+1 line of output
+Grep "from ['"]@?/?features/" (in src)
+1 line of output
+Grep "^import .* from" (in src)
+101 lines of output
+依赖图扫完，关键发现（解释我为什么这么排）：
+
+shared/types/desktop.ts, shared/config/desktopLayout.ts, shared/config/appSettings.ts 被 desktop + settings 都引用 → 这是领域模型，不是工具
+features/settings 直接 import 了 features/desktop/store/desktopStore → feature 间已经互相依赖了，store 该提到中性层
+shared/api/desktop.ts、shared/window/dragPreviewWindow.ts、shared/events/boxContextMenuEvents.ts、shared/events/boxItemDragEvents.ts 实际只被 desktop 用 → 错放进了 shared
+BoxContextMenuWindow.vue、DragPreviewWindow.vue 是独立的 Tauri webview window，不是 desktop 的子组件，App.vue 里靠条件渲染分发 → 它们和 desktop/settings 是同一级
+真正全局共用的只有 SegmentedControl.vue + database.ts
+推荐结构
+
+src/
+├── app/                              # 应用入口
+│   ├── App.vue                       # 窗口分发（按 windowLabel 选挂载哪个）
+│   ├── main.ts
+│   └── styles.css
+│
+├── windows/                          # ★ 每个独立 Tauri webview = 一个顶层模块
+│   ├── desktop/                      # 主桌面窗口（原 features/desktop/index.vue）
+│   │   ├── index.vue
+│   │   ├── components/
+│   │   │   ├── DesktopIcon.vue
+│   │   │   └── DesktopIconGlyph.vue
+│   │   └── config/
+│   │       └── desktopIcon.ts        # DESKTOP_ICON_VIEW, WINDOWS_SHORTCUT_BADGE
+│   ├── settings/                     # 设置窗口（原 features/settings）
+│   │   ├── index.vue
+│   │   ├── components/
+│   │   ├── config/settingsUi.ts
+│   │   └── types.ts
+│   ├── boxContextMenu/               # 右键菜单窗口
+│   │   └── index.vue                 # 原 BoxContextMenuWindow.vue
+│   └── dragPreview/                  # 拖拽预览窗口
+│       ├── index.vue                 # 原 DragPreviewWindow.vue
+│       └── lifecycle.ts              # 原 shared/window/dragPreviewWindow.ts
+│
+├── entities/                         # ★ 跨窗口共享的领域模型
+│   ├── desktopItem/
+│   │   ├── types.ts                  # DesktopItem, DesktopNameDisplayMode
+│   │   ├── api.ts                    # openDesktopItem (原 shared/api/desktop.ts)
+│   │   └── displayName.ts            # formatDesktopItemDisplayName
+│   ├── desktopBox/
+│   │   ├── types.ts                  # DesktopBox, DesktopBoxTitlePosition, DesktopSnapshot
+│   │   ├── layout.ts                 # BOX_DEFAULT_STATE, BOX_CONTEXT_MENU_LAYOUT, …
+│   │   ├── store.ts                  # desktopStore ← 从 features/desktop 提上来
+│   │   └── windows.ts                # openBoxWindow, closeBoxWindow, openSettingsWindow
+│   └── appSettings/
+│       ├── types.ts                  # AppSettings, ThemeMode
+│       └── defaults.ts               # DEFAULT_APP_SETTINGS, SETTINGS_WINDOW_SYNC_TIMING
+│
+├── shared/                           # ★ 真·跨业务，无领域知识
+│   ├── ui/
+│   │   └── SegmentedControl.vue
+│   ├── ipc/                          # 窗口间事件契约（替代原 shared/events/）
+│   │   ├── boxContextMenu.ts
+│   │   ├── boxItemDrag.ts
+│   │   └── desktop.ts
+│   └── storage/
+│       └── database.ts
+│
+└── assets/
+主要改动一览
+原位置	新位置	原因
+features/desktop/store/desktopStore.ts	entities/desktopBox/store.ts	settings 反向依赖了它
+shared/types/desktop.ts	拆到 entities/{desktopItem,desktopBox,appSettings}/types.ts	单文件混了三个领域
+shared/config/desktopLayout.ts	entities/desktopBox/layout.ts	Box 的领域配置
+shared/config/appSettings.ts	entities/appSettings/defaults.ts	AppSettings 的领域默认值
+shared/window/boxWindows.ts	entities/desktopBox/windows.ts	全是 Box 相关的窗口操作
+shared/api/desktop.ts	entities/desktopItem/api.ts	只 desktop 用，且是 Item 的能力
+features/desktop/components/BoxContextMenuWindow.vue	windows/boxContextMenu/index.vue	独立 webview，不该藏在 desktop 子组件里
+features/desktop/components/DragPreviewWindow.vue	windows/dragPreview/index.vue	同上
+shared/events/*	shared/ipc/*	改名更准确：这是窗口间 IPC 契约
+tradeoff 提醒
+没引入 features/ 中间层：当前每个"功能"基本就等于一个窗口，硬加 features 会变成无用的二级目录。如果后续单窗口内出现多个独立子功能（如桌面窗口里加搜索栏、小组件面板），再把 features/ 加回来。
+entities/ 是有学习成本的概念：核心就是"被多个窗口共享的领域知识 + 该领域的 store/api"。如果你觉得这层抽象太重，可以把 entities/ 改名 domain/ 或干脆叫 core/，含义相同。
+要不要我直接动手按这个结构重排？还是你想先调整哪部分（比如不要 entities 层 / windows 改叫别的名字 / 某几个文件该归到别处）？
+
+不用改名，然后你再确认一下吧，有一些函数方法其实完全可以抽离到组件自己内部的，确认后再给我修改后的结构图
+No response requested.
+
+d:\Develop\Project\Own\Dasktop\package.json
+继续
+我来看那些只被单个组件用的工具/配置文件，确认哪些可以直接内联回组件，不必单独成文件。
+
+Read d:\Develop\Project\Own\Dasktop\src\features\desktop\utils\desktopItemName.ts
+Read d:\Develop\Project\Own\Dasktop\src\features\desktop\config\desktopIcon.ts
+Read d:\Develop\Project\Own\Dasktop\src\features\settings\config\settingsUi.ts
+Read d:\Develop\Project\Own\Dasktop\src\shared\window\dragPreviewWindow.ts
+Read d:\Develop\Project\Own\Dasktop\src\shared\api\desktop.ts
+Read d:\Develop\Project\Own\Dasktop\src\features\settings\types.ts
+已读完关键文件。结论是有几处确实可以内联，但不是全部，区别在于"这段逻辑/数据是否只服务于一个组件且没有复用价值"。我逐个判断：
+
+可以内联回组件的
+| 文件 | 判断 | 理由 |
+|---|---|
+| features/settings/types.ts | 内联到 index.vue | SettingsSection / SettingsNavItem 只在 settings 内部用。navItem 数组本来就该在 index.vue 里定义，类型跟着走即可。SettingsSidebar 用到的两个类型可改为从父组件 props 推导或就近 import |
+| features/desktop/config/desktopIcon.ts 的 WINDOWS_SHORTCUT_BADGE | 内联到 DesktopIconGlyph.vue | 这堆 SVG 角标常量只有 DesktopIconGlyph 一个消费者，纯渲染细节，放组件 <script> 顶部更内聚 |
+| features/settings/config/settingsUi.ts 的 THEME_SEGMENT_OPTIONS | 内联到 AppearancePanel.vue | 只有这个 panel 用 |
+| settingsUi.ts 的 NAME_DISPLAY_SEGMENT_OPTIONS | 内联到 BoxDisplayPanel.vue | 只有这个 panel 用 |
+| settingsUi.ts 的 BOX_VISUAL_SETTING_CONTROLS + SNAP_THRESHOLD_INPUT + BoxVisualSettingKey | 内联到 BoxDisplayPanel.vue | 都是该面板的渲染描述表 |
+| settingsUi.ts 的 SETTINGS_PANEL_WIDTH | 保留，但移到 settings 内 | 被 3 个 panel 共用（About/Boxes/BoxDisplay），不能内联 |
+
+→ 结论：settingsUi.ts 拆散后基本可以删掉，只剩 SETTINGS_PANEL_WIDTH 一个常量，可并入 settings/index.vue 旁的小 constants.ts 或直接留一个精简文件。
+
+不建议内联的（保持独立文件）
+文件	理由
+desktopIcon.ts 的 DESKTOP_ICON_VIEW	被 index.vue / DesktopIcon / DesktopIconGlyph / DragPreviewWindow 4 处引用，是 desktop 窗口的布局契约，必须共享
+shared/api/desktop.ts	6 个 invoke 封装，是 IPC 边界。即使现在只 desktop 用，也应作为 entities/desktopItem/api.ts 独立存在——它是"能力"不是"组件细节"
+shared/window/dragPreviewWindow.ts	窗口生命周期管理（创建/复用/ready 握手），逻辑重且和 dragPreview/index.vue 是两端关系，不能塞进组件
+utils/desktopItemName.ts 的 formatDesktopItemDisplayName	被 DesktopIcon + DragPreviewWindow 两处用，是纯函数适合独立、可测试
+判断准则：单一消费者 + 纯展示数据 → 内联；多消费者 / 是 IPC 或窗口边界 / 纯逻辑函数 → 独立。
+
+修改后的结构图
+
+src/
+├── app/
+│   ├── App.vue                # 按 windowLabel 分发挂载哪个窗口
+│   ├── main.ts
+│   └── styles.css
+│
+├── windows/                # 每个独立 Tauri webview = 一个顶层模块
+│   ├── desktop/
+│   │   ├── index.vue
+│   │   ├── components/
+│   │   │   ├── DesktopIcon.vue
+│   │   └── DesktopIconGlyph.vue  # ← WINDOWS_SHORTCUT_BADGE 内联进此组件
+│   │   └── config/
+│   │       └── desktopIcon.ts        # 仅保留 DESKTOP_ICON_VIEW（4 处共享）
+│   │
+│   ├── settings/
+│   │   ├── index.vue                 # ← SettingsSection/NavItem 类型 + SETTINGS_PANEL_WIDTH 内聚于此
+│   │   └── components/
+│   │       ├── SettingsHeader.vue
+│       ├── SettingsSidebar.vue
+│   │       ├── AboutPanel.vue
+│   │       ├── BoxesPanel.vue
+│   │       ├── AppearancePanel.vue   # ← THEME_SEGMENT_OPTIONS 内联
+│   │       └── BoxDisplayPanel.vue   # ← NAME_DISPLAY/BOX_VISUAL_CONTROLS/SNAP_INPUT 内联
+│   │   # settingsUi.ts 拆散后删除
+│   │   # types.ts 内联后删除
+│   │
+│   ├── boxContextMenu/
+│   │   └── index.vue                 # 原 BoxContextMenuWindow.vue
+│   │
+│   └── dragPreview/
+│       ├── index.vue                 # 原 DragPreviewWindow.vue
+│       └── lifecycle.ts              # 原 shared/window/dragPreviewWindow.ts（窗口创建/ready握手）
+│
+├── entities/                         # 跨窗口共享的领域模型
+│   ├── desktopItem/
+│   ├── types.ts                  # DesktopItem, DesktopNameDisplayMode
+│   │   ├── api.ts                    # 原 shared/api/desktop.ts（6个 invoke 封装）
+│   │   └── displayName.ts            # formatDesktopItemDisplayName
+│   │
+│   ├── desktopBox/
+│   │   ├── types.ts                  # DesktopBox, DesktopBoxTitlePosition, DesktopSnapshot
+│   ├── layout.ts                 # 原 shared/config/desktopLayout.ts
+│   │   ├── store.ts                  # ← desktopStore 从 desktop 提上来（settings 反向依赖）
+│   └── windows.ts                # 原 shared/window/boxWindows.ts
+│   │
+│   └── appSettings/
+│       ├── types.ts                  # AppSettings, ThemeMode
+│       └── defaults.ts               # 原 shared/config/appSettings.ts
+│                     #   含 DEFAULT_APP_SETTINGS, APP_SETTING_NUMBER_LIMITS
+│
+├── shared/                           # 真·跨业务，无领域知识
+│   ├── ui/
+│   │   └── SegmentedControl.vue
+│   ├── ipc/                # 窗口间事件契约（原 shared/events/）
+│   │   ├── boxContextMenu.ts
+│   │   ├── boxItemDrag.ts
+│   │   └── desktop.ts
+│   └── storage/
+│       └── database.ts
+│
+└── assets/
+内联带来的净变化
+删除 2 个文件：settings/types.ts、settings/config/settingsUi.ts（仅 SETTINGS_PANEL_WIDTH 一个常量需要保留，并入 settings/index.vue 即可）
+desktopIcon.ts 瘦身：WINDOWS_SHORTCUT_BADGE（约 23 行）移入组件，只留 DESKTOP_ICON_VIEW
+其余按上一版结构图归位
+需要注意一个小坑：settingsUi.ts 里 BoxVisualSettingKey 依赖 appSettings.ts 的 AppSettingNumberKey，内联到 BoxDisplayPanel.vue 后，import 路径要改成指向 entities/appSettings/defaults.ts，类型本身随面板走即可。
+
+要我按这个方案动手执行吗？我会分两步：先做目录/文件搬迁并改 import 路径，再做组件内联，每步跑一次 tsc / build 确认不破。
+
+/brainstorming 动手吧，可以问我问题后写 plan 然后保存到docs下
+Update Todos
+
+探索项目上下文（构建配置、别名、测试、git 状态）
+
+提出澄清问题（逐个）
+
+提出 2-3 种执行方案及权衡
+
+分节展示设计并获批准
+
+编写设计文档到 docs/ 并 commit
+
+规格自检
+
+用户审查规格
+
+调用 writing-plans 技能
+先快速确认构建配置和 git 状态，这影响搬迁方案（路径别名、是否有测试需要同步改）。
+
+Read d:\Develop\Project\Own\Dasktop\package.json
+Read d:\Develop\Project\Own\Dasktop\vite.config.ts
+没有配置路径别名，当前全是相对路径 import。我再确认 tsconfig 和入口引用，然后开始提问。
+
+Read d:\Develop\Project\Own\Dasktop\tsconfig.json
+摸清现状了，关键事实：
+
+没有路径别名，全是相对 import（../../shared/... 这种已经出现了）
+没有测试框架，验证手段是 pnpm build（= vue-tsc --noEmit && vite build）
+main.ts 在 src/ 根，index.html 通常引用它
+按 brainstorming 流程，我先逐个问几个会影响方案的问题，再写设计文档存到 docs。
+
+第一个问题（最关键）：要不要顺便引入路径别名？
+
+现在已经是相对 import，最深的是 ../../../shared/types/desktop。按新结构再加一层 windows/ / entities/，相对路径会更长更脆（一搬文件就断）。
+
+选项	说明	影响
+A. 引入 @/ 别名（推荐）	在 vite.config.ts + tsconfig.json 配 @/* → src/*，所有跨目录 import 改成 @/entities/...、@/shared/...	一次性配置，之后搬文件不断链，import 可读性大幅提升。需要同时改 vite + tsconfig 两处
+B. 继续用相对路径	不动配置，搬迁后手工修正所有相对路径	零配置改动，但深层相对路径丑且脆，未来每次移动文件都要重算 ../
+你选哪个？（我推荐 A，配置成本很低，且正好趁这次重构一并做掉。）
+
+A
+好，用 @/ 别名。第二个问题：
+
+App.vue 当前用 4 个条件渲染 + 全部静态 import 的方式分发窗口。新结构下要不要顺手改成按 window label 路由 + 懒加载？
+
+现在的 App.vue（从依赖图看）一次性 import 了 desktop / settings / boxContextMenu / dragPreview 四个窗口组件，靠条件判断决定渲染哪个。每个 Tauri webview 其实只会用到其中一个。
+
+选项	说明	影响
+A. 只搬迁，不动分发逻辑（推荐）	App.vue 逻辑原样保留，只把 4 个 import 路径改成新的 @/windows/...	范围最小、最安全。每个窗口仍会打包全部组件，但 4 个窗口都在同一 bundle，影响很小
+B. 顺便改懒加载	用 defineAsyncComponent 按 label 动态加载对应窗口	每个 webview 只加载自己那块。但属于行为变更，得额外验证 4 个窗口都正常，扩大了重构风险面
+这次重构的主线是「目录结构 + 内联」，我倾向 A，把分发逻辑的优化留作独立任务，避免一次动太多。你的意见？
+
+A
+明白。第三个问题，关于执行与验证的节奏：
+
+这次改动会触及几乎所有文件（搬迁 + 改 import + 内联），且没有测试，唯一防线是 pnpm build（vue-tsc --noEmit）。我想确认你希望的推进粒度：
+
+选项	说明
+A. 分阶段执行，每阶段跑 build（推荐）	拆成几个独立阶段：①配别名 → ②搬迁+改路径 → ③组件内联。每阶段结束跑一次 pnpm build，绿了再进下一步。出问题容易定位
+B. 一次性全做完再 build	改动一把梭，最后统一验证。快但出错时排查范围大
+我推荐 A。另外想确认：plan 写好存到 docs/superpowers/specs/ 下后，你是希望我等你审查 plan 再开工，还是 plan 存完直接按 A 执行？
+
+B 而且不用build，每阶段跑一下检查就行，只要保证没有语法错误
+决定都记下了。最终方案汇总如下，确认无误我就写设计文档存到 docs/。
+
+最终方案
+三项决策
+
+引入 @/ 路径别名（改 vite.config.ts + tsconfig.json），跨目录 import 一律走 @/...
+App.vue 窗口分发逻辑不动，只改 import 路径
+一次性完成全部改动，用 vue-tsc --noEmit 检查无语法/类型错误（不跑完整 vite build）
+目标结构
+
+
+src/
+├── app/              App.vue · main.ts · styles
+├── windows/          desktop · settings · boxContextMenu · dragPreview
+├── entities/         desktopItem · desktopBox · appSettings
+├── shared/           ui · ipc · storage
+└── assets/
+搬迁映射（已在前面确认）
+
+features/desktop/store/desktopStore → entities/desktopBox/store.ts
+shared/types/desktop.ts 拆成三个 entities/*/types.ts
+shared/config/desktopLayout.ts → entities/desktopBox/layout.ts
+shared/config/appSettings.ts → entities/appSettings/defaults.ts
+shared/window/boxWindows.ts → entities/desktopBox/windows.ts
+shared/api/desktop.ts → entities/desktopItem/api.ts
+shared/window/dragPreviewWindow.ts → windows/dragPreview/lifecycle.ts
+shared/events/* → shared/ipc/*
+BoxContextMenuWindow.vue → windows/boxContextMenu/index.vue
+DragPreviewWindow.vue → windows/dragPreview/index.vue
+utils/desktopItemName.ts → entities/desktopItem/displayName.ts
+组件内联（删除 2 文件 + 1 文件瘦身）
+
+settings/types.ts → 内联进 settings/index.vue，删除
+settings/config/settingsUi.ts 拆散：THEME_SEGMENT_OPTIONS→AppearancePanel，NAME_DISPLAY/BOX_VISUAL_CONTROLS/SNAP_INPUT/BoxVisualSettingKey→BoxDisplayPanel，SETTINGS_PANEL_WIDTH→并入 settings/index.vue；文件删除
+desktopIcon.ts 的 WINDOWS_SHORTCUT_BADGE → 内联进 DesktopIconGlyph.vue，文件只留 DESKTOP_ICON_VIEW
+保持独立：DESKTOP_ICON_VIEW（4 处共享）、api.ts（IPC 边界）、dragPreview/lifecycle.ts（窗口生命周期）、displayName.ts（纯函数双消费者）
+
+确认这版没问题的话，我就把它写成设计文档存到 docs/superpowers/specs/2026-06-17-frontend-structure-refactor-design.md。
+
+可以，动手吧
+我先写设计文档存到 docs，然后开始执行。
+
+/**
+ * 每个 Tauri WebView 都独立挂载应用实例，Box 窗和设置窗通过 URL 参数选择视图。
+ */
+createApp(App).use(createPinia()).mount("#app");
+关键发现：main.ts / App.vue 在 src/ 根，index.html 引用 /src/main.ts。把它们移进 app/ 需要同步改 index.html 的 script src 和 main.ts 里的相对 import。设计文档里会记上这点。
+
+现在写设计文档。
+
+Bash Create specs directory
+IN
+mkdir -p docs/superpowers/specs && echo created
+
+OUT
+created
+刚刚我发你的这点也加进去吧，再就是
+# Dasktop Agent Notes
+
+## 文件编码
+
+- 读取、编辑、创建项目文件时必须使用 UTF-8 编码。
+- 如果终端、工具或系统区域设置导致中文显示异常，必须优先怀疑读取/显示链路，不得直接认定源文件内容损坏。
+- 涉及中文内容的修改应保持 UTF-8，不引入 GBK、ANSI 或其他本地编码。
+
+## 注释规范
+
+- 所有新增和修改的代码都必须补充符合阿里巴巴注释风格的注释。
+- 注释应说明业务意图、设计原因、边界条件和非显而易见的实现逻辑，避免“赋值给变量”这类流水账注释。
+- TypeScript、Vue 的公共类型、Store、组合式逻辑、跨模块函数和复杂交互必须使用 JSDoc。
+- Rust 的 public struct、enum、function、module 和复杂逻辑必须使用 rustdoc 或必要的行内说明。
+- TODO 注释必须写清楚责任、原因和后续处理方向，不允许留下模糊占位。
+
+## 兼容与迁移
+
+- 项目当前未上线，功能调整时不需要保留旧逻辑、旧字段、旧配置或旧数据结构的兼容分支。
+- 旧逻辑必须直接删除，不做历史迁移脚本，不写兼容读取，不保留废弃配置入口。
+理解，把这套项目规范作为实现约束补进设计文档。我加一个新章节。
+
+Edit d:\Develop\Project\Own\Dasktop\docs\superpowers\specs\2026-06-17-frontend-structure-refactor-design.md
+Added 25 lines
+新增章节插入正确，验证章节未重复。commit。
+
+Bash Commit the spec update
+IN
+cd "d:/Develop/Project/Own/Dasktop" && git add docs/superpowers/specs/2026-06-17-frontend-structure-refactor-design.md && git commit -m "docs: 重构设计补充项目实现约束（编码/注释/兼容）
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+
+OUT
+warning: in the working copy of 'docs/superpowers/specs/2026-06-17-frontend-structure-refactor-design.md', LF will be replaced by CRLF the next time Git touches it
+[main f771a80] docs: 重构设计补充项目实现约束（编码/注释/兼容）
+ 1 file changed, 25 insertions(+)
+已补充并 commit。新增的「项目实现约束」章节涵盖三块：
+
+文件编码：全程 UTF-8，中文显示异常优先怀疑读取/显示链路而非源文件损坏，不引入 GBK/ANSI。
+注释规范：阿里巴巴风格；TS/Vue 公共类型、Store、组合式逻辑、跨模块函数、复杂交互用 JSDoc；说明业务意图与边界，不写流水账。
+兼容与迁移：项目未上线，不保留旧逻辑/字段/配置兼容分支，旧逻辑直接删除，不写迁移脚本。
+规格已更新并 commit 到 docs/superpowers/specs/2026-06-17-frontend-structure-refactor-design.md。请再审查一下这版，如果还想调整请告诉我；确认无误我就进入下一步，调用 writing-plans 编写实现计划。
+
+没啥问题，动手吧
+设计已确认。进入实现阶段，调用 writing-plans 技能编写实现计划。

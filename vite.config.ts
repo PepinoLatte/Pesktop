@@ -4,9 +4,17 @@ import tailwindcss from "@tailwindcss/vite";
 
 // @ts-expect-error Tauri dev server 会通过 Node 环境变量注入局域网调试地址。
 const host = process.env.TAURI_DEV_HOST;
+const srcAliasPath = new URL("./src", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
 export default defineConfig(async () => ({
   plugins: [vue(), tailwindcss()],
+
+  resolve: {
+    // 跨窗口与领域模块统一使用 @/ 前缀，避免目录重构后深层相对路径继续扩散。
+    alias: {
+      "@": srcAliasPath,
+    },
+  },
 
   // 保留 Rust 错误输出，避免前端 dev server 清屏后吞掉 Tauri 侧诊断信息。
   clearScreen: false,

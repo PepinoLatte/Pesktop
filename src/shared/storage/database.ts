@@ -1,10 +1,10 @@
 import Database from "@tauri-apps/plugin-sql";
+import type { AppSettings } from "@/entities/appSettings/types";
 import type {
-  AppSettings,
   DesktopBox,
   DesktopBoxItem,
   DesktopBoxTitlePosition,
-} from "../types/desktop";
+} from "@/entities/desktopBox/types";
 import {
   APP_SETTINGS_STORAGE,
   DEFAULT_APP_SETTINGS,
@@ -15,8 +15,8 @@ import {
   APP_SETTING_NUMBER_LIMITS,
   sanitizeNumberAppSetting,
   type AppSettingNumberKey,
-} from "../config/appSettings";
-import { BOX_DEFAULT_STATE, BOX_TITLE_OPACITY } from "../config/desktopLayout";
+} from "@/entities/appSettings/defaults";
+import { BOX_DEFAULT_STATE, BOX_TITLE_OPACITY } from "@/entities/desktopBox/layout";
 
 let databasePromise: Promise<Database> | null = null;
 /**
