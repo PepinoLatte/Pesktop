@@ -4,6 +4,7 @@ import { animate } from "motion";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 import {
   BOX_COLLAPSE_INTERACTION,
+  BOX_IDLE_OPACITY_ANIMATION,
   BOX_TITLE_OPACITY,
   BOX_TITLE_VISIBILITY,
   BOX_WINDOW_INTERACTION_TIMING,
@@ -251,7 +252,7 @@ export function useBoxCollapsePreview(options: {
       },
       {
         delay: resolveBoxIdleOpacityAnimationDelay(),
-        duration: 0.18,
+        duration: resolveBoxIdleOpacityAnimationDuration(),
         ease: [0.16, 1, 0.3, 1],
         onComplete: () => {
           boxOpacityTween = null;
@@ -276,6 +277,18 @@ export function useBoxCollapsePreview(options: {
     }
 
     return Math.min(options.getBoxCollapseAnimationMs() * 0.36, 140) / 1000;
+  }
+
+  /**
+   * 闲置隐藏比 hover 显示略慢，保留柔和淡出；显示仍保持短时长以确保指针进入后立即可操作。
+   */
+  function resolveBoxIdleOpacityAnimationDuration(): number {
+    const durationMs =
+      boxIdleOpacity.value >= 1
+        ? BOX_IDLE_OPACITY_ANIMATION.showDurationMs
+        : BOX_IDLE_OPACITY_ANIMATION.hideDurationMs;
+
+    return durationMs / 1000;
   }
 
   /**
