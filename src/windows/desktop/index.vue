@@ -15,8 +15,13 @@ import {
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import DesktopIcon from "./components/DesktopIcon.vue";
 import { DESKTOP_ICON_VIEW } from "./config/desktopIcon";
+import { useBoxContextMenu } from "./composables/useBoxContextMenu";
+import { useBoxTitleEditing } from "./composables/useBoxTitleEditing";
+import {
+  resolveBoxGridDragInsertTarget,
+  type BoxGridDragInsertTarget,
+} from "./utils/dragGeometry";
 import { useDesktopStore } from "@/entities/desktopBox/store";
-import type { DesktopBoxItemDropPlacement } from "@/entities/desktopBox/types";
 import type { DesktopItem } from "@/entities/desktopItem/types";
 import {
   getDesktopItemsByPaths,
@@ -32,11 +37,7 @@ import {
   type BoxItemDragPreviewOptions,
 } from "@/shared/ipc/boxItemDrag";
 import { openDragPreviewWindow } from "@/windows/dragPreview/lifecycle";
-import {
-  closeBoxContextMenuWindow,
-  preloadBoxContextMenuWindow,
-  toggleBoxContextMenuWindow,
-} from "@/entities/desktopBox/windows";
+import { preloadBoxContextMenuWindow } from "@/entities/desktopBox/windows";
 import { listenBoxContextMenuState } from "@/shared/ipc/boxContextMenu";
 import {
   BOX_COLLAPSE_INTERACTION,
@@ -91,15 +92,6 @@ interface LogicalWindowFrame {
 }
 
 /**
- * Box 内空隙拖拽命中结果同时保存排序目标和插入线坐标，避免竖线挂在某个图标边缘抖动。
- */
-interface BoxGridDragInsertTarget {
-  indicatorStyle: CSSProperties;
-  path: string;
-  placement: DesktopBoxItemDropPlacement;
-}
-
-/**
  * 跨窗口拖拽会话保存在来源 Box 中，用于轮询全局鼠标并在未被接收时执行拖出删除映射。
  */
 interface BoxItemGlobalDragState {
@@ -149,8 +141,6 @@ let boxOpacityTween: ReturnType<typeof animate> | null = null;
 let collapsePreviewCloseTimer: ReturnType<typeof window.setTimeout> | null = null;
 let collapseSizeApplyLockTimer: ReturnType<typeof window.setTimeout> | null = null;
 let windowResizableApplyVersion = 0;
-let lastContextMenuClosedAt = 0;
-let lastContextMenuClosedBoxId = "";
 let manualDragState: ManualDragState | null = null;
 let manualDragCleanup: (() => void) | null = null;
 let resizeReleaseCleanup: (() => void) | null = null;
@@ -213,9 +203,7 @@ const resizeHandles: Array<{
 
 const isCollapsedPreviewOpen = ref(false);
 const isBoxHovered = ref(false);
-const isContextMenuOpen = ref(false);
 const isDragHoveringBox = ref(false);
-const isEditingTitle = ref(false);
 const isManualDraggingBox = ref(false);
 const isResizeHandleHovered = ref(false);
 const isResizingBox = ref(false);
@@ -225,8 +213,6 @@ const boxSurfaceVisualHeight = ref<number | null>(null);
 const draggingBoxItemPath = ref<string | null>(null);
 const draggingBoxItemSessionId = ref<string | null>(null);
 const dragInsertLineStyle = ref<CSSProperties | null>(null);
-const titleDraft = ref("");
-const titleInputRef = ref<HTMLInputElement | null>(null);
 const boxSurfaceRef = ref<HTMLElement | null>(null);
 const box = computed(() => desktopStore.boxes.find((item) => item.id === props.boxId));
 const boxItems = computed(() => (box.value ? desktopStore.getBoxItems(box.value.id) : []));
@@ -317,6 +303,32 @@ const boxGridStyle = computed(
       gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${boxItemWidth.value}px), ${boxItemWidth.value}px))`,
       rowGap: `${desktopStore.settings.boxIconGapY}px`,
     }) as CSSProperties,
+);
+const {
+  closeContextMenu,
+  handleBoxContextMenuState,
+  isContextMenuOpen,
+  toggleContextMenu,
+} = useBoxContextMenu({
+  boxId: () => props.boxId,
+  menuToggleCloseGuardMs: BOX_WINDOW_INTERACTION_TIMING.menuToggleCloseGuardMs,
+  openCollapsedPreviewForActiveInteraction: () => openCollapsedPreviewForActiveInteraction(),
+  refreshCollapsedPreviewCloseSchedule: () => refreshCollapsedPreviewCloseSchedule(),
+  setLastError: (message) => {
+    desktopStore.lastError = message;
+  },
+});
+const {
+  cancelTitleEditing,
+  commitTitleEditing,
+  isEditingTitle,
+  setTitleInputRef,
+  startTitleEditing,
+  titleDraft,
+} = useBoxTitleEditing(
+  box,
+  (nextBox) => desktopStore.updateBox(nextBox),
+  () => closeContextMenu(),
 );
 
 watch(isBoxCollapsedToTitle, () => {
@@ -782,28 +794,6 @@ async function handleWindowMoved(x: number, y: number): Promise<void> {
 }
 
 /**
- * 菜单窗口是单例复用的，Box 窗口不能再通过窗口是否存在判断自己菜单是否打开。
- */
-function handleBoxContextMenuState(
-  boxId: string,
-  isOpen: boolean,
-  reason?: "blur" | "request",
-): void {
-  isContextMenuOpen.value = isOpen && boxId === props.boxId;
-  if (isContextMenuOpen.value) {
-    openCollapsedPreviewForActiveInteraction();
-  }
-  if (!isOpen && boxId === props.boxId && reason === "blur") {
-    lastContextMenuClosedAt = performance.now();
-    lastContextMenuClosedBoxId = boxId;
-  }
-
-  if (!isContextMenuOpen.value) {
-    refreshCollapsedPreviewCloseSchedule();
-  }
-}
-
-/**
  * 锁定布局和收缩态不仅隐藏自定义热区，也要关闭原生 resizable，避免窗口边缘仍可被系统缩放。
  */
 function syncNativeWindowResizable(canResize: boolean): void {
@@ -881,54 +871,6 @@ function handleResizeHandleMouseLeave(): void {
 }
 
 /**
- * Box 标题双击进入编辑态，只修改 Dasktop 的分组名称，不重命名真实桌面文件。
- */
-function startTitleEditing(event: MouseEvent): void {
-  event.stopPropagation();
-
-  if (!box.value) {
-    return;
-  }
-
-  closeContextMenu();
-  titleDraft.value = box.value.title;
-  isEditingTitle.value = true;
-  void nextTick(() => {
-    titleInputRef.value?.focus();
-    titleInputRef.value?.select();
-  });
-}
-
-/**
- * 保存标题时允许空文本，设置页会用兜底名称识别该 Box，不强迫用户显示标题。
- */
-async function commitTitleEditing(): Promise<void> {
-  if (!box.value || !isEditingTitle.value) {
-    return;
-  }
-
-  const nextTitle = titleDraft.value.trim();
-  isEditingTitle.value = false;
-
-  if (nextTitle === box.value.title) {
-    return;
-  }
-
-  await desktopStore.updateBox({
-    ...box.value,
-    title: nextTitle,
-  });
-}
-
-/**
- * 取消编辑只还原标题草稿，不触发数据库写入。
- */
-function cancelTitleEditing(): void {
-  titleDraft.value = box.value?.title ?? "";
-  isEditingTitle.value = false;
-}
-
-/**
  * 缩放从窗口边缘热区触发，保持 Box 没有最小化、最大化、关闭按钮的桌面组件形态。
  */
 function startResizing(direction: ResizeDirection, event: MouseEvent): void {
@@ -944,49 +886,6 @@ function startResizing(direction: ResizeDirection, event: MouseEvent): void {
   closeContextMenu();
   bindResizeReleaseEvents();
   void currentWindow.startResizeDragging(direction);
-}
-
-/**
- * 更多菜单按钮使用切换语义；菜单打开时再次点击只触发关闭动画，不重新计算位置。
- */
-function toggleContextMenu(): void {
-  openCollapsedPreviewForActiveInteraction();
-
-  const shouldCloseMenu = isContextMenuOpen.value || wasContextMenuJustClosedByButton();
-  if (shouldCloseMenu) {
-    lastContextMenuClosedAt = performance.now();
-    lastContextMenuClosedBoxId = props.boxId;
-    isContextMenuOpen.value = false;
-    void closeBoxContextMenuWindow(props.boxId)
-      .then(() => {
-        refreshCollapsedPreviewCloseSchedule();
-      })
-      .catch((error) => {
-        desktopStore.lastError = error instanceof Error ? error.message : String(error);
-      });
-    return;
-  }
-
-  void cursorPosition()
-    .then((position) => toggleBoxContextMenuWindow(props.boxId, position, false))
-    .then((result) => {
-      if (result === "closed") {
-        refreshCollapsedPreviewCloseSchedule();
-      }
-    })
-    .catch((error) => {
-      desktopStore.lastError = error instanceof Error ? error.message : String(error);
-    });
-}
-
-/**
- * 单例菜单失焦会先于更多按钮 click 到达；短时间内的关闭状态视为当前按钮二次点击关闭，避免误重新打开。
- */
-function wasContextMenuJustClosedByButton(): boolean {
-  return (
-    lastContextMenuClosedBoxId === props.boxId &&
-    performance.now() - lastContextMenuClosedAt <= BOX_WINDOW_INTERACTION_TIMING.menuToggleCloseGuardMs
-  );
 }
 
 /**
@@ -1683,83 +1582,6 @@ async function commitBoxItemDragDrop(
 }
 
 /**
- * 根据同一行图标中心点计算稳定插入槽位，并把竖线放在相邻图标间隙的视觉中心。
- */
-function resolveBoxGridDragInsertTarget(
-  clientX: number,
-  clientY: number,
-  container: HTMLElement,
-  excludedPath: string,
-): BoxGridDragInsertTarget | null {
-  const containerRect = container.getBoundingClientRect();
-  const candidates = Array.from(
-    container.querySelectorAll<HTMLElement>("[data-box-item-path]"),
-  )
-    .map((iconElement) => ({
-      path: iconElement.dataset.boxItemPath ?? "",
-      rect: iconElement.getBoundingClientRect(),
-    }))
-    .filter(({ path }) => path && path !== excludedPath);
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const rowItems = candidates
-    .filter(({ rect }) => {
-      const verticalDistance =
-        clientY < rect.top ? rect.top - clientY : Math.max(clientY - rect.bottom, 0);
-
-      return verticalDistance <= DESKTOP_ICON_VIEW.dragInsertRowTolerance;
-    })
-    .sort((left, right) => left.rect.left - right.rect.left);
-
-  if (rowItems.length === 0) {
-    return null;
-  }
-
-  const insertIndex = rowItems.reduce(
-    (count, item) => (clientX > item.rect.left + item.rect.width / 2 ? count + 1 : count),
-    0,
-  );
-  const targetIndex = Math.min(insertIndex, rowItems.length - 1);
-  const targetItem = rowItems[targetIndex];
-  const placement: DesktopBoxItemDropPlacement =
-    insertIndex >= rowItems.length ? "after" : "before";
-  const lineX = resolveDragInsertLineX(rowItems, insertIndex);
-  const rowTop = Math.min(...rowItems.map((item) => item.rect.top));
-  const rowBottom = Math.max(...rowItems.map((item) => item.rect.bottom));
-
-  return {
-    indicatorStyle: {
-      height: `${Math.max(rowBottom - rowTop - 8, 24)}px`,
-      left: `${lineX - containerRect.left + container.scrollLeft}px`,
-      top: `${rowTop - containerRect.top + container.scrollTop + 4}px`,
-    },
-    path: targetItem.path,
-    placement,
-  };
-}
-
-/**
- * 插入线坐标优先取相邻图标的真实间隙中心，首尾位置则贴近目标图标外侧但不挤到内容上。
- */
-function resolveDragInsertLineX(
-  rowItems: Array<{ rect: DOMRect; path: string }>,
-  insertIndex: number,
-): number {
-  if (insertIndex <= 0) {
-    return rowItems[0].rect.left - DESKTOP_ICON_VIEW.dragInsertEdgeOffset;
-  }
-
-  if (insertIndex >= rowItems.length) {
-    return rowItems[rowItems.length - 1].rect.right + DESKTOP_ICON_VIEW.dragInsertEdgeOffset;
-  }
-
-  return (rowItems[insertIndex - 1].rect.right + rowItems[insertIndex].rect.left) / 2;
-}
-
-/**
  * Windows Shell 右键菜单由后端直接接管，前端只负责传递屏幕坐标和目标路径。
  */
 function openNativeItemContextMenu(event: MouseEvent, item: DesktopItem): void {
@@ -1767,16 +1589,6 @@ function openNativeItemContextMenu(event: MouseEvent, item: DesktopItem): void {
   void showNativeItemContextMenu(item.path, event.screenX, event.screenY).catch((error) => {
     desktopStore.lastError = error instanceof Error ? error.message : String(error);
   });
-}
-
-/**
- * 独立菜单窗口可能正处于进入或退出动画中；Box 发生拖动、缩放或标题编辑前统一请求它关闭。
- */
-function closeContextMenu(): void {
-  void closeBoxContextMenuWindow(props.boxId).catch((error) => {
-    desktopStore.lastError = error instanceof Error ? error.message : String(error);
-  });
-  refreshCollapsedPreviewCloseSchedule();
 }
 
 /**
@@ -2263,7 +2075,7 @@ function resolveManualDragPosition(
       >
         <input
           v-if="isEditingTitle"
-          ref="titleInputRef"
+          :ref="setTitleInputRef"
           v-model="titleDraft"
           aria-label="编辑 Box 名称"
           class="h-7 w-[68%] max-w-[220px] rounded-[6px] bg-white/60 px-2 text-center text-[13px] font-semibold text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:bg-white/85 dark:bg-white/10 dark:text-white dark:focus:bg-white/15"
