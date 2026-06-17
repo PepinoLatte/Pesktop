@@ -276,6 +276,7 @@ function sanitizeSettingValue<Key extends keyof AppSettings>(
   }
 
   if (
+    key === APP_SETTING_KEYS.boxResizeGridEnabled ||
     key === APP_SETTING_KEYS.snapToEdges ||
     key === APP_SETTING_KEYS.nativeDesktopIconsHidden ||
     key === APP_SETTING_KEYS.showItemLabels ||

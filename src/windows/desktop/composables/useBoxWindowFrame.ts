@@ -11,8 +11,11 @@ import { isPrimaryMouseButtonPressed } from "@/entities/desktopItem/api";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 import {
   BOX_ITEM_DRAG_INTERACTION,
+  BOX_WINDOW_SIZE,
   BOX_WINDOW_INTERACTION_TIMING,
 } from "@/entities/desktopBox/layout";
+import type { AppSettings } from "@/entities/appSettings/types";
+import { resolveBoxResizeGridSnappedBounds } from "../utils/boxResizeGrid";
 
 /**
  * 物理坐标用于和 Tauri 窗口移动事件保持同一坐标体系，高 DPI 下再单独换算逻辑坐标。
@@ -68,6 +71,18 @@ interface ManualDragState {
   workArea?: PhysicalWorkArea;
 }
 
+/**
+ * 手动 resize 用逻辑坐标保存起始窗口边界，鼠标轮询使用物理坐标再按 DPI 换算。
+ */
+interface ManualResizeState {
+  cursorStartX: number;
+  cursorStartY: number;
+  direction: ResizeDirection;
+  lastFrame: LogicalWindowFrame;
+  scaleFactor: number;
+  startFrame: LogicalWindowFrame;
+}
+
 export type ResizeDirection =
   | "East"
   | "North"
@@ -106,7 +121,6 @@ interface DesktopWindowHandle {
   setPosition: (position: LogicalPosition | PhysicalPosition) => Promise<void>;
   setResizable: (resizable: boolean) => Promise<void>;
   setSize: (size: LogicalSize) => Promise<void>;
-  startResizeDragging: (direction: ResizeDirection) => Promise<void>;
 }
 
 /**
@@ -124,6 +138,7 @@ export function useBoxWindowFrame(options: {
   closeContextMenu: () => void;
   currentWindow: DesktopWindowHandle;
   getBoxes: () => DesktopBox[];
+  getResizeGridSettings: () => AppSettings;
   getSnapThreshold: () => number;
   getSnapToEdges: () => boolean;
   isBoxCollapsedToTitle: () => boolean;
@@ -138,13 +153,20 @@ export function useBoxWindowFrame(options: {
   const isResizeHandleHovered = ref(false);
   const isResizingBox = ref(false);
   let isApplyingWindowPosition = false;
+  let isApplyingProgrammaticResize = false;
   let windowPositionApplyVersion = 0;
   let windowResizableApplyVersion = 0;
+  let programmaticResizeApplyVersion = 0;
   let manualDragState: ManualDragState | null = null;
   let manualDragCleanup: (() => void) | null = null;
+  let manualResizeState: ManualResizeState | null = null;
+  let manualResizeFrameTimer: ReturnType<typeof window.setInterval> | null = null;
+  let manualResizeApplyPending = false;
+  let pendingManualResizeFrame: LogicalWindowFrame | null = null;
   let resizeReleaseCleanup: (() => void) | null = null;
   let resizeInteractionReleaseProbeTimer: ReturnType<typeof window.setInterval> | null = null;
   let resizePersistTimer: ReturnType<typeof window.setTimeout> | null = null;
+  let activeResizeDirection: ResizeDirection | null = null;
   let resizeStartedAt = 0;
   let resizeReleasedStableTicks = 0;
 
@@ -156,12 +178,24 @@ export function useBoxWindowFrame(options: {
       return;
     }
 
-    await options.currentWindow.setSize(
-      new LogicalSize(options.box.value.width, options.box.value.height),
-    );
-    await options.currentWindow.setPosition(
-      new LogicalPosition(options.box.value.x, options.box.value.y),
-    );
+    const resizeApplyVersion = programmaticResizeApplyVersion + 1;
+
+    programmaticResizeApplyVersion = resizeApplyVersion;
+    isApplyingProgrammaticResize = true;
+    try {
+      await options.currentWindow.setSize(
+        new LogicalSize(options.box.value.width, options.box.value.height),
+      );
+      await options.currentWindow.setPosition(
+        new LogicalPosition(options.box.value.x, options.box.value.y),
+      );
+    } finally {
+      window.setTimeout(() => {
+        if (programmaticResizeApplyVersion === resizeApplyVersion) {
+          isApplyingProgrammaticResize = false;
+        }
+      }, BOX_WINDOW_INTERACTION_TIMING.positionApplyLockMs);
+    }
     await ensureWindowInsideMonitor();
   }
 
@@ -199,14 +233,14 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 锁定布局和收缩态不仅隐藏自定义热区，也要关闭原生 resizable，避免窗口边缘仍可被系统缩放。
+   * resize 由自定义热区接管，原生边框缩放保持关闭，避免绕过网格化尺寸计算。
    */
-  function syncNativeWindowResizable(canResize: boolean): void {
+  function syncNativeWindowResizable(): void {
     const applyVersion = windowResizableApplyVersion + 1;
 
     windowResizableApplyVersion = applyVersion;
     void options.currentWindow
-      .setResizable(canResize)
+      .setResizable(false)
       .catch((error) => {
         if (windowResizableApplyVersion === applyVersion) {
           options.setLastError(error instanceof Error ? error.message : String(error));
@@ -255,14 +289,232 @@ export function useBoxWindowFrame(options: {
       return;
     }
 
+    void startManualResizing(direction).catch((error) => {
+      clearResizePersistState();
+      options.setLastError(error instanceof Error ? error.message : String(error));
+    });
+  }
+
+  /**
+   * 手动 resize 由全局鼠标坐标驱动，便于在拖动过程中实时按网格步进改变窗口尺寸。
+   */
+  async function startManualResizing(direction: ResizeDirection): Promise<void> {
+    if (!options.box.value || manualResizeState) {
+      return;
+    }
+
+    const [windowPosition, windowSize, cursor, scaleFactor] = await Promise.all([
+      options.currentWindow.outerPosition(),
+      options.currentWindow.outerSize(),
+      cursorPosition(),
+      options.currentWindow.scaleFactor(),
+    ]);
+    const logicalPosition = new PhysicalPosition(windowPosition.x, windowPosition.y).toLogical(
+      scaleFactor,
+    );
+    const startFrame = {
+      height: windowSize.height / scaleFactor,
+      width: windowSize.width / scaleFactor,
+      x: logicalPosition.x,
+      y: logicalPosition.y,
+    };
+
     isResizingBox.value = true;
+    activeResizeDirection = direction;
     resizeStartedAt = performance.now();
     resizeReleasedStableTicks = 0;
+    manualResizeState = {
+      cursorStartX: cursor.x,
+      cursorStartY: cursor.y,
+      direction,
+      lastFrame: startFrame,
+      scaleFactor,
+      startFrame,
+    };
     options.openCollapsedPreviewForActiveInteraction();
     stopManualDragging(false);
     options.closeContextMenu();
     bindResizeReleaseEvents();
-    void options.currentWindow.startResizeDragging(direction);
+    startManualResizeFrameLoop();
+  }
+
+  /**
+   * resize 期间轮询系统鼠标位置，即使窗口边界移动导致指针离开 WebView 也能继续计算尺寸。
+   */
+  function startManualResizeFrameLoop(): void {
+    clearManualResizeFrameLoop();
+    manualResizeFrameTimer = window.setInterval(() => {
+      void updateManualResizeFrame();
+    }, BOX_ITEM_DRAG_INTERACTION.pollIntervalMs);
+  }
+
+  /**
+   * 每一帧都基于起始边界和鼠标位移重新计算，避免连续取整导致尺寸误差累积。
+   */
+  async function updateManualResizeFrame(): Promise<void> {
+    const resizeState = manualResizeState;
+    if (!resizeState) {
+      return;
+    }
+
+    const cursor = await cursorPosition();
+    const nextFrame = resolveManualResizeFrame(cursor, resizeState);
+    if (areWindowFramesEqual(nextFrame, resizeState.lastFrame)) {
+      return;
+    }
+
+    resizeState.lastFrame = nextFrame;
+    requestManualResizeFrameApply(nextFrame);
+  }
+
+  /**
+   * 原生窗口写入可能慢于鼠标轮询，始终只保留最新一帧，避免排队应用过期尺寸。
+   */
+  function requestManualResizeFrameApply(frame: LogicalWindowFrame): void {
+    pendingManualResizeFrame = frame;
+    if (manualResizeApplyPending) {
+      return;
+    }
+
+    manualResizeApplyPending = true;
+    void flushManualResizeFrameApply();
+  }
+
+  /**
+   * 顺序应用最新窗口边界，保证 Tauri setSize/setPosition 不被并发写入打乱。
+   */
+  async function flushManualResizeFrameApply(): Promise<void> {
+    try {
+      while (pendingManualResizeFrame) {
+        const frame = pendingManualResizeFrame;
+
+        pendingManualResizeFrame = null;
+        await applyResizeSnappedWindowBounds(frame);
+      }
+    } catch (error) {
+      options.setLastError(error instanceof Error ? error.message : String(error));
+    } finally {
+      manualResizeApplyPending = false;
+      if (pendingManualResizeFrame) {
+        requestManualResizeFrameApply(pendingManualResizeFrame);
+      }
+    }
+  }
+
+  /**
+   * 根据拖拽方向更新对应边；开启网格时再换算成完整图标行列。
+   */
+  function resolveManualResizeFrame(
+    cursor: PhysicalWindowPoint,
+    resizeState: ManualResizeState,
+  ): LogicalWindowFrame {
+    const deltaX = (cursor.x - resizeState.cursorStartX) / resizeState.scaleFactor;
+    const deltaY = (cursor.y - resizeState.cursorStartY) / resizeState.scaleFactor;
+    const rawFrame = resolveRawResizeFrame(resizeState.startFrame, resizeState.direction, {
+      x: deltaX,
+      y: deltaY,
+    });
+
+    return resolveResizeFrameForSettings(rawFrame, resizeState.direction);
+  }
+
+  /**
+   * 未开启网格调整时仍保持最小尺寸约束，避免手动写入小于 Tauri 最小窗口的值。
+   */
+  function resolveResizeFrameForSettings(
+    frame: LogicalWindowFrame,
+    direction: ResizeDirection | null,
+  ): LogicalWindowFrame {
+    if (options.getResizeGridSettings().boxResizeGridEnabled) {
+      return resolveBoxResizeGridSnappedBounds(
+        frame,
+        options.getResizeGridSettings(),
+        direction,
+      );
+    }
+
+    return resolveMinimumResizeFrame(frame, direction);
+  }
+
+  /**
+   * 连续缩放模式只做最小尺寸夹取，左/上边拖动时保持右/下边不漂移。
+   */
+  function resolveMinimumResizeFrame(
+    frame: LogicalWindowFrame,
+    direction: ResizeDirection | null,
+  ): LogicalWindowFrame {
+    const width = Math.max(frame.width, BOX_WINDOW_SIZE.min.width);
+    const height = Math.max(frame.height, BOX_WINDOW_SIZE.min.height);
+
+    return {
+      height,
+      width,
+      x: shouldResizeAnchorRightEdge(direction) ? frame.x + frame.width - width : frame.x,
+      y: shouldResizeAnchorBottomEdge(direction) ? frame.y + frame.height - height : frame.y,
+    };
+  }
+
+  /**
+   * 从原始起点按拖拽方向计算连续尺寸，后续再由网格或最小尺寸规则收口。
+   */
+  function resolveRawResizeFrame(
+    startFrame: LogicalWindowFrame,
+    direction: ResizeDirection,
+    delta: { x: number; y: number },
+  ): LogicalWindowFrame {
+    const resizesWest = shouldResizeAnchorRightEdge(direction);
+    const resizesNorth = shouldResizeAnchorBottomEdge(direction);
+    const resizesEast =
+      direction === "East" || direction === "NorthEast" || direction === "SouthEast";
+    const resizesSouth =
+      direction === "South" || direction === "SouthEast" || direction === "SouthWest";
+    const width = startFrame.width + (resizesEast ? delta.x : 0) - (resizesWest ? delta.x : 0);
+    const height = startFrame.height + (resizesSouth ? delta.y : 0) - (resizesNorth ? delta.y : 0);
+
+    return {
+      height,
+      width,
+      x: resizesWest ? startFrame.x + delta.x : startFrame.x,
+      y: resizesNorth ? startFrame.y + delta.y : startFrame.y,
+    };
+  }
+
+  /**
+   * 窗口边界只按整数像素比较，避免浮点微差导致重复 setSize。
+   */
+  function areWindowFramesEqual(left: LogicalWindowFrame, right: LogicalWindowFrame): boolean {
+    return (
+      Math.round(left.x) === Math.round(right.x) &&
+      Math.round(left.y) === Math.round(right.y) &&
+      Math.round(left.width) === Math.round(right.width) &&
+      Math.round(left.height) === Math.round(right.height)
+    );
+  }
+
+  /**
+   * 从左侧缩放时右边缘是用户眼中的固定锚点，网格和连续模式都遵循这一点。
+   */
+  function shouldResizeAnchorRightEdge(direction: ResizeDirection | null): boolean {
+    return direction === "West" || direction === "NorthWest" || direction === "SouthWest";
+  }
+
+  /**
+   * 从上方缩放时底边缘是用户眼中的固定锚点，避免尺寸夹取后窗口向下漂移。
+   */
+  function shouldResizeAnchorBottomEdge(direction: ResizeDirection | null): boolean {
+    return direction === "North" || direction === "NorthEast" || direction === "NorthWest";
+  }
+
+  /**
+   * 清理手动 resize 的鼠标轮询，窗口卸载或松手后不再继续写入尺寸。
+   */
+  function clearManualResizeFrameLoop(): void {
+    if (!manualResizeFrameTimer) {
+      return;
+    }
+
+    window.clearInterval(manualResizeFrameTimer);
+    manualResizeFrameTimer = null;
   }
 
   /**
@@ -320,19 +572,31 @@ export function useBoxWindowFrame(options: {
   /**
    * 读取当前真实窗口边界后落库，避免 resize payload 只包含尺寸而漏掉左上方向缩放的位置变化。
    */
-  async function persistCurrentWindowBounds(): Promise<void> {
+  async function persistCurrentWindowBounds(
+    resizeDirection: ResizeDirection | null = activeResizeDirection,
+  ): Promise<void> {
     const [position, size, scaleFactor] = await Promise.all([
       options.currentWindow.outerPosition(),
       options.currentWindow.outerSize(),
       options.currentWindow.scaleFactor(),
     ]);
     const logicalPosition = new PhysicalPosition(position.x, position.y).toLogical(scaleFactor);
+    const snappedBounds = resolveResizeFrameForSettings(
+      {
+        height: size.height / scaleFactor,
+        width: size.width / scaleFactor,
+        x: logicalPosition.x,
+        y: logicalPosition.y,
+      },
+      resizeDirection,
+    );
 
+    await applyResizeSnappedWindowBounds(snappedBounds);
     await persistWindowBounds(
-      logicalPosition.x,
-      logicalPosition.y,
-      size.width / scaleFactor,
-      size.height / scaleFactor,
+      snappedBounds.x,
+      snappedBounds.y,
+      snappedBounds.width,
+      snappedBounds.height,
     );
   }
 
@@ -340,7 +604,7 @@ export function useBoxWindowFrame(options: {
    * 缩放事件只安排最终保存，不在拖动过程中写 SQLite。
    */
   function scheduleResizePersist(): void {
-    if (options.isCollapseWindowSizeApplying()) {
+    if (options.isCollapseWindowSizeApplying() || isApplyingProgrammaticResize) {
       return;
     }
 
@@ -356,7 +620,11 @@ export function useBoxWindowFrame(options: {
    */
   function persistResizeBounds(): void {
     clearResizePersistTimer();
-    void persistCurrentWindowBounds();
+    if (isResizingBox.value) {
+      return;
+    }
+
+    void persistCurrentWindowBounds(activeResizeDirection);
   }
 
   /**
@@ -364,12 +632,26 @@ export function useBoxWindowFrame(options: {
    */
   function finishResizeInteraction(): void {
     const wasResizing = isResizingBox.value;
+    const finalManualResizeFrame = manualResizeState?.lastFrame ?? null;
 
     isResizingBox.value = false;
     resizeReleasedStableTicks = 0;
     clearResizeReleaseEvents();
     clearResizeInteractionReleaseProbe();
-    persistResizeBounds();
+    clearManualResizeFrameLoop();
+    manualResizeState = null;
+    if (finalManualResizeFrame) {
+      requestManualResizeFrameApply(finalManualResizeFrame);
+      void persistWindowBounds(
+        finalManualResizeFrame.x,
+        finalManualResizeFrame.y,
+        finalManualResizeFrame.width,
+        finalManualResizeFrame.height,
+      );
+    } else {
+      persistResizeBounds();
+    }
+    activeResizeDirection = null;
     if (wasResizing) {
       options.refreshCollapsedPreviewCloseSchedule();
     }
@@ -464,7 +746,39 @@ export function useBoxWindowFrame(options: {
     clearResizeReleaseEvents();
     clearResizePersistTimer();
     clearResizeInteractionReleaseProbe();
+    clearManualResizeFrameLoop();
     isResizingBox.value = false;
+    activeResizeDirection = null;
+    manualResizeState = null;
+    pendingManualResizeFrame = null;
+  }
+
+  /**
+   * resize 吸附会主动写回窗口尺寸和左上角，短暂屏蔽由这次写回触发的移动/缩放事件。
+   */
+  async function applyResizeSnappedWindowBounds(frame: LogicalWindowFrame): Promise<void> {
+    const applyVersion = programmaticResizeApplyVersion + 1;
+    const positionApplyVersion = windowPositionApplyVersion + 1;
+
+    programmaticResizeApplyVersion = applyVersion;
+    windowPositionApplyVersion = positionApplyVersion;
+    isApplyingProgrammaticResize = true;
+    isApplyingWindowPosition = true;
+    try {
+      await Promise.all([
+        options.currentWindow.setPosition(new LogicalPosition(frame.x, frame.y)),
+        options.currentWindow.setSize(new LogicalSize(frame.width, frame.height)),
+      ]);
+    } finally {
+      window.setTimeout(() => {
+        if (programmaticResizeApplyVersion === applyVersion) {
+          isApplyingProgrammaticResize = false;
+        }
+        if (windowPositionApplyVersion === positionApplyVersion) {
+          isApplyingWindowPosition = false;
+        }
+      }, BOX_WINDOW_INTERACTION_TIMING.positionApplyLockMs);
+    }
   }
 
   /**

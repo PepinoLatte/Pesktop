@@ -489,6 +489,15 @@ export const useDesktopStore = defineStore("desktop", () => {
   }
 
   /**
+   * Box 缩放网格化只影响窗口尺寸交互，不改变现有 Box 内文件映射。
+   */
+  async function updateBoxResizeGridEnabled(enabled: boolean): Promise<void> {
+    settings.value.boxResizeGridEnabled = enabled;
+    await saveSetting(APP_SETTING_KEYS.boxResizeGridEnabled, enabled);
+    await broadcastStateChanged("settings");
+  }
+
+  /**
    * 边缘吸附开关立即持久化，避免下次启动恢复旧交互习惯。
    */
   async function updateSnapToEdges(enabled: boolean): Promise<void> {
@@ -845,6 +854,7 @@ export const useDesktopStore = defineStore("desktop", () => {
     updateBox,
     updateBoxCollapsed,
     updateBoxLocked,
+    updateBoxResizeGridEnabled,
     updateBoxTheme,
     updateBoxTitleOpacity,
     updateBoxTitlePosition,

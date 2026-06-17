@@ -73,6 +73,7 @@ const {
   closeContextMenu: () => closeActiveContextMenu(),
   currentWindow,
   getBoxes: () => desktopStore.boxes,
+  getResizeGridSettings: () => desktopStore.settings,
   getSnapThreshold: () => desktopStore.settings.snapThreshold,
   getSnapToEdges: () => desktopStore.settings.snapToEdges,
   isBoxCollapsedToTitle: () => readBoxCollapsedToTitle(),
@@ -259,8 +260,8 @@ watch(boxIdleOpacity, () => {
 
 watch(
   canResizeBox,
-  (canResize) => {
-    syncNativeWindowResizable(canResize);
+  () => {
+    syncNativeWindowResizable();
   },
   { immediate: true },
 );
@@ -274,7 +275,7 @@ onMounted(async () => {
   await applyCollapseWindowSize(false);
   await nextTick();
   animateBoxIdleOpacity(false);
-  syncNativeWindowResizable(canResizeBox.value);
+  syncNativeWindowResizable();
   void preloadBoxContextMenuWindow().catch((error) => {
     desktopStore.lastError = error instanceof Error ? error.message : String(error);
   });

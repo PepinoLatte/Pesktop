@@ -4,6 +4,7 @@ import { animate } from "motion";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 import {
   BOX_COLLAPSE_INTERACTION,
+  BOX_GRID_LAYOUT,
   BOX_IDLE_OPACITY_ANIMATION,
   BOX_TITLE_OPACITY,
   BOX_TITLE_VISIBILITY,
@@ -26,11 +27,6 @@ interface LogicalWindowFrame {
 interface BoxPointerLocalPoint {
   inside: boolean;
 }
-
-/**
- * 图标网格默认使用 Tailwind p-2.5；底部标题收缩时只动态压缩上下内边距，避免影响展开态横向留白。
- */
-const BOX_GRID_VERTICAL_PADDING_PX = 10;
 
 /**
  * Box 收缩预览组合式逻辑集中管理临时展开、收起动画和闲置透明度，不直接持久化 Box 数据。
@@ -114,7 +110,7 @@ export function useBoxCollapsePreview(options: {
       const verticalPadding =
         bodyHeight === undefined
           ? undefined
-          : Math.min(BOX_GRID_VERTICAL_PADDING_PX, bodyHeight / 2);
+          : Math.min(BOX_GRID_LAYOUT.padding, bodyHeight / 2);
 
       return {
         flex: isCollapsingBottomTitle ? "0 0 auto" : undefined,

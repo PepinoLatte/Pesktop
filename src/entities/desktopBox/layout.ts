@@ -54,6 +54,13 @@ export const BOX_TITLE_VISIBILITY = {
 } as const;
 
 /**
+ * Box 图标网格使用 Tailwind p-2.5，对应 10px；resize 吸附和收缩动画都依赖这个内容留白。
+ */
+export const BOX_GRID_LAYOUT = {
+  padding: 10,
+} as const;
+
+/**
  * 新建 Box 使用固定起点和错位步长，避免连续创建时窗口完全重叠。
  */
 export const BOX_WINDOW_PLACEMENT = {

@@ -17,6 +17,10 @@ export interface AppSettings {
    * Box 窗口独立使用的明暗主题，便于整理面板和设置页采用不同外观。
    */
   boxTheme: ThemeMode;
+  /**
+   * Box resize 时是否按完整图标行列调整尺寸，关闭后允许连续像素级缩放。
+   */
+  boxResizeGridEnabled: boolean;
   snapToEdges: boolean;
   snapThreshold: number;
   /**

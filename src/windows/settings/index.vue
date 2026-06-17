@@ -365,6 +365,7 @@ function closeSettings(): void {
             :panel-width="SETTINGS_PANEL_WIDTH.default"
             :settings="desktopStore.settings"
             @autostart-enabled-change="updateAutostartEnabled"
+            @box-resize-grid-enabled-change="desktopStore.updateBoxResizeGridEnabled"
             @double-click-open-items-change="desktopStore.updateDoubleClickOpenItems"
             @item-labels-change="desktopStore.updateShowItemLabels"
             @name-display-mode-change="desktopStore.updateNameDisplayMode"

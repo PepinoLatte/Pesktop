@@ -32,6 +32,7 @@ export const APP_SETTING_KEYS = {
   boxIconGapY: "boxIconGapY",
   boxIconSize: "boxIconSize",
   boxLabelTextSize: "boxLabelTextSize",
+  boxResizeGridEnabled: "boxResizeGridEnabled",
   boxTheme: "boxTheme",
   doubleClickOpenItems: "doubleClickOpenItems",
   nameDisplayMode: "nameDisplayMode",
@@ -49,6 +50,7 @@ export const APP_SETTING_KEYS = {
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   settingsTheme: "system",
   boxTheme: "system",
+  boxResizeGridEnabled: true,
   snapToEdges: true,
   snapThreshold: 20,
   nativeDesktopIconsHidden: false,
