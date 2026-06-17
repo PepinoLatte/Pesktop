@@ -1,5 +1,6 @@
 use crate::desktop::{scan_desktop, scan_paths, DesktopItem, DesktopSnapshot};
 use std::path::Path;
+use tauri::AppHandle;
 
 #[cfg(target_os = "windows")]
 use windows::core::{PCSTR, PCWSTR};
@@ -65,6 +66,27 @@ pub fn show_native_item_context_menu(
 #[tauri::command]
 pub fn set_native_desktop_icons_hidden(hidden: bool) -> Result<(), String> {
     crate::desktop::set_native_desktop_icons_hidden(hidden)
+}
+
+/// 读取系统开机自启状态；状态来源是官方 autostart 插件，不写入前端 SQLite 设置表。
+#[tauri::command]
+pub fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
+    crate::app_tray::resolve_autostart_enabled(&app)
+}
+
+/// 切换系统开机自启状态，并同步托盘菜单与设置页开关。
+#[tauri::command]
+pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<bool, String> {
+    crate::app_tray::set_autostart_enabled(&app, enabled)
+}
+
+/// 同步托盘菜单里的原生桌面图标隐藏勾选状态，设置值仍由前端 Store 持久化。
+#[tauri::command]
+pub fn set_tray_native_desktop_icons_hidden_checked(
+    app: AppHandle,
+    hidden: bool,
+) -> Result<bool, String> {
+    crate::app_tray::set_native_desktop_icons_hidden_checked(&app, hidden)
 }
 
 /// 读取系统级左键状态，跨 WebView 拖拽释放时不依赖当前窗口能否收到鼠标事件。

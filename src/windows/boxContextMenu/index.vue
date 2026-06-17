@@ -15,6 +15,7 @@ import {
   notifyBoxContextMenuReady,
   notifyBoxContextMenuState,
 } from "@/shared/ipc/boxContextMenu";
+import { confirmDesktopBoxDeletion } from "@/entities/desktopBox/deleteConfirmation";
 import { closeBoxWindow, openSettingsWindow } from "@/entities/desktopBox/windows";
 
 const currentWindow = getCurrentWindow();
@@ -365,6 +366,11 @@ async function deleteCurrentBox(): Promise<void> {
   }
 
   const targetBoxId = box.value.id;
+  const itemCount = desktopStore.getBoxItemPaths(targetBoxId).length;
+  if (!confirmDesktopBoxDeletion(box.value, itemCount)) {
+    return;
+  }
+
   void closeAnimated();
   await desktopStore.deleteBox(targetBoxId);
   await closeBoxWindow(targetBoxId);

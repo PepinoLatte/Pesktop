@@ -9,10 +9,22 @@ import BoxDisplayPanel from "./components/BoxDisplayPanel.vue";
 import BoxesPanel from "./components/BoxesPanel.vue";
 import SettingsHeader from "./components/SettingsHeader.vue";
 import SettingsSidebar from "./components/SettingsSidebar.vue";
+import {
+  isAutostartEnabled,
+  setAutostartEnabled,
+  setTrayNativeDesktopIconsHiddenChecked,
+} from "@/entities/appSettings/api";
+import { confirmDesktopBoxDeletion } from "@/entities/desktopBox/deleteConfirmation";
 import { useDesktopStore } from "@/entities/desktopBox/store";
-import { openBoxWindow } from "@/entities/desktopBox/windows";
+import { closeBoxWindow, openBoxWindow } from "@/entities/desktopBox/windows";
 import { SETTINGS_WINDOW_SYNC_TIMING } from "@/entities/desktopBox/layout";
+import {
+  listenAutostartChanged,
+  listenTrayCreateBox,
+  listenTrayToggleNativeDesktopIconsHidden,
+} from "@/shared/ipc/appTray";
 import type { Component } from "vue";
+import type { DesktopBox } from "@/entities/desktopBox/types";
 
 /**
  * 设置页的导航键值统一收口，避免侧栏、标题和内容区域各自维护字符串。
@@ -40,6 +52,7 @@ const currentWindow = getCurrentWindow();
 const desktopStore = useDesktopStore();
 const activeSection = ref<SettingsSection>("boxes");
 const startupError = ref("");
+const autostartEnabled = ref(false);
 const unlistenFns: UnlistenFn[] = [];
 /**
  * 设置窗获得焦点时不立刻刷新桌面快照，避免 Shell 缩略图扫描卡住标题栏拖动首帧。
@@ -72,6 +85,23 @@ const boxItemCounts = computed(() =>
 
 onMounted(async () => {
   await desktopStore.initialize();
+  await syncAutostartEnabled();
+  await syncTrayNativeDesktopIconsHidden();
+  unlistenFns.push(
+    await listenAutostartChanged(({ payload }) => {
+      autostartEnabled.value = payload;
+    }),
+  );
+  unlistenFns.push(
+    await listenTrayCreateBox(async () => {
+      await createAndOpenBox();
+    }),
+  );
+  unlistenFns.push(
+    await listenTrayToggleNativeDesktopIconsHidden(async ({ payload }) => {
+      await updateNativeDesktopIconsHidden(payload);
+    }),
+  );
   unlistenFns.push(
     await currentWindow.onFocusChanged(({ payload }) => {
       if (!payload) {
@@ -125,6 +155,75 @@ async function createAndOpenBox(): Promise<void> {
 }
 
 /**
+ * 设置页里的锁定入口与 Box 更多菜单共用同一 Store 字段，确保窗口拖动和缩放行为一致。
+ */
+async function toggleBoxLockedFromSettings(box: DesktopBox): Promise<void> {
+  await desktopStore.updateBoxLocked(box.id, !box.locked);
+}
+
+/**
+ * 设置页删除 Box 只移除分组和映射；真实文件不会被删除，删除前必须由用户二次确认。
+ */
+async function deleteBoxFromSettings(box: DesktopBox): Promise<void> {
+  const itemCount = desktopStore.getBoxItemPaths(box.id).length;
+  if (!confirmDesktopBoxDeletion(box, itemCount)) {
+    return;
+  }
+
+  await desktopStore.deleteBox(box.id);
+  await closeBoxWindow(box.id);
+}
+
+/**
+ * 开机自启以系统启动项为准，设置页每次需要展示时都重新读取，避免外部修改后状态滞后。
+ */
+async function syncAutostartEnabled(): Promise<void> {
+  try {
+    autostartEnabled.value = await isAutostartEnabled();
+  } catch (error) {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+  }
+}
+
+/**
+ * 设置页切换自启后交给 Rust 同步托盘勾选状态，前端只保存后端确认后的真实结果。
+ */
+async function updateAutostartEnabled(value: boolean): Promise<void> {
+  try {
+    autostartEnabled.value = await setAutostartEnabled(value);
+  } catch (error) {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+    await syncAutostartEnabled();
+  }
+}
+
+/**
+ * 隐藏原生桌面图标的真实写入复用 Store，托盘只跟随最终偏好展示勾选状态。
+ */
+async function updateNativeDesktopIconsHidden(value: boolean): Promise<void> {
+  try {
+    await desktopStore.updateNativeDesktopIconsHidden(value);
+  } catch (error) {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+  } finally {
+    await syncTrayNativeDesktopIconsHidden();
+  }
+}
+
+/**
+ * 设置页初始化、聚焦刷新和托盘操作后都用当前 Store 状态回写托盘，避免两个入口显示不一致。
+ */
+async function syncTrayNativeDesktopIconsHidden(): Promise<void> {
+  try {
+    await setTrayNativeDesktopIconsHiddenChecked(
+      desktopStore.settings.nativeDesktopIconsHidden,
+    );
+  } catch (error) {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+  }
+}
+
+/**
  * 自定义标题栏通过 Tauri 转交拖动，保持无边框窗口仍可移动。
  */
 function startDragging(event: MouseEvent): void {
@@ -159,6 +258,8 @@ async function syncSettingsWindowState(): Promise<void> {
   }
 
   await desktopStore.reloadPersistedState();
+  await syncAutostartEnabled();
+  await syncTrayNativeDesktopIconsHidden();
   await desktopStore.refreshSnapshot(false);
 }
 
@@ -266,12 +367,14 @@ function closeSettings(): void {
           />
           <BoxDisplayPanel
             v-else-if="activeSection === 'boxDisplay'"
+            :autostart-enabled="autostartEnabled"
             :panel-width="SETTINGS_PANEL_WIDTH.default"
             :settings="desktopStore.settings"
+            @autostart-enabled-change="updateAutostartEnabled"
             @double-click-open-items-change="desktopStore.updateDoubleClickOpenItems"
             @item-labels-change="desktopStore.updateShowItemLabels"
             @name-display-mode-change="desktopStore.updateNameDisplayMode"
-            @native-desktop-icons-hidden-change="desktopStore.updateNativeDesktopIconsHidden"
+            @native-desktop-icons-hidden-change="updateNativeDesktopIconsHidden"
             @show-shortcut-arrow-change="desktopStore.updateShowShortcutArrow"
             @snap-threshold-change="desktopStore.updateSnapThreshold"
             @snap-to-edges-change="desktopStore.updateSnapToEdges"
@@ -284,8 +387,10 @@ function closeSettings(): void {
             :total-items="totalItems"
             :unassigned-items="desktopStore.unassignedItems.length"
             @create-box="createAndOpenBox"
+            @delete-box="deleteBoxFromSettings"
             @open-box="openBoxWindow"
             @refresh="desktopStore.refreshSnapshot"
+            @toggle-box-locked="toggleBoxLockedFromSettings"
           />
           <AboutPanel
             v-else-if="activeSection === 'about'"

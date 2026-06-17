@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Boxes } from "@lucide/vue";
+import logoUrl from "@/assets/logo.png";
+import packageInfo from "../../../../package.json";
 import type { Component } from "vue";
 
 /**
@@ -28,16 +29,28 @@ const emit = defineEmits<{
   sectionChange: [section: SettingsSection];
 }>();
 
+/**
+ * 侧栏品牌区直接使用应用正式 logo，避免设置页与安装包图标分开维护视觉资产。
+ */
+const settingsLogoUrl = logoUrl;
+
+/**
+ * 版本和作者来自包元数据，发布时只需要维护 package.json 这一处来源。
+ */
+const appInfo = {
+  version: packageInfo.version,
+  author: packageInfo.author,
+} as const;
 </script>
 
 <template>
   <aside class="flex h-full w-[264px] shrink-0 flex-col border-r border-[#dfe2e8] bg-[#f2f3f6] dark:border-[#292c34] dark:bg-[#17181e]">
     <div class="flex items-center gap-3 px-5 pb-5 pt-6">
-      <span
-        class="grid size-10 shrink-0 place-items-center rounded-[10px] bg-[#1d1f26] text-white shadow-[0_10px_24px_rgba(21,24,32,0.18)] dark:bg-[#f4f4f5] dark:text-[#17181c]"
-      >
-        <Boxes :size="20" />
-      </span>
+      <img
+        :src="settingsLogoUrl"
+        alt="Dasktop"
+        class="size-10 shrink-0 rounded-[10px] object-contain shadow-[0_10px_24px_rgba(21,24,32,0.18)]"
+      />
       <div class="min-w-0">
         <div class="truncate text-[17px] font-semibold tracking-[0] text-[#17181c] dark:text-[#f4f4f5]">Dasktop</div>
         <div class="mt-0.5 text-[12px] text-[#6f7480] dark:text-[#9ca0aa]">桌面 Box 设置</div>
@@ -75,7 +88,8 @@ const emit = defineEmits<{
     </nav>
 
     <div class="border-t border-[#dfe2e8] px-5 py-4 text-[12px] text-[#7a7f8b] dark:border-[#292c34] dark:text-[#858a95]">
-      Windows 原生桌面右键保留
+      <div>版本 v{{ appInfo.version }}</div>
+      <div class="mt-1">作者 {{ appInfo.author }}</div>
     </div>
   </aside>
 </template>
