@@ -7,6 +7,8 @@ pub const APP_SETTINGS_TABLE: &str = "app_settings";
 pub mod keys {
     /// Box 背景透明度百分比。
     pub const BOX_BACKGROUND_OPACITY: &str = "boxBackgroundOpacity";
+    /// Box 收缩和展开动画持续时间。
+    pub const BOX_COLLAPSE_ANIMATION_MS: &str = "boxCollapseAnimationMs";
     /// Box 整体和图标命中区域圆角。
     pub const BOX_CORNER_RADIUS: &str = "boxCornerRadius";
     /// Box 文件名换行宽度。

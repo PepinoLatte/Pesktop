@@ -70,6 +70,12 @@ export const BOX_VISUAL_SETTING_CONTROLS: Array<{
     ...APP_SETTING_NUMBER_LIMITS.boxBackgroundOpacity,
   },
   {
+    key: "boxCollapseAnimationMs",
+    label: "收缩动画速度",
+    description: "调整 Box 自动收起和展开的动画时长。",
+    ...APP_SETTING_NUMBER_LIMITS.boxCollapseAnimationMs,
+  },
+  {
     key: "boxIconSize",
     label: "图标大小",
     description: "调整 Box 内项目图标的显示尺寸。",

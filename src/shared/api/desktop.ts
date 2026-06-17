@@ -49,3 +49,10 @@ export function applyNativeDesktopIconVisibility(
     ignoredPaths,
   });
 }
+
+/**
+ * 读取系统当前左键状态，用于跨 Box 拖拽时判断释放点，不依赖单个 WebView 的 pointerup。
+ */
+export function isPrimaryMouseButtonPressed(): Promise<boolean> {
+  return invoke<boolean>("is_primary_mouse_button_pressed");
+}

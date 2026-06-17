@@ -11,6 +11,7 @@ pub fn run() {
             commands::apply_native_desktop_icon_visibility,
             commands::get_desktop_items_by_paths,
             commands::get_desktop_snapshot,
+            commands::is_primary_mouse_button_pressed,
             commands::open_desktop_item,
             commands::show_native_item_context_menu
         ])

@@ -28,6 +28,7 @@ export const APP_SETTINGS_STORAGE = {
  */
 export const APP_SETTING_KEYS = {
   boxBackgroundOpacity: "boxBackgroundOpacity",
+  boxCollapseAnimationMs: "boxCollapseAnimationMs",
   boxCornerRadius: "boxCornerRadius",
   boxFilenameWidth: "boxFilenameWidth",
   boxIconGapX: "boxIconGapX",
@@ -61,6 +62,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   doubleClickOpenItems: true,
   nameDisplayMode: "full",
   boxBackgroundOpacity: 70,
+  boxCollapseAnimationMs: 180,
   boxIconSize: 44,
   boxLabelTextSize: 12,
   boxIconGapX: 4,
@@ -74,6 +76,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
  */
 export const APP_SETTING_NUMBER_LIMITS = {
   boxBackgroundOpacity: { min: 0, max: 100, step: 1, unit: "%" },
+  boxCollapseAnimationMs: { min: 80, max: 420, step: 10, unit: "ms" },
   boxCornerRadius: { min: 0, max: 24, step: 1, unit: "px" },
   boxFilenameWidth: { min: 56, max: 180, step: 1, unit: "px" },
   boxIconGapX: { min: 0, max: 32, step: 1, unit: "px" },

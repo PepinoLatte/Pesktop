@@ -37,8 +37,20 @@ export interface DesktopItem {
  * Box 是桌面扩展层中的可视分组，不移动真实文件。
  */
 export interface DesktopBox {
+  /**
+   * 收缩模式开启后，鼠标离开 Box 会折叠到只剩标题栏，hover 标题时临时展开。
+   */
+  collapsed: boolean;
   id: string;
+  /**
+   * 锁定后禁止移动和改变窗口大小，但 Box 内文件操作仍然可用。
+   */
+  locked: boolean;
   title: string;
+  /**
+   * Box 闲置可见度，0 表示鼠标未进入 Box 区域时整体透明；hover 后恢复完全可见。
+   */
+  titleOpacity: number;
   /**
    * 标题位置属于单个 Box 的布局偏好，不参与全局设置同步。
    */
@@ -104,6 +116,10 @@ export interface AppSettings {
    * Box 背景透明度使用百分比保存，便于设置页直接用滑块表达。
    */
   boxBackgroundOpacity: number;
+  /**
+   * Box 收缩和展开动画的持续时间，数值越小动画速度越快。
+   */
+  boxCollapseAnimationMs: number;
   /**
    * Box 内系统图标的最大显示尺寸，真实图像仍由 Windows Shell 解析。
    */

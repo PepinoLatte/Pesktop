@@ -16,6 +16,7 @@ import {
   sanitizeNumberAppSetting,
   type AppSettingNumberKey,
 } from "../config/appSettings";
+import { BOX_DEFAULT_STATE, BOX_TITLE_OPACITY } from "../config/desktopLayout";
 
 let databasePromise: Promise<Database> | null = null;
 /**
@@ -41,12 +42,13 @@ async function getDatabase(): Promise<Database> {
 export async function initializeStorage(): Promise<void> {
   const database = await getDatabase();
 
-  await resetLegacyBoxSchema(database);
-
   await database.execute(`
     CREATE TABLE IF NOT EXISTS ${APP_SETTINGS_STORAGE.tables.boxes} (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
+      collapsed INTEGER NOT NULL DEFAULT 0,
+      locked INTEGER NOT NULL DEFAULT 0,
+      title_opacity INTEGER NOT NULL DEFAULT 100,
       title_position TEXT NOT NULL DEFAULT 'top',
       x INTEGER NOT NULL,
       y INTEGER NOT NULL,
@@ -55,7 +57,6 @@ export async function initializeStorage(): Promise<void> {
       updated_at INTEGER NOT NULL
     )
   `);
-  await ensureBoxesTitlePositionColumn(database);
 
   await database.execute(`
     CREATE TABLE IF NOT EXISTS ${APP_SETTINGS_STORAGE.tables.boxItems} (
@@ -67,7 +68,6 @@ export async function initializeStorage(): Promise<void> {
       FOREIGN KEY (box_id) REFERENCES ${APP_SETTINGS_STORAGE.tables.boxes}(id) ON DELETE CASCADE
     )
   `);
-  await ensureBoxItemsOrderColumn(database);
 
   await database.execute(`
     CREATE TABLE IF NOT EXISTS ${APP_SETTINGS_STORAGE.tables.appSettings} (
@@ -79,72 +79,22 @@ export async function initializeStorage(): Promise<void> {
 }
 
 /**
- * 标题位置从全局设置迁到 Box 自身；旧表补列后使用默认上方布局。
- */
-async function ensureBoxesTitlePositionColumn(database: Database): Promise<void> {
-  const columns = await database.select<Array<Record<string, unknown>>>(
-    `PRAGMA table_info(${APP_SETTINGS_STORAGE.tables.boxes})`,
-  );
-  const hasTitlePosition = columns.some((column) => String(column.name) === "title_position");
-
-  if (hasTitlePosition) {
-    return;
-  }
-
-  await database.execute(
-    `ALTER TABLE ${APP_SETTINGS_STORAGE.tables.boxes} ADD COLUMN title_position TEXT NOT NULL DEFAULT 'top'`,
-  );
-}
-
-/**
- * 为已有关联表补齐排序字段；排序属于当前模型的一部分，不再回退到旧 item_paths 结构。
- */
-async function ensureBoxItemsOrderColumn(database: Database): Promise<void> {
-  const columns = await database.select<Array<Record<string, unknown>>>(
-    `PRAGMA table_info(${APP_SETTINGS_STORAGE.tables.boxItems})`,
-  );
-  const hasOrderIndex = columns.some((column) => String(column.name) === "order_index");
-
-  if (hasOrderIndex) {
-    return;
-  }
-
-  await database.execute(
-    `ALTER TABLE ${APP_SETTINGS_STORAGE.tables.boxItems} ADD COLUMN order_index INTEGER NOT NULL DEFAULT 0`,
-  );
-}
-
-/**
- * 发现旧的 item_paths 列时直接重建 Box 表，避免新旧映射模型混用造成删除和查询语义分裂。
- */
-async function resetLegacyBoxSchema(database: Database): Promise<void> {
-  const columns = await database.select<Array<Record<string, unknown>>>(
-    `PRAGMA table_info(${APP_SETTINGS_STORAGE.tables.boxes})`,
-  );
-  const hasLegacyItemPaths = columns.some((column) => String(column.name) === "item_paths");
-
-  if (!hasLegacyItemPaths) {
-    return;
-  }
-
-  await database.execute(`DROP TABLE IF EXISTS ${APP_SETTINGS_STORAGE.tables.boxItems}`);
-  await database.execute(`DROP TABLE IF EXISTS ${APP_SETTINGS_STORAGE.tables.boxes}`);
-}
-
-/**
  * 读取所有 Box 布局和映射；真实桌面文件仍由桌面快照提供。
  */
 export async function loadBoxes(): Promise<DesktopBox[]> {
   const database = await getDatabase();
   const rows = await database.select<Array<Record<string, unknown>>>(`
-    SELECT id, title, title_position, x, y, width, height
+    SELECT id, title, collapsed, locked, title_opacity, title_position, x, y, width, height
     FROM ${APP_SETTINGS_STORAGE.tables.boxes}
     ORDER BY updated_at ASC
   `);
 
   return rows.map((row) => ({
+    collapsed: sanitizeDesktopBoxBoolean(row.collapsed),
     id: String(row.id),
+    locked: sanitizeDesktopBoxBoolean(row.locked),
     title: String(row.title),
+    titleOpacity: sanitizeDesktopBoxTitleOpacity(row.title_opacity),
     titlePosition: sanitizeDesktopBoxTitlePosition(row.title_position),
     x: Number(row.x),
     y: Number(row.y),
@@ -179,10 +129,13 @@ export async function saveBox(box: DesktopBox): Promise<void> {
 
   await database.execute(
     `
-      INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxes} (id, title, title_position, x, y, width, height, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxes} (id, title, collapsed, locked, title_opacity, title_position, x, y, width, height, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
+        collapsed = excluded.collapsed,
+        locked = excluded.locked,
+        title_opacity = excluded.title_opacity,
         title_position = excluded.title_position,
         x = excluded.x,
         y = excluded.y,
@@ -190,7 +143,19 @@ export async function saveBox(box: DesktopBox): Promise<void> {
         height = excluded.height,
         updated_at = excluded.updated_at
     `,
-    [box.id, box.title, box.titlePosition, box.x, box.y, box.width, box.height, Date.now()],
+    [
+      box.id,
+      box.title,
+      box.collapsed ? 1 : 0,
+      box.locked ? 1 : 0,
+      sanitizeDesktopBoxTitleOpacity(box.titleOpacity),
+      box.titlePosition,
+      box.x,
+      box.y,
+      box.width,
+      box.height,
+      Date.now(),
+    ],
   );
 }
 
@@ -368,10 +333,31 @@ function isDesktopBoxTitlePosition(value: unknown): value is DesktopBoxTitlePosi
 }
 
 /**
+ * SQLite 布尔值以 0/1 保存，读取时只接受明确开启状态，避免脏值误锁定窗口。
+ */
+function sanitizeDesktopBoxBoolean(value: unknown): boolean {
+  return value === 1 || value === "1" || value === true;
+}
+
+/**
  * Box 标题位置保存在布局表中，非法值回退到默认上方，避免窗口渲染出现无序 order。
  */
 function sanitizeDesktopBoxTitlePosition(value: unknown): DesktopBoxTitlePosition {
-  return isDesktopBoxTitlePosition(value) ? value : "top";
+  return isDesktopBoxTitlePosition(value) ? value : BOX_DEFAULT_STATE.titlePosition;
+}
+
+/**
+ * 闲置可见度只允许 0-100 的百分比，防止菜单滑块和渲染样式出现不同步。
+ */
+function sanitizeDesktopBoxTitleOpacity(value: unknown): number {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return BOX_DEFAULT_STATE.titleOpacity;
+  }
+
+  return Math.round(
+    Math.min(Math.max(numericValue, BOX_TITLE_OPACITY.min), BOX_TITLE_OPACITY.max),
+  );
 }
 
 /**

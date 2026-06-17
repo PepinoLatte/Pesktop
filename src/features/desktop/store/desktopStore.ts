@@ -24,6 +24,8 @@ import {
   type AppSettingNumberKey,
 } from "../../../shared/config/appSettings";
 import {
+  BOX_DEFAULT_STATE,
+  BOX_TITLE_OPACITY,
   BOX_WINDOW_PLACEMENT,
   BOX_WINDOW_SIZE,
   THEME_TRANSITION_CONFIG,
@@ -66,7 +68,11 @@ export const useDesktopStore = defineStore("desktop", () => {
   const lastError = ref("");
   const settings = ref<AppSettings>({ ...DEFAULT_APP_SETTINGS });
   const storeInstanceId = crypto.randomUUID();
-  const isBoxWindowContext = new URLSearchParams(window.location.search).has("boxId");
+  /**
+   * Box 内容窗和 Box 菜单窗都应使用窗口主题，设置页继续使用设置页主题。
+   */
+  const routeSearchParams = new URLSearchParams(window.location.search);
+  const isBoxWindowContext = routeSearchParams.has("boxId") || routeSearchParams.has("boxMenu");
   let stateListenerRegistered = false;
   let themeTransitionTimer: ReturnType<typeof window.setTimeout> | null = null;
 
@@ -170,6 +176,33 @@ export const useDesktopStore = defineStore("desktop", () => {
   }
 
   /**
+   * Box 菜单窗口只需要 Box 几何状态和主题设置，避免打开菜单时扫描桌面目录造成明显延迟。
+   */
+  async function initializeBoxMenu(): Promise<void> {
+    if (isInitialized.value) {
+      return;
+    }
+
+    isLoading.value = true;
+    lastError.value = "";
+
+    try {
+      await initializeStorage();
+      registerStateListener();
+      const [savedBoxes, savedSettings] = await Promise.all([loadBoxes(), loadSettings()]);
+
+      boxes.value = savedBoxes.map((box) => sanitizeBoxSize(box));
+      settings.value = savedSettings;
+      applyCurrentWindowTheme();
+      isInitialized.value = true;
+    } catch (error) {
+      lastError.value = error instanceof Error ? error.message : String(error);
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  /**
    * 主动刷新桌面目录快照，用于用户手动同步新增或删除的桌面文件。
    */
   async function refreshSnapshot(shouldBroadcast = true): Promise<void> {
@@ -246,7 +279,7 @@ export const useDesktopStore = defineStore("desktop", () => {
     const nextBox = sanitizeBoxSize({
       id: crypto.randomUUID(),
       title,
-      titlePosition: "top",
+      ...BOX_DEFAULT_STATE,
       x: BOX_WINDOW_PLACEMENT.initialX + boxes.value.length * BOX_WINDOW_PLACEMENT.cascadeStep,
       y: BOX_WINDOW_PLACEMENT.initialY + boxes.value.length * BOX_WINDOW_PLACEMENT.cascadeStep,
       ...BOX_WINDOW_SIZE.default,
@@ -425,9 +458,9 @@ export const useDesktopStore = defineStore("desktop", () => {
    */
   function createDefaultBox(): DesktopBox {
     return {
+      ...BOX_DEFAULT_STATE,
       id: crypto.randomUUID(),
       title: "工作",
-      titlePosition: "top",
       x: BOX_WINDOW_PLACEMENT.initialX,
       y: BOX_WINDOW_PLACEMENT.initialY,
       ...BOX_WINDOW_SIZE.default,
@@ -568,14 +601,86 @@ export const useDesktopStore = defineStore("desktop", () => {
   }
 
   /**
-   * Box 的最小尺寸与窗口配置保持一致，避免拖动缩放后出现不可操作区域。
+   * 收缩模式是单个 Box 的行为偏好，开启后窗口会在鼠标离开时只保留标题。
+   */
+  async function updateBoxCollapsed(boxId: string, value: boolean): Promise<void> {
+    const targetBox = boxes.value.find((item) => item.id === boxId);
+    if (!targetBox || targetBox.collapsed === value) {
+      return;
+    }
+
+    await updateBox({
+      ...targetBox,
+      collapsed: value,
+    });
+  }
+
+  /**
+   * 锁定只影响当前 Box 的移动和缩放，内部图标拖拽、打开和右键菜单仍保持可用。
+   */
+  async function updateBoxLocked(boxId: string, value: boolean): Promise<void> {
+    const targetBox = boxes.value.find((item) => item.id === boxId);
+    if (!targetBox || targetBox.locked === value) {
+      return;
+    }
+
+    await updateBox({
+      ...targetBox,
+      locked: value,
+    });
+  }
+
+  /**
+   * 闲置可见度独立于 Box 背景透明度，只影响鼠标未进入 Box 区域时的整体透明度。
+   */
+  async function updateBoxTitleOpacity(boxId: string, value: number): Promise<void> {
+    const targetBox = boxes.value.find((item) => item.id === boxId);
+    const nextOpacity = sanitizeBoxTitleOpacity(value);
+    if (!targetBox || targetBox.titleOpacity === nextOpacity) {
+      return;
+    }
+
+    await updateBox({
+      ...targetBox,
+      titleOpacity: nextOpacity,
+    });
+  }
+
+  /**
+   * Box 的尺寸与本地偏好一起规整，避免非法透明度或过小窗口撑破桌面组件。
    */
   function sanitizeBoxSize(box: DesktopBox): DesktopBox {
     return {
       ...box,
+      collapsed: Boolean(box.collapsed),
       width: Math.max(box.width, BOX_WINDOW_SIZE.min.width),
       height: Math.max(box.height, BOX_WINDOW_SIZE.min.height),
+      locked: Boolean(box.locked),
+      titleOpacity: sanitizeBoxTitleOpacity(box.titleOpacity),
     };
+  }
+
+  /**
+   * 闲置可见度在 Store 层统一夹取，数据库和菜单滑块都复用相同边界。
+   */
+  function sanitizeBoxTitleOpacity(value: number): number {
+    if (!Number.isFinite(value)) {
+      return BOX_DEFAULT_STATE.titleOpacity;
+    }
+
+    return Math.round(
+      Math.min(Math.max(value, BOX_TITLE_OPACITY.min), BOX_TITLE_OPACITY.max),
+    );
+  }
+
+  /**
+   * Box 收缩动画时长从设置读取，确保所有窗口动画节奏一致。
+   */
+  function getBoxCollapseAnimationMs(): number {
+    return sanitizeNumberAppSetting(
+      APP_SETTING_KEYS.boxCollapseAnimationMs,
+      settings.value.boxCollapseAnimationMs,
+    );
   }
 
   /**
@@ -760,10 +865,12 @@ export const useDesktopStore = defineStore("desktop", () => {
     desktopItems,
     desktopPath,
     findItem,
+    getBoxCollapseAnimationMs,
     getBoxItemPaths,
     getBoxItems,
     handleItemDrop,
     initialize,
+    initializeBoxMenu,
     isInitialized,
     isLoading,
     items,
@@ -778,7 +885,10 @@ export const useDesktopStore = defineStore("desktop", () => {
     totalBoxItems,
     unassignedItems,
     updateBox,
+    updateBoxCollapsed,
+    updateBoxLocked,
     updateBoxTheme,
+    updateBoxTitleOpacity,
     updateBoxTitlePosition,
     updateDoubleClickOpenItems,
     updateNameDisplayMode,

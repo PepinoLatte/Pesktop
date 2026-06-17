@@ -46,6 +46,25 @@ button {
   cursor: default;
 }
 
+/**
+ * 拖拽排序期间其他图标不参与 hover 和 pointer 命中，避免拖影经过时出现成片高亮。
+ */
+.dasktop-icon-button--drag-interaction-disabled {
+  pointer-events: none;
+}
+
+/**
+ * 当前被拖动的原位置图标不显示 hover/active 背景，只保留轻微透明，避免和拖影同时高亮。
+ */
+.dasktop-icon-button--dragging,
+.dasktop-icon-button--dragging:hover,
+.dasktop-icon-button--dragging:active,
+.dark .dasktop-icon-button--dragging,
+.dark .dasktop-icon-button--dragging:hover,
+.dark .dasktop-icon-button--dragging:active {
+  background: transparent;
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible {
@@ -113,26 +132,16 @@ select:focus-visible {
 }
 
 /**
- * Box 背景使用固定的桌面毛玻璃材质，颜色不再开放配置，只保留透明度控制层级感。
+ * Box 背景只保留半透明底色和毛玻璃滤镜，不叠加渐变或阴影，避免桌面组件显得过重。
  */
 .dasktop-box-surface {
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.24), rgb(255 255 255 / 0.08)),
-    rgb(246 248 252 / var(--dasktop-box-background-opacity, 0.7));
+  background: rgb(246 248 252 / var(--dasktop-box-background-opacity, 0.7));
   backdrop-filter: blur(24px) saturate(1.65);
   -webkit-backdrop-filter: blur(24px) saturate(1.65);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.42),
-    0 10px 28px rgb(15 23 42 / 0.1);
 }
 
 .dark .dasktop-box-surface {
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.08), rgb(255 255 255 / 0.02)),
-    rgb(18 20 24 / var(--dasktop-box-background-opacity, 0.7));
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.12),
-    0 10px 28px rgb(0 0 0 / 0.24);
+  background: rgb(18 20 24 / var(--dasktop-box-background-opacity, 0.7));
 }
 
 /**
@@ -152,23 +161,10 @@ select:focus-visible {
 }
 
 /**
- * Box 更多菜单从触发点轻微下落出现，表达菜单来自按钮但不遮挡按钮本身。
+ * Box 更多菜单的 transform-origin 由 motion 动画复用，入口和退出时保持来自按钮的空间关系。
  */
 .dasktop-box-menu {
-  animation: dasktop-box-menu-enter 170ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   transform-origin: top right;
-}
-
-@keyframes dasktop-box-menu-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

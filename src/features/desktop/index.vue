@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { CSSProperties } from "vue";
-import { MoreHorizontal, RefreshCw, Settings, Trash2 } from "@lucide/vue";
+import { MoreHorizontal } from "@lucide/vue";
+import { animate } from "motion";
 import {
   LogicalPosition,
   LogicalSize,
@@ -15,16 +16,35 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import DesktopIcon from "./components/DesktopIcon.vue";
 import { DESKTOP_ICON_VIEW } from "./config/desktopIcon";
 import { useDesktopStore } from "./store/desktopStore";
-import SegmentedControl from "../../shared/components/SegmentedControl.vue";
 import type {
   DesktopBoxItemDropPlacement,
-  DesktopBoxTitlePosition,
   DesktopItem,
 } from "../../shared/types/desktop";
-import { showNativeItemContextMenu } from "../../shared/api/desktop";
-import { openSettingsWindow } from "../../shared/window/boxWindows";
 import {
-  BOX_CONTEXT_MENU_LAYOUT,
+  getDesktopItemsByPaths,
+  isPrimaryMouseButtonPressed,
+  showNativeItemContextMenu,
+} from "../../shared/api/desktop";
+import {
+  listenBoxItemDrag,
+  listenBoxItemDragAccepted,
+  notifyBoxItemDrag,
+  notifyBoxItemDragAccepted,
+  type BoxItemDragPayload,
+  type BoxItemDragPreviewOptions,
+} from "../../shared/events/boxItemDragEvents";
+import { openDragPreviewWindow } from "../../shared/window/dragPreviewWindow";
+import {
+  closeBoxContextMenuWindow,
+  preloadBoxContextMenuWindow,
+  toggleBoxContextMenuWindow,
+} from "../../shared/window/boxWindows";
+import { listenBoxContextMenuState } from "../../shared/events/boxContextMenuEvents";
+import {
+  BOX_COLLAPSE_INTERACTION,
+  BOX_ITEM_DRAG_INTERACTION,
+  BOX_TITLE_OPACITY,
+  BOX_TITLE_VISIBILITY,
   BOX_WINDOW_INTERACTION_TIMING,
 } from "../../shared/config/desktopLayout";
 
@@ -63,19 +83,91 @@ interface PhysicalWorkArea {
 }
 
 /**
- * Box 内空隙拖拽命中结果，父级用它在最近图标左右两侧绘制插入线。
+ * 收缩动画最终写回原生窗口时同时包含位置和尺寸，标题在下方时需要用它保持标题视觉锚点。
+ */
+interface LogicalWindowFrame {
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+}
+
+/**
+ * Box 内空隙拖拽命中结果同时保存排序目标和插入线坐标，避免竖线挂在某个图标边缘抖动。
  */
 interface BoxGridDragInsertTarget {
+  indicatorStyle: CSSProperties;
   path: string;
   placement: DesktopBoxItemDropPlacement;
 }
 
+/**
+ * 跨窗口拖拽会话保存在来源 Box 中，用于轮询全局鼠标并在未被接收时执行拖出删除映射。
+ */
+interface BoxItemGlobalDragState {
+  accepted: boolean;
+  finishing: boolean;
+  item: DesktopItem;
+  preview: BoxItemDragPreviewOptions;
+  sessionId: string;
+  sourceBoxId: string;
+}
+
+/**
+ * 外部桌面文件拖入 Box 时没有来源 Box，会话只负责拖影和插入线接力，不参与拖出删除。
+ */
+interface ExternalFileDragState {
+  item: DesktopItem;
+  preview: BoxItemDragPreviewOptions;
+  sessionId: string;
+  usesScreenPosition: boolean;
+}
+
+/**
+ * 屏幕物理坐标换算到当前 Box WebView 的结果，目标窗口据此判断是否命中自身。
+ */
+interface BoxItemDragLocalPoint {
+  inside: boolean;
+  x: number;
+  y: number;
+}
+
+/**
+ * 外部 Windows 拖拽取消时可延迟清理 hover，保证鼠标仍按下时 Box 不会收缩导致原生拖放链路抖动。
+ */
+interface ExternalFileDragCancelOptions {
+  deferHoverClearUntilRelease?: boolean;
+}
+
 let isApplyingWindowPosition = false;
+let isApplyingCollapseWindowSize = false;
 let windowPositionApplyVersion = 0;
+/**
+ * 收缩动画可能被快速 hover 切换打断，版本号用于阻止旧动画的异步收尾覆盖新状态。
+ */
+let collapseAnimationVersion = 0;
+let collapseAnimationTween: ReturnType<typeof animate> | null = null;
+let boxOpacityTween: ReturnType<typeof animate> | null = null;
+let collapsePreviewCloseTimer: ReturnType<typeof window.setTimeout> | null = null;
+let collapseSizeApplyLockTimer: ReturnType<typeof window.setTimeout> | null = null;
+let windowResizableApplyVersion = 0;
+let lastContextMenuClosedAt = 0;
+let lastContextMenuClosedBoxId = "";
 let manualDragState: ManualDragState | null = null;
 let manualDragCleanup: (() => void) | null = null;
 let resizeReleaseCleanup: (() => void) | null = null;
+let resizeInteractionReleaseProbeTimer: ReturnType<typeof window.setInterval> | null = null;
 let resizePersistTimer: ReturnType<typeof window.setTimeout> | null = null;
+let resizeStartedAt = 0;
+let resizeReleasedStableTicks = 0;
+let boxItemGlobalDragState: BoxItemGlobalDragState | null = null;
+let boxItemDragPollTimer: ReturnType<typeof window.setInterval> | null = null;
+let isBoxItemDragPollTickPending = false;
+let externalFileDragState: ExternalFileDragState | null = null;
+let externalFileDragReleaseProbeTimer: ReturnType<typeof window.setInterval> | null = null;
+let externalFileDragReleaseProbeStartedAt = 0;
+let externalFileDragReleaseSessionId = "";
+const acceptedBoxItemDragSessions = new Set<string>();
 
 /**
  * 手写拖动状态保存鼠标与窗口左上角的偏移，实时移动时复用窗口尺寸和缩放系数。
@@ -111,42 +203,68 @@ const resizeHandles: Array<{
   direction: ResizeDirection;
   className: string;
 }> = [
-  { direction: "North", className: "left-4 right-4 top-[-3px] h-2 cursor-ns-resize" },
-  { direction: "South", className: "bottom-[-3px] left-4 right-4 h-2 cursor-ns-resize" },
-  { direction: "West", className: "bottom-4 left-[-3px] top-4 w-2 cursor-ew-resize" },
-  { direction: "East", className: "bottom-4 right-[-3px] top-4 w-2 cursor-ew-resize" },
-  { direction: "NorthWest", className: "left-[-4px] top-[-4px] size-4 cursor-nwse-resize" },
-  { direction: "NorthEast", className: "right-[-4px] top-[-4px] size-4 cursor-nesw-resize" },
-  { direction: "SouthWest", className: "bottom-[-4px] left-[-4px] size-4 cursor-nesw-resize" },
-  { direction: "SouthEast", className: "bottom-[-4px] right-[-4px] size-4 cursor-nwse-resize" },
+  { direction: "North", className: "left-4 right-4 top-0 h-2 cursor-ns-resize" },
+  { direction: "South", className: "bottom-0 left-4 right-4 h-2 cursor-ns-resize" },
+  { direction: "West", className: "bottom-4 left-0 top-4 w-2 cursor-ew-resize" },
+  { direction: "East", className: "bottom-4 right-0 top-4 w-2 cursor-ew-resize" },
+  { direction: "NorthWest", className: "left-0 top-0 size-4 cursor-nwse-resize" },
+  { direction: "NorthEast", className: "right-0 top-0 size-4 cursor-nesw-resize" },
+  { direction: "SouthWest", className: "bottom-0 left-0 size-4 cursor-nesw-resize" },
+  { direction: "SouthEast", className: "bottom-0 right-0 size-4 cursor-nwse-resize" },
 ];
 
-/**
- * Box 菜单里的标题位置使用紧凑分段控件，既保留动画反馈，也避免菜单出现两行重复按钮。
- */
-const BOX_TITLE_POSITION_OPTIONS: Array<{
-  label: string;
-  value: DesktopBoxTitlePosition;
-}> = [
-  { label: "上方", value: "top" },
-  { label: "下方", value: "bottom" },
-];
-const BOX_TITLE_POSITION_OPTION_WIDTH = 74;
-const contextMenu = ref({ open: false, x: 0, y: 0 });
+const isCollapsedPreviewOpen = ref(false);
+const isBoxHovered = ref(false);
+const isContextMenuOpen = ref(false);
+const isDragHoveringBox = ref(false);
 const isEditingTitle = ref(false);
+const isManualDraggingBox = ref(false);
+const isResizeHandleHovered = ref(false);
+const isResizingBox = ref(false);
+const isTitleHovered = ref(false);
+const isCollapseAnimating = ref(false);
+const boxSurfaceVisualHeight = ref<number | null>(null);
 const draggingBoxItemPath = ref<string | null>(null);
-const dragInsertTargetPath = ref<string | null>(null);
-const dragInsertPlacement = ref<DesktopBoxItemDropPlacement | null>(null);
+const draggingBoxItemSessionId = ref<string | null>(null);
+const dragInsertLineStyle = ref<CSSProperties | null>(null);
 const titleDraft = ref("");
 const titleInputRef = ref<HTMLInputElement | null>(null);
+const boxSurfaceRef = ref<HTMLElement | null>(null);
 const box = computed(() => desktopStore.boxes.find((item) => item.id === props.boxId));
 const boxItems = computed(() => (box.value ? desktopStore.getBoxItems(box.value.id) : []));
 const boxGridRef = ref<HTMLElement | null>(null);
+const isBoxItemDragActive = computed(() => Boolean(draggingBoxItemPath.value));
+const isBoxCollapsedToTitle = computed(() =>
+  Boolean(box.value?.collapsed && !isCollapsedPreviewOpen.value),
+);
+const collapsedWindowHeight = computed(() => BOX_TITLE_VISIBILITY.expandedHeight);
+const boxIdleOpacity = computed(() =>
+  isBoxHovered.value ||
+  isDragHoveringBox.value ||
+  isContextMenuOpen.value ||
+  isEditingTitle.value ||
+  isManualDraggingBox.value ||
+  isResizeHandleHovered.value ||
+  isResizingBox.value ||
+  isCollapsedPreviewOpen.value
+    ? 1
+    : (box.value?.titleOpacity ?? BOX_TITLE_OPACITY.max) / 100,
+);
+const canResizeBox = computed(
+  () =>
+    Boolean(box.value) &&
+    !isBoxItemDragActive.value &&
+    !isBoxCollapsedToTitle.value &&
+    !box.value?.locked,
+);
 const boxItemWidth = computed(() =>
   Math.max(
     desktopStore.settings.boxFilenameWidth,
     desktopStore.settings.boxIconSize + DESKTOP_ICON_VIEW.itemInlinePadding * 2,
   ),
+);
+const boxTitleOrderClass = computed(() =>
+  box.value?.titlePosition === "bottom" ? "order-2" : "order-0",
 );
 const boxSurfaceStyle = computed(
   () =>
@@ -154,7 +272,45 @@ const boxSurfaceStyle = computed(
       "--dasktop-box-background-opacity": `${desktopStore.settings.boxBackgroundOpacity / 100}`,
       "--dasktop-box-radius": `${desktopStore.settings.boxCornerRadius}px`,
       borderRadius: "var(--dasktop-box-radius)",
+      clipPath: "inset(0 round var(--dasktop-box-radius))",
+      height: boxSurfaceVisualHeight.value === null ? "100%" : `${boxSurfaceVisualHeight.value}px`,
+      position: "relative",
     }) as CSSProperties,
+);
+const boxTitleAreaStyle = computed(
+  () =>
+    ({
+      height: `${BOX_TITLE_VISIBILITY.expandedHeight}px`,
+    }) as CSSProperties,
+);
+const boxBodyStyle = computed(
+  () => {
+    const isBottomTitle = box.value?.titlePosition === "bottom";
+    const animatedHeight = boxSurfaceVisualHeight.value;
+    const isCollapsingBottomTitle =
+      isBottomTitle && (isCollapseAnimating.value || isBoxCollapsedToTitle.value);
+    const bodyHeight =
+      !isCollapsingBottomTitle
+        ? undefined
+        : Math.max(
+            (animatedHeight ?? collapsedWindowHeight.value) - BOX_TITLE_VISIBILITY.expandedHeight,
+            0,
+          );
+
+    return {
+      flex: isCollapsingBottomTitle ? "0 0 auto" : undefined,
+      height: bodyHeight === undefined ? undefined : `${bodyHeight}px`,
+      opacity: isBoxCollapsedToTitle.value ? "0" : "1",
+      pointerEvents: isBoxCollapsedToTitle.value ? "none" : "auto",
+      transform: isBoxCollapsedToTitle.value ? "translateY(-6px)" : "translateY(0)",
+    } as CSSProperties;
+  },
+);
+/**
+ * 收缩窗口高度动画期间隐藏内部滚动条，避免 WebView 中间高度小于内容高度时闪出滚动条。
+ */
+const boxGridOverflowClass = computed(() =>
+  isCollapseAnimating.value || isBoxCollapsedToTitle.value ? "overflow-hidden" : "overflow-auto",
 );
 const boxGridStyle = computed(
   () =>
@@ -165,9 +321,39 @@ const boxGridStyle = computed(
     }) as CSSProperties,
 );
 
+watch(isBoxCollapsedToTitle, () => {
+  void applyCollapseWindowSize(true);
+});
+
+watch(
+  () => box.value?.titlePosition,
+  () => {
+    void applyCollapseWindowSize(true);
+  },
+);
+
+watch(boxIdleOpacity, () => {
+  animateBoxIdleOpacity(true);
+});
+
+watch(
+  canResizeBox,
+  (canResize) => {
+    syncNativeWindowResizable(canResize);
+  },
+  { immediate: true },
+);
+
 onMounted(async () => {
   await desktopStore.initialize();
   await syncWindowBoundsFromStore();
+  await applyCollapseWindowSize(false);
+  await nextTick();
+  animateBoxIdleOpacity(false);
+  syncNativeWindowResizable(canResizeBox.value);
+  void preloadBoxContextMenuWindow().catch((error) => {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+  });
 
   unlistenFns.push(
     await currentWindow.onMoved(async ({ payload }) => {
@@ -176,13 +362,25 @@ onMounted(async () => {
   );
 
   unlistenFns.push(
-    await currentWindow.onFocusChanged(({ payload }) => {
-      if (!payload) {
-        handleWindowBlur();
+    await listenBoxContextMenuState(({ payload }) => {
+      handleBoxContextMenuState(payload.boxId, payload.isOpen, payload.reason);
+    }),
+  );
+
+  unlistenFns.push(
+    await listenBoxItemDrag(async ({ payload }) => {
+      await handleBoxItemDragPayload(payload);
+    }),
+  );
+
+  unlistenFns.push(
+    await listenBoxItemDragAccepted(({ payload }) => {
+      acceptedBoxItemDragSessions.add(payload.sessionId);
+      if (boxItemGlobalDragState?.sessionId === payload.sessionId) {
+        boxItemGlobalDragState.accepted = true;
       }
     }),
   );
-  window.addEventListener("blur", handleWindowBlur);
 
   unlistenFns.push(await currentWindow.onResized(() => scheduleResizePersist()));
 
@@ -194,19 +392,38 @@ onMounted(async () => {
 
   unlistenFns.push(
     await currentWindow.onDragDropEvent(async ({ payload }) => {
-      if (payload.type !== "drop" || !box.value) {
+      if (!box.value) {
         return;
       }
 
-      await desktopStore.assignDroppedPathsToBox(payload.paths, box.value.id);
+      if (payload.type === "enter") {
+        await beginExternalFileDrag(payload.paths, payload.position.x, payload.position.y);
+        return;
+      }
+
+      if (payload.type === "over") {
+        await moveExternalFileDrag(payload.position.x, payload.position.y);
+        return;
+      }
+
+      if (payload.type === "drop") {
+        await finishExternalFileDrag(payload.paths, payload.position.x, payload.position.y);
+        return;
+      }
+
+      cancelExternalFileDrag({ deferHoverClearUntilRelease: true });
     }),
   );
 });
 
 onUnmounted(() => {
+  cancelActiveBoxItemDrag();
+  cancelExternalFileDrag();
+  clearExternalFileDragReleaseProbe();
   stopManualDragging(false);
+  closeContextMenu();
+  clearCollapseWindowAnimation();
   clearResizePersistState();
-  window.removeEventListener("blur", handleWindowBlur);
   for (const unlisten of unlistenFns) {
     unlisten();
   }
@@ -226,6 +443,336 @@ async function syncWindowBoundsFromStore(): Promise<void> {
 }
 
 /**
+ * 根据收缩展示状态调整真实窗口高度，避免透明空白窗口挡住桌面点击。
+ */
+async function applyCollapseWindowSize(shouldAnimate: boolean): Promise<void> {
+  if (!box.value) {
+    return;
+  }
+
+  cancelCollapseAnimationTween();
+  collapseAnimationVersion += 1;
+  const activeCollapseAnimationVersion = collapseAnimationVersion;
+
+  const targetHeight = isBoxCollapsedToTitle.value ? collapsedWindowHeight.value : box.value.height;
+  const targetWidth = box.value.width;
+  const targetFrame = resolveCollapseWindowFrame(targetWidth, targetHeight);
+  const animationMs = shouldAnimate ? desktopStore.getBoxCollapseAnimationMs() : 0;
+
+  setCollapseSizeApplyLock(animationMs);
+
+  if (!shouldAnimate) {
+    boxSurfaceVisualHeight.value = null;
+    await applyCollapseWindowFrame(targetFrame);
+    return;
+  }
+
+  const [windowSize, scaleFactor] = await Promise.all([
+    currentWindow.outerSize(),
+    currentWindow.scaleFactor(),
+  ]);
+  const currentWindowHeight = windowSize.height / scaleFactor;
+  const startHeight = boxSurfaceVisualHeight.value ?? currentWindowHeight;
+  const heightDistance = targetHeight - startHeight;
+
+  if (Math.abs(heightDistance) < 1) {
+    boxSurfaceVisualHeight.value = null;
+    await applyCollapseWindowFrame(targetFrame);
+    return;
+  }
+
+  if (shouldReduceMotion()) {
+    boxSurfaceVisualHeight.value = null;
+    await applyCollapseWindowFrame(targetFrame);
+    return;
+  }
+
+  isCollapseAnimating.value = true;
+  boxSurfaceVisualHeight.value = startHeight;
+  if (targetHeight > currentWindowHeight) {
+    await applyCollapseWindowFrame(targetFrame);
+  }
+
+  const tweenState = {
+    height: startHeight,
+  };
+  collapseAnimationTween = animate(
+    tweenState,
+    {
+      height: targetHeight,
+    },
+    {
+      duration: animationMs / 1000,
+      ease: [0.22, 1, 0.36, 1],
+      onComplete: () => {
+        collapseAnimationTween = null;
+        finishCollapseWindowResize(activeCollapseAnimationVersion, targetFrame);
+      },
+      onUpdate: () => {
+        boxSurfaceVisualHeight.value = Math.round(tweenState.height);
+      },
+    },
+  );
+}
+
+/**
+ * motion 驱动 Box 闲置可见度，hover 进入时即使配置为 0 也能平滑恢复到完全可见。
+ */
+function animateBoxIdleOpacity(shouldAnimate: boolean): void {
+  const surfaceElement = boxSurfaceRef.value;
+  if (!surfaceElement) {
+    return;
+  }
+
+  boxOpacityTween?.stop();
+  boxOpacityTween = null;
+
+  if (!shouldAnimate || shouldReduceMotion()) {
+    surfaceElement.style.opacity = String(boxIdleOpacity.value);
+    return;
+  }
+
+  boxOpacityTween = animate(
+    surfaceElement,
+    {
+      opacity: boxIdleOpacity.value,
+    },
+    {
+      delay: resolveBoxIdleOpacityAnimationDelay(),
+      duration: 0.18,
+      ease: [0.16, 1, 0.3, 1],
+      onComplete: () => {
+        boxOpacityTween = null;
+      },
+    },
+  );
+}
+
+/**
+ * 减少动态效果时直接应用终态，遵守系统辅助功能设置。
+ */
+function shouldReduceMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/**
+ * 收缩触发闲置透明时延后淡出，让用户先感知 Box 收回动作，再看到透明度过渡。
+ */
+function resolveBoxIdleOpacityAnimationDelay(): number {
+  if (boxIdleOpacity.value >= 1 || !isBoxCollapsedToTitle.value) {
+    return 0;
+  }
+
+  return Math.min(desktopStore.getBoxCollapseAnimationMs() * 0.36, 140) / 1000;
+}
+
+/**
+ * 收缩态统一保留完整 Box 顶部的标题高度，即使标题配置在下方也向上收缩，避免视觉方向反转。
+ */
+function resolveCollapseWindowFrame(width: number, height: number): LogicalWindowFrame {
+  if (!box.value) {
+    return {
+      height,
+      width,
+      x: 0,
+      y: 0,
+    };
+  }
+
+  return {
+    height,
+    width,
+    x: box.value.x,
+    y: box.value.y,
+  };
+}
+
+/**
+ * 收缩和展开会主动调整窗口几何状态，需要加移动锁，防止 onMoved 把临时标题位置误写入数据库。
+ */
+async function applyCollapseWindowFrame(frame: LogicalWindowFrame): Promise<void> {
+  const applyVersion = windowPositionApplyVersion + 1;
+
+  windowPositionApplyVersion = applyVersion;
+  isApplyingWindowPosition = true;
+  try {
+    await Promise.all([
+      currentWindow.setPosition(new LogicalPosition(frame.x, frame.y)),
+      currentWindow.setSize(new LogicalSize(frame.width, frame.height)),
+    ]);
+  } finally {
+    window.setTimeout(() => {
+      if (windowPositionApplyVersion === applyVersion) {
+        isApplyingWindowPosition = false;
+      }
+    }, WINDOW_POSITION_APPLY_LOCK_MS);
+  }
+}
+
+/**
+ * 收缩动画完成后一次性同步真实窗口高度，避免动画过程中暴露 Windows 原生直角边界。
+ */
+function finishCollapseWindowResize(
+  activeCollapseAnimationVersion: number,
+  targetFrame: LogicalWindowFrame,
+): void {
+  boxSurfaceVisualHeight.value = targetFrame.height;
+  void applyCollapseWindowFrame(targetFrame).finally(() => {
+    if (activeCollapseAnimationVersion !== collapseAnimationVersion) {
+      return;
+    }
+
+    boxSurfaceVisualHeight.value = null;
+    isCollapseAnimating.value = false;
+  });
+}
+
+/**
+ * 收缩动画期间屏蔽 resize 落库，最终同步真实窗口高度时也不能覆盖用户保存的 Box 尺寸。
+ */
+function setCollapseSizeApplyLock(animationMs = 0): void {
+  isApplyingCollapseWindowSize = true;
+  if (collapseSizeApplyLockTimer) {
+    window.clearTimeout(collapseSizeApplyLockTimer);
+  }
+
+  const lockMs = Math.max(
+    BOX_COLLAPSE_INTERACTION.sizeApplyLockMs,
+    animationMs + RESIZE_PERSIST_SETTLE_MS + 40,
+  );
+  collapseSizeApplyLockTimer = window.setTimeout(() => {
+    isApplyingCollapseWindowSize = false;
+    collapseSizeApplyLockTimer = null;
+  }, lockMs);
+}
+
+/**
+ * 取消未完成的 motion 收缩动画，用于快速 hover 切换或窗口卸载。
+ */
+function cancelCollapseAnimationTween(): void {
+  if (!collapseAnimationTween) {
+    return;
+  }
+
+  collapseAnimationTween.stop();
+  collapseAnimationTween = null;
+  isCollapseAnimating.value = false;
+}
+
+/**
+ * 完整清理收缩动画和尺寸锁，避免窗口关闭后继续触发异步 setSize。
+ */
+function clearCollapseWindowAnimation(): void {
+  collapseAnimationVersion += 1;
+  cancelCollapseAnimationTween();
+  boxOpacityTween?.stop();
+  boxOpacityTween = null;
+  clearCollapsedPreviewCloseTimer();
+  boxSurfaceVisualHeight.value = null;
+  if (collapseSizeApplyLockTimer) {
+    window.clearTimeout(collapseSizeApplyLockTimer);
+    collapseSizeApplyLockTimer = null;
+  }
+  isApplyingCollapseWindowSize = false;
+  isCollapseAnimating.value = false;
+}
+
+/**
+ * 清理延迟收起计时器，所有进入 Box、菜单、拖动和缩放的交互都应先取消旧的收起任务。
+ */
+function clearCollapsedPreviewCloseTimer(): void {
+  if (!collapsePreviewCloseTimer) {
+    return;
+  }
+
+  window.clearTimeout(collapsePreviewCloseTimer);
+  collapsePreviewCloseTimer = null;
+}
+
+/**
+ * 交互命中 Box 时使用同一套展开入口；拖拽命中也按普通鼠标进入处理，不再维护独立拖拽展开状态。
+ */
+function openCollapsedPreviewForActiveInteraction(): void {
+  clearCollapsedPreviewCloseTimer();
+  if (box.value?.collapsed) {
+    isCollapsedPreviewOpen.value = true;
+  }
+}
+
+/**
+ * 判断是否存在需要保持 Box 展开的交互，避免菜单、缩放、拖动过程中被 mouseleave 抢先收起。
+ */
+function shouldKeepCollapsedPreviewOpen(): boolean {
+  return (
+    isBoxHovered.value ||
+    isDragHoveringBox.value ||
+    isTitleHovered.value ||
+    isContextMenuOpen.value ||
+    isEditingTitle.value ||
+    isManualDraggingBox.value ||
+    isResizeHandleHovered.value ||
+    isResizingBox.value
+  );
+}
+
+/**
+ * 拖拽坐标命中独立于真实 mouseenter/mouseleave，避免拖拽结束后把普通 hover 状态卡住。
+ */
+function setDragHoveringBox(isHovering: boolean): void {
+  isDragHoveringBox.value = isHovering;
+  if (isHovering) {
+    openCollapsedPreviewForActiveInteraction();
+    return;
+  }
+
+  refreshCollapsedPreviewCloseSchedule();
+}
+
+/**
+ * 拖拽结束后用最终屏幕坐标恢复普通 hover 状态，避免拖拽 hover 残留或误清真实鼠标停留。
+ */
+async function syncPointerHoverFromScreenPoint(screenX: number, screenY: number): Promise<void> {
+  const localPoint = await resolveBoxItemDragLocalPoint(screenX, screenY);
+
+  isBoxHovered.value = localPoint.inside;
+  if (localPoint.inside) {
+    openCollapsedPreviewForActiveInteraction();
+    return;
+  }
+
+  refreshCollapsedPreviewCloseSchedule();
+}
+
+/**
+ * 鼠标离开后延迟收起，给用户从标题移动到边缘缩放或菜单窗口留出缓冲时间。
+ */
+function scheduleCollapsedPreviewClose(): void {
+  clearCollapsedPreviewCloseTimer();
+  if (!box.value?.collapsed || shouldKeepCollapsedPreviewOpen()) {
+    return;
+  }
+
+  collapsePreviewCloseTimer = window.setTimeout(() => {
+    collapsePreviewCloseTimer = null;
+    if (!shouldKeepCollapsedPreviewOpen()) {
+      isCollapsedPreviewOpen.value = false;
+    }
+  }, BOX_WINDOW_INTERACTION_TIMING.collapsePreviewCloseDelayMs);
+}
+
+/**
+ * 状态退出时统一刷新收起计划，保证透明度淡出只会在收缩动画真正启动后再延迟发生。
+ */
+function refreshCollapsedPreviewCloseSchedule(): void {
+  if (shouldKeepCollapsedPreviewOpen()) {
+    clearCollapsedPreviewCloseTimer();
+    return;
+  }
+
+  scheduleCollapsedPreviewClose();
+}
+
+/**
  * 外部窗口移动只负责持久化，手写拖动期间的位置由拖动循环统一保存。
  */
 async function handleWindowMoved(x: number, y: number): Promise<void> {
@@ -237,37 +784,102 @@ async function handleWindowMoved(x: number, y: number): Promise<void> {
 }
 
 /**
- * 窗口失焦时关闭菜单；如果正拖着 Box 图标离开窗口，则按拖出 Box 删除映射处理。
+ * 菜单窗口是单例复用的，Box 窗口不能再通过窗口是否存在判断自己菜单是否打开。
  */
-function handleWindowBlur(): void {
-  closeContextMenu();
-  void removeDraggingBoxItemAfterWindowBlur();
+function handleBoxContextMenuState(
+  boxId: string,
+  isOpen: boolean,
+  reason?: "blur" | "request",
+): void {
+  isContextMenuOpen.value = isOpen && boxId === props.boxId;
+  if (isContextMenuOpen.value) {
+    openCollapsedPreviewForActiveInteraction();
+  }
+  if (!isOpen && boxId === props.boxId && reason === "blur") {
+    lastContextMenuClosedAt = performance.now();
+    lastContextMenuClosedBoxId = boxId;
+  }
+
+  if (!isContextMenuOpen.value) {
+    refreshCollapsedPreviewCloseSchedule();
+  }
 }
 
 /**
- * pointer 拖出 WebView 后可能收不到 pointerup，用窗口失焦作为删除映射的兜底信号。
+ * 锁定布局和收缩态不仅隐藏自定义热区，也要关闭原生 resizable，避免窗口边缘仍可被系统缩放。
  */
-async function removeDraggingBoxItemAfterWindowBlur(): Promise<void> {
-  const itemPath = draggingBoxItemPath.value;
-  if (!box.value || !itemPath) {
-    return;
-  }
+function syncNativeWindowResizable(canResize: boolean): void {
+  const applyVersion = windowResizableApplyVersion + 1;
 
-  draggingBoxItemPath.value = null;
-  clearBoxItemDragIndicator();
-  await desktopStore.removeItemFromBox(box.value.id, itemPath);
+  windowResizableApplyVersion = applyVersion;
+  void currentWindow
+    .setResizable(canResize)
+    .catch((error) => {
+      if (windowResizableApplyVersion === applyVersion) {
+        desktopStore.lastError = error instanceof Error ? error.message : String(error);
+      }
+    });
 }
 
 /**
  * 拖动只从标题栏触发，避免图标区域的拖拽和窗口移动互相抢事件。
  */
 function startDragging(event: MouseEvent): void {
-  if (event.button !== 0 || event.detail > 1 || isEditingTitle.value) {
+  if (event.button !== 0 || event.detail > 1 || isEditingTitle.value || box.value?.locked) {
     return;
   }
 
   closeContextMenu();
   void startManualDragging(event);
+}
+
+/**
+ * Box 区域 hover 进入时取消延迟收起；收缩态窗口只剩标题高度，因此进入可见区域等同于进入标题入口。
+ */
+function handleBoxMouseEnter(): void {
+  isBoxHovered.value = true;
+  openCollapsedPreviewForActiveInteraction();
+}
+
+/**
+ * 标题 hover 是收缩 Box 的展开入口，内容是否展开仍由标题区域单独控制。
+ */
+function handleBoxTitleMouseEnter(): void {
+  isTitleHovered.value = true;
+  openCollapsedPreviewForActiveInteraction();
+}
+
+/**
+ * 离开标题后只取消 roll-up 展开入口，内容收回仍等鼠标离开整个 Box。
+ */
+function handleBoxTitleMouseLeave(): void {
+  isTitleHovered.value = false;
+  refreshCollapsedPreviewCloseSchedule();
+}
+
+/**
+ * 鼠标离开整个 Box 后延迟收回临时展开内容，避免移动到菜单或缩放边缘时立刻收缩。
+ */
+function handleBoxMouseLeave(): void {
+  isBoxHovered.value = false;
+  isTitleHovered.value = false;
+  refreshCollapsedPreviewCloseSchedule();
+}
+
+/**
+ * 鼠标命中缩放热区时保持展开，防止刚出现 resize 光标就被自动收起打断。
+ */
+function handleResizeHandleMouseEnter(): void {
+  isResizeHandleHovered.value = true;
+  openCollapsedPreviewForActiveInteraction();
+}
+
+/**
+ * 离开缩放热区后回到统一延迟收起调度，避免 resize 边缘和标题区之间闪收。
+ */
+function handleResizeHandleMouseLeave(): void {
+  isResizeHandleHovered.value = false;
+  refreshCollapsedPreviewCloseSchedule();
 }
 
 /**
@@ -322,10 +934,14 @@ function cancelTitleEditing(): void {
  * 缩放从窗口边缘热区触发，保持 Box 没有最小化、最大化、关闭按钮的桌面组件形态。
  */
 function startResizing(direction: ResizeDirection, event: MouseEvent): void {
-  if (event.button !== 0) {
+  if (event.button !== 0 || box.value?.locked || isBoxCollapsedToTitle.value) {
     return;
   }
 
+  isResizingBox.value = true;
+  resizeStartedAt = performance.now();
+  resizeReleasedStableTicks = 0;
+  openCollapsedPreviewForActiveInteraction();
   stopManualDragging(false);
   closeContextMenu();
   bindResizeReleaseEvents();
@@ -333,66 +949,63 @@ function startResizing(direction: ResizeDirection, event: MouseEvent): void {
 }
 
 /**
- * 更多菜单相对按钮向左下方错开，并限制在当前窗口内，避免贴着点击点或被窗口边缘裁切。
+ * 更多菜单按钮使用切换语义；菜单打开时再次点击只触发关闭动画，不重新计算位置。
  */
-function openContextMenu(event: MouseEvent): void {
-  if (contextMenu.value.open) {
+function toggleContextMenu(): void {
+  openCollapsedPreviewForActiveInteraction();
+
+  const shouldCloseMenu = isContextMenuOpen.value || wasContextMenuJustClosedByButton();
+  if (shouldCloseMenu) {
+    lastContextMenuClosedAt = performance.now();
+    lastContextMenuClosedBoxId = props.boxId;
+    isContextMenuOpen.value = false;
+    void closeBoxContextMenuWindow(props.boxId)
+      .then(() => {
+        refreshCollapsedPreviewCloseSchedule();
+      })
+      .catch((error) => {
+        desktopStore.lastError = error instanceof Error ? error.message : String(error);
+      });
     return;
   }
 
-  const { height, triggerGap, viewportPadding, width } = BOX_CONTEXT_MENU_LAYOUT;
-  const preferredX = event.clientX - width + triggerGap * 2;
-  const preferredY =
-    event.clientY + triggerGap + height > window.innerHeight - viewportPadding
-      ? event.clientY - height - triggerGap
-      : event.clientY + triggerGap;
-
-  contextMenu.value = {
-    open: true,
-    x: Math.min(Math.max(preferredX, viewportPadding), window.innerWidth - width - viewportPadding),
-    y: Math.min(
-      Math.max(preferredY, viewportPadding),
-      window.innerHeight - height - viewportPadding,
-    ),
-  };
+  void cursorPosition()
+    .then((position) => toggleBoxContextMenuWindow(props.boxId, position, false))
+    .then((result) => {
+      if (result === "closed") {
+        refreshCollapsedPreviewCloseSchedule();
+      }
+    })
+    .catch((error) => {
+      desktopStore.lastError = error instanceof Error ? error.message : String(error);
+    });
 }
 
 /**
- * Box 图标 pointer 拖拽开始时关闭菜单，并记录当前正在排序的项目路径。
+ * 单例菜单失焦会先于更多按钮 click 到达；短时间内的关闭状态视为当前按钮二次点击关闭，避免误重新打开。
  */
-function startBoxItemPointerDrag(itemPath: string): void {
+function wasContextMenuJustClosedByButton(): boolean {
+  return (
+    lastContextMenuClosedBoxId === props.boxId &&
+    performance.now() - lastContextMenuClosedAt <= BOX_WINDOW_INTERACTION_TIMING.menuToggleCloseGuardMs
+  );
+}
+
+/**
+ * Box 图标 pointer 拖拽开始时创建跨窗口会话，并启动全局鼠标轮询和拖影窗口。
+ */
+function startBoxItemPointerDrag(event: PointerEvent, itemPath: string): void {
   draggingBoxItemPath.value = itemPath;
   clearBoxItemDragIndicator();
   closeContextMenu();
-}
-
-/**
- * pointer 拖过 Box 内容区时展示插入竖线，让用户在释放前知道排序位置。
- */
-function moveBoxItemPointerDrag(event: PointerEvent, itemPath: string): void {
-  if (draggingBoxItemPath.value !== itemPath || !boxGridRef.value) {
-    clearBoxItemDragIndicator();
-    return;
-  }
-
-  const insertTarget = resolveBoxGridDragInsertTarget(
-    event.clientX,
-    event.clientY,
-    boxGridRef.value,
-  );
-  if (!insertTarget) {
-    clearBoxItemDragIndicator();
-    return;
-  }
-
-  dragInsertTargetPath.value = insertTarget.path;
-  dragInsertPlacement.value = insertTarget.placement;
+  void beginBoxItemGlobalDrag(event, itemPath);
 }
 
 /**
  * 外部文件拖入 Box 时声明当前区域可接收文件；内部排序已改用 pointer 拖拽。
  */
 function handleBoxGridDragOver(event: DragEvent): void {
+  setDragHoveringBox(true);
   if (event.dataTransfer) {
     event.dataTransfer.dropEffect = "copy";
   }
@@ -402,7 +1015,7 @@ function handleBoxGridDragOver(event: DragEvent): void {
  * DOM drop 只处理外部文件路径；Box 内部排序由 pointer up 提交，避免浏览器 DnD 禁用光标。
  */
 async function handleBoxGridDrop(event: DragEvent): Promise<void> {
-  if (!box.value) {
+  if (!box.value || externalFileDragState) {
     return;
   }
 
@@ -410,99 +1023,742 @@ async function handleBoxGridDrop(event: DragEvent): Promise<void> {
 }
 
 /**
- * pointer 拖拽结束时提交排序；如果释放点已离开 Box 窗口，则删除映射让图标回到桌面。
+ * pointer 释放时只通知全局拖拽会话结束；实际排序由命中的 Box 处理 Drop 事件。
  */
 async function finishBoxItemPointerDrag(event: PointerEvent, itemPath: string): Promise<void> {
-  if (!box.value || draggingBoxItemPath.value !== itemPath) {
-    draggingBoxItemPath.value = null;
-    clearBoxItemDragIndicator();
+  if (draggingBoxItemPath.value !== itemPath) {
     return;
   }
 
-  const shouldRemove = !isPointerInsideCurrentWindow(event);
-  const insertTargetPath = dragInsertTargetPath.value;
-  const insertPlacement = dragInsertPlacement.value;
-
-  draggingBoxItemPath.value = null;
-  clearBoxItemDragIndicator();
-  if (shouldRemove) {
-    await desktopStore.removeItemFromBox(box.value.id, itemPath);
-    return;
-  }
-
-  if (insertTargetPath && insertPlacement) {
-    await desktopStore.reorderBoxItem(box.value.id, itemPath, insertTargetPath, insertPlacement);
-    return;
-  }
-
-  await desktopStore.moveBoxItemToEnd(box.value.id, itemPath);
+  await finishBoxItemGlobalDrag(event);
 }
 
 /**
  * 清理排序提示线，避免拖拽离开窗口或落到空白区后保留旧位置。
  */
 function clearBoxItemDragIndicator(): void {
-  dragInsertTargetPath.value = null;
-  dragInsertPlacement.value = null;
+  dragInsertLineStyle.value = null;
 }
 
 /**
- * 指针位于图标间隙时，根据同一行最近的图标推导插入方向，避免排序提示线在空隙中消失。
+ * 拖拽来源状态必须和路径一起清理，避免旧来源 Box 让后续外部拖入误隐藏同名项目。
+ */
+function clearDraggingBoxItemState(): void {
+  draggingBoxItemPath.value = null;
+  draggingBoxItemSessionId.value = null;
+}
+
+/**
+ * 清理拖拽视觉状态时校验 session，避免旧窗口的 cancel/drop 事件覆盖新的同路径拖拽。
+ */
+function isCurrentBoxItemDragPayload(payload: BoxItemDragPayload): boolean {
+  return (
+    draggingBoxItemPath.value === payload.item.path &&
+    (!draggingBoxItemSessionId.value || draggingBoxItemSessionId.value === payload.sessionId)
+  );
+}
+
+/**
+ * 应用当前拖拽插入目标；目标为空时保留 Drop 到末尾的语义但隐藏竖线。
+ */
+function applyBoxItemDragIndicator(insertTarget: BoxGridDragInsertTarget | null): void {
+  dragInsertLineStyle.value = insertTarget?.indicatorStyle ?? null;
+}
+
+/**
+ * 外部文件进入 Box 时先解析第一项作为拖影代表，其余路径在 Drop 时一起收纳。
+ */
+async function beginExternalFileDrag(
+  paths: string[],
+  x: number,
+  y: number,
+  isScreenPosition = false,
+): Promise<void> {
+  const acceptedPaths = paths.filter(Boolean);
+  if (acceptedPaths.length === 0) {
+    return;
+  }
+
+  clearExternalFileDragReleaseProbe();
+  const previewItems = await resolveExternalDragPreviewItems(acceptedPaths);
+  const firstItem = previewItems[0];
+  if (!firstItem) {
+    return;
+  }
+
+  const screenPoint = isScreenPosition
+    ? { x, y }
+    : await resolveWindowClientPhysicalPointToScreen(x, y);
+  setDragHoveringBox(true);
+  const sessionId = crypto.randomUUID();
+  externalFileDragState = {
+    item: firstItem,
+    preview: resolveCurrentDragPreviewOptions(),
+    sessionId,
+    usesScreenPosition: isScreenPosition,
+  };
+  void openDragPreviewWindow()
+    .then(() => emitExternalFileDragPhase("move", screenPoint.x, screenPoint.y, sessionId))
+    .catch((error) => {
+      desktopStore.lastError = error instanceof Error ? error.message : String(error);
+    });
+  await emitExternalFileDragPhase("start", screenPoint.x, screenPoint.y, sessionId);
+}
+
+/**
+ * 外部文件悬停时持续广播坐标，目标 Box 用同一套逻辑绘制插入线。
+ */
+async function moveExternalFileDrag(x: number, y: number): Promise<void> {
+  const dragState = externalFileDragState;
+  if (!dragState) {
+    return;
+  }
+
+  const screenPoint = dragState.usesScreenPosition
+    ? { x, y }
+    : await resolveWindowClientPhysicalPointToScreen(x, y);
+  await emitExternalFileDragPhase("move", screenPoint.x, screenPoint.y, dragState.sessionId);
+}
+
+/**
+ * 外部文件 Drop 后按当前插入点写入 Box，随后关闭拖影。
+ */
+async function finishExternalFileDrag(paths: string[], x: number, y: number): Promise<void> {
+  if (!box.value) {
+    cancelExternalFileDrag();
+    return;
+  }
+
+  const acceptedPaths = paths.filter(Boolean);
+  if (acceptedPaths.length === 0) {
+    cancelExternalFileDrag();
+    return;
+  }
+
+  const dragState =
+    externalFileDragState ??
+    (await createExternalFileDragStateForDrop(acceptedPaths));
+
+  if (!dragState) {
+    return;
+  }
+
+  externalFileDragState = dragState;
+  const screenPoint = dragState.usesScreenPosition
+    ? { x, y }
+    : await resolveWindowClientPhysicalPointToScreen(x, y);
+  const localPoint = await resolveBoxItemDragLocalPoint(screenPoint.x, screenPoint.y);
+  const insertTarget =
+    localPoint.inside && boxGridRef.value
+      ? resolveBoxGridDragInsertTarget(
+          localPoint.x,
+          localPoint.y,
+          boxGridRef.value,
+          dragState.item.path,
+        )
+      : null;
+
+  await desktopStore.assignDroppedPathsToBox(acceptedPaths, box.value.id);
+  if (insertTarget) {
+    await desktopStore.reorderBoxItem(
+      box.value.id,
+      dragState.item.path,
+      insertTarget.path,
+      insertTarget.placement,
+    );
+  }
+  await emitExternalFileDragPhase("drop", screenPoint.x, screenPoint.y, dragState.sessionId);
+  externalFileDragState = null;
+  clearExternalFileDragReleaseProbe();
+  setDragHoveringBox(false);
+  await syncPointerHoverFromScreenPoint(screenPoint.x, screenPoint.y);
+  refreshCollapsedPreviewCloseSchedule();
+  clearBoxItemDragIndicator();
+}
+
+/**
+ * 外部拖拽离开窗口时关闭拖影和插入线，真实文件不做任何处理。
+ */
+function cancelExternalFileDrag(options: ExternalFileDragCancelOptions = {}): void {
+  const dragState = externalFileDragState;
+  externalFileDragState = null;
+  if (options.deferHoverClearUntilRelease && dragState) {
+    startExternalFileDragReleaseProbe(dragState.sessionId);
+  } else {
+    clearExternalFileDragReleaseProbe();
+    setDragHoveringBox(false);
+    refreshCollapsedPreviewCloseSchedule();
+  }
+  clearBoxItemDragIndicator();
+
+  if (!dragState) {
+    return;
+  }
+
+  void notifyBoxItemDrag({
+    item: dragState.item,
+    phase: "cancel",
+    preview: dragState.preview,
+    screenX: 0,
+    screenY: 0,
+    sessionId: dragState.sessionId,
+    sourceBoxId: "",
+  });
+}
+
+/**
+ * 原生拖拽 leave 后鼠标仍处于按下态，保持临时展开直到释放，避免收缩 setSize 让 WebView 拖放状态卡死。
+ */
+function startExternalFileDragReleaseProbe(sessionId: string): void {
+  externalFileDragReleaseSessionId = sessionId;
+  externalFileDragReleaseProbeStartedAt = performance.now();
+  clearExternalFileDragReleaseProbe(false);
+  setDragHoveringBox(true);
+  externalFileDragReleaseProbeTimer = window.setInterval(() => {
+    void isPrimaryMouseButtonPressed()
+      .then((isPressed) => {
+        const elapsedMs = performance.now() - externalFileDragReleaseProbeStartedAt;
+        if (elapsedMs < BOX_ITEM_DRAG_INTERACTION.externalReleaseMinHoldMs) {
+          return;
+        }
+
+        const hasTimedOut =
+          elapsedMs >= BOX_ITEM_DRAG_INTERACTION.externalReleaseFallbackMs;
+        if (isPressed && !hasTimedOut) {
+          return;
+        }
+
+        finishExternalFileDragReleaseProbe(sessionId);
+      })
+      .catch(() => {
+        finishExternalFileDragReleaseProbe(sessionId);
+      });
+  }, BOX_ITEM_DRAG_INTERACTION.externalReleasePollIntervalMs);
+}
+
+/**
+ * 外部拖拽释放兜底只清理自己的会话，防止旧 leave 的轮询把新拖拽 hover 状态误关闭。
+ */
+function finishExternalFileDragReleaseProbe(sessionId: string): void {
+  if (externalFileDragReleaseSessionId !== sessionId) {
+    return;
+  }
+
+  clearExternalFileDragReleaseProbe();
+  setDragHoveringBox(false);
+  refreshCollapsedPreviewCloseSchedule();
+}
+
+/**
+ * 清理外部拖拽释放轮询；保留会话时用于先停旧 timer 再启动新 timer。
+ */
+function clearExternalFileDragReleaseProbe(shouldClearSession = true): void {
+  if (externalFileDragReleaseProbeTimer) {
+    window.clearInterval(externalFileDragReleaseProbeTimer);
+    externalFileDragReleaseProbeTimer = null;
+  }
+
+  if (shouldClearSession) {
+    externalFileDragReleaseSessionId = "";
+    externalFileDragReleaseProbeStartedAt = 0;
+  }
+}
+
+/**
+ * Drop 事件可能先于 enter 状态初始化到达，此时临时创建一次会话以复用排序流程。
+ */
+async function createExternalFileDragStateForDrop(
+  paths: string[],
+): Promise<ExternalFileDragState | null> {
+  const previewItems = await resolveExternalDragPreviewItems(paths);
+  const firstItem = previewItems[0];
+  if (!firstItem) {
+    return null;
+  }
+
+  return {
+    item: firstItem,
+    preview: resolveCurrentDragPreviewOptions(),
+    sessionId: crypto.randomUUID(),
+    usesScreenPosition: false,
+  };
+}
+
+/**
+ * 外部拖入只解析第一条路径作为拖影代表，避免为了预览提前写入 Box 映射。
+ */
+async function resolveExternalDragPreviewItems(paths: string[]): Promise<DesktopItem[]> {
+  const firstPath = paths[0];
+  if (!firstPath) {
+    return [];
+  }
+
+  const existingItem = desktopStore.findItem(firstPath);
+  if (existingItem) {
+    return [existingItem];
+  }
+
+  return getDesktopItemsByPaths([firstPath]);
+}
+
+/**
+ * 外部拖放 over/drop 在 Windows WebView2 下是窗口客户区物理坐标，广播前需要转成屏幕物理坐标。
+ */
+async function resolveWindowClientPhysicalPointToScreen(
+  x: number,
+  y: number,
+): Promise<PhysicalWindowPoint> {
+  const position = await currentWindow.innerPosition();
+
+  return {
+    x: position.x + x,
+    y: position.y + y,
+  };
+}
+
+/**
+ * 外部文件拖影复用 Box 内部拖拽事件，sourceBoxId 为空表示不会触发拖出删除。
+ */
+async function emitExternalFileDragPhase(
+  phase: BoxItemDragPayload["phase"],
+  screenX: number,
+  screenY: number,
+  sessionId: string,
+): Promise<void> {
+  const dragState = externalFileDragState;
+  if (!dragState || dragState.sessionId !== sessionId) {
+    return;
+  }
+
+  await notifyBoxItemDrag({
+    item: dragState.item,
+    phase,
+    preview: dragState.preview,
+    screenX,
+    screenY,
+    sessionId: dragState.sessionId,
+    sourceBoxId: "",
+  });
+}
+
+/**
+ * 拖影沿用当前 Box 的展示配置，保持拖动中的图标大小、文字和圆角与目标工作区一致。
+ */
+function resolveCurrentDragPreviewOptions(): BoxItemDragPreviewOptions {
+  return {
+    iconSize: desktopStore.settings.boxIconSize,
+    labelTextSize: desktopStore.settings.boxLabelTextSize,
+    labelWidth: desktopStore.settings.boxFilenameWidth,
+    nameDisplayMode: desktopStore.settings.nameDisplayMode,
+    radiusSize: desktopStore.settings.boxCornerRadius,
+    showItemLabels: desktopStore.settings.showItemLabels,
+    showShortcutArrow: desktopStore.settings.showShortcutArrow,
+  };
+}
+
+/**
+ * 来源 Box 创建拖拽会话后持续广播屏幕坐标，目标 Box 不需要依赖浏览器原生 DnD。
+ */
+async function beginBoxItemGlobalDrag(event: PointerEvent, itemPath: string): Promise<void> {
+  if (!box.value || boxItemGlobalDragState) {
+    clearDraggingBoxItemState();
+    return;
+  }
+
+  const item = desktopStore.findItem(itemPath);
+  if (!item) {
+    clearDraggingBoxItemState();
+    return;
+  }
+
+  const sessionId = crypto.randomUUID();
+  draggingBoxItemSessionId.value = sessionId;
+  const cursor = await cursorPosition().catch(() => ({
+    x: Math.round(event.screenX),
+    y: Math.round(event.screenY),
+  }));
+
+  boxItemGlobalDragState = {
+    accepted: false,
+    finishing: false,
+    item,
+    preview: resolveCurrentDragPreviewOptions(),
+    sessionId,
+    sourceBoxId: box.value.id,
+  };
+  acceptedBoxItemDragSessions.delete(sessionId);
+  void openDragPreviewWindow()
+    .then(() => emitBoxItemDragPhase("move", cursor.x, cursor.y))
+    .catch((error) => {
+      desktopStore.lastError = error instanceof Error ? error.message : String(error);
+    });
+  await emitBoxItemDragPhase("start", cursor.x, cursor.y);
+  startBoxItemDragPolling();
+}
+
+/**
+ * 全局鼠标轮询让拖拽在离开当前 WebView 后仍能更新拖影和目标 Box 插入线。
+ */
+function startBoxItemDragPolling(): void {
+  clearBoxItemDragPolling();
+  boxItemDragPollTimer = window.setInterval(() => {
+    void pollBoxItemDragCursor();
+  }, BOX_ITEM_DRAG_INTERACTION.pollIntervalMs);
+}
+
+/**
+ * 每一帧读取鼠标位置和左键状态；左键释放时统一派发 Drop。
+ */
+async function pollBoxItemDragCursor(): Promise<void> {
+  const dragState = boxItemGlobalDragState;
+  if (!dragState || dragState.finishing || isBoxItemDragPollTickPending) {
+    return;
+  }
+
+  isBoxItemDragPollTickPending = true;
+  try {
+    const [cursor, isPressed] = await Promise.all([
+      cursorPosition(),
+      isPrimaryMouseButtonPressed(),
+    ]);
+    if (!boxItemGlobalDragState || boxItemGlobalDragState.sessionId !== dragState.sessionId) {
+      return;
+    }
+
+    if (!isPressed) {
+      await finishBoxItemGlobalDragAt(cursor.x, cursor.y);
+      return;
+    }
+
+    await emitBoxItemDragPhase("move", cursor.x, cursor.y);
+  } finally {
+    isBoxItemDragPollTickPending = false;
+  }
+}
+
+/**
+ * 清理拖拽轮询定时器，避免 Drop 结束后继续发送旧坐标。
+ */
+function clearBoxItemDragPolling(): void {
+  if (!boxItemDragPollTimer) {
+    return;
+  }
+
+  window.clearInterval(boxItemDragPollTimer);
+  boxItemDragPollTimer = null;
+}
+
+/**
+ * pointerup 仍在当前窗口内时使用实时鼠标坐标结束会话，避免等待下一次轮询。
+ */
+async function finishBoxItemGlobalDrag(event: PointerEvent): Promise<void> {
+  const cursor = await cursorPosition().catch(() => ({
+    x: Math.round(event.screenX),
+    y: Math.round(event.screenY),
+  }));
+
+  await finishBoxItemGlobalDragAt(cursor.x, cursor.y);
+}
+
+/**
+ * 结束拖拽时先广播 Drop，再给目标窗口一个短暂提交窗口；无人接收才按拖出 Box 删除映射。
+ */
+async function finishBoxItemGlobalDragAt(screenX: number, screenY: number): Promise<void> {
+  const dragState = boxItemGlobalDragState;
+  if (!dragState || dragState.finishing) {
+    return;
+  }
+
+  dragState.finishing = true;
+  clearBoxItemDragPolling();
+  await emitBoxItemDragPhase("drop", screenX, screenY);
+  window.setTimeout(() => {
+    if (
+      draggingBoxItemPath.value === dragState.item.path &&
+      draggingBoxItemSessionId.value === dragState.sessionId
+    ) {
+      clearDraggingBoxItemState();
+      clearBoxItemDragIndicator();
+    }
+  }, BOX_ITEM_DRAG_INTERACTION.sourceLayoutReleaseDelayMs);
+  scheduleUnacceptedBoxItemDragRemoval(dragState);
+  boxItemGlobalDragState = null;
+}
+
+/**
+ * 来源窗口销毁或异常结束时取消拖影，避免残留一个始终置顶的小透明窗口。
+ */
+function cancelActiveBoxItemDrag(): void {
+  const dragState = boxItemGlobalDragState;
+  clearBoxItemDragPolling();
+  clearDraggingBoxItemState();
+  clearBoxItemDragIndicator();
+  boxItemGlobalDragState = null;
+  refreshCollapsedPreviewCloseSchedule();
+
+  if (dragState) {
+    void notifyBoxItemDrag({
+      item: dragState.item,
+      phase: "cancel",
+      preview: dragState.preview,
+      screenX: 0,
+      screenY: 0,
+      sessionId: dragState.sessionId,
+      sourceBoxId: dragState.sourceBoxId,
+    });
+  }
+}
+
+/**
+ * 广播拖拽阶段时复用当前会话数据，保证预览窗和所有 Box 看到同一个 sessionId。
+ */
+async function emitBoxItemDragPhase(
+  phase: BoxItemDragPayload["phase"],
+  screenX: number,
+  screenY: number,
+): Promise<void> {
+  const dragState = boxItemGlobalDragState;
+  if (!dragState) {
+    return;
+  }
+
+  await notifyBoxItemDrag({
+    item: dragState.item,
+    phase,
+    preview: dragState.preview,
+    screenX,
+    screenY,
+    sessionId: dragState.sessionId,
+    sourceBoxId: dragState.sourceBoxId,
+  });
+}
+
+/**
+ * 如果没有任何 Box 回执接收 Drop，就按用户拖出 Box 处理，只删除映射不动真实文件。
+ */
+function scheduleUnacceptedBoxItemDragRemoval(dragState: BoxItemGlobalDragState): void {
+  window.setTimeout(() => {
+    const hasAccepted =
+      dragState.accepted || acceptedBoxItemDragSessions.has(dragState.sessionId);
+    acceptedBoxItemDragSessions.delete(dragState.sessionId);
+    if (hasAccepted) {
+      return;
+    }
+
+    void desktopStore.removeItemFromBox(dragState.sourceBoxId, dragState.item.path);
+  }, BOX_ITEM_DRAG_INTERACTION.acceptFallbackDelayMs);
+}
+
+/**
+ * 所有 Box 都监听拖拽事件，但只有鼠标落入当前窗口时才展示插入线或接收 Drop。
+ */
+async function handleBoxItemDragPayload(payload: BoxItemDragPayload): Promise<void> {
+  if (!box.value || payload.phase === "cancel") {
+    if (isCurrentBoxItemDragPayload(payload)) {
+      clearDraggingBoxItemState();
+    }
+    const isWaitingForExternalRelease =
+      !payload.sourceBoxId && externalFileDragReleaseSessionId === payload.sessionId;
+    if (!isWaitingForExternalRelease) {
+      setDragHoveringBox(false);
+    }
+    clearBoxItemDragIndicator();
+    if (payload.phase === "cancel" && !isWaitingForExternalRelease) {
+      refreshCollapsedPreviewCloseSchedule();
+    }
+    return;
+  }
+
+  const localPoint = await resolveBoxItemDragLocalPoint(payload.screenX, payload.screenY);
+  if (!localPoint.inside) {
+    if (isCurrentBoxItemDragPayload(payload)) {
+      clearDraggingBoxItemState();
+    }
+    setDragHoveringBox(false);
+    clearBoxItemDragIndicator();
+    refreshCollapsedPreviewCloseSchedule();
+    return;
+  }
+
+  if (payload.phase !== "drop") {
+    setDragHoveringBox(true);
+  }
+  const insertTarget = boxGridRef.value
+    ? resolveBoxGridDragInsertTarget(
+        localPoint.x,
+        localPoint.y,
+        boxGridRef.value,
+        payload.item.path,
+      )
+    : null;
+
+  applyBoxItemDragIndicator(insertTarget);
+  if (payload.phase !== "drop") {
+    draggingBoxItemPath.value = payload.item.path;
+    draggingBoxItemSessionId.value = payload.sessionId;
+    return;
+  }
+
+  if (!payload.sourceBoxId) {
+    if (isCurrentBoxItemDragPayload(payload)) {
+      clearDraggingBoxItemState();
+    }
+    clearBoxItemDragIndicator();
+    setDragHoveringBox(false);
+    await syncPointerHoverFromScreenPoint(payload.screenX, payload.screenY);
+    refreshCollapsedPreviewCloseSchedule();
+    return;
+  }
+
+  await commitBoxItemDragDrop(payload, insertTarget);
+  clearDraggingBoxItemState();
+  clearBoxItemDragIndicator();
+  await notifyBoxItemDragAccepted({
+    sessionId: payload.sessionId,
+    targetBoxId: box.value.id,
+  });
+  setDragHoveringBox(false);
+  await syncPointerHoverFromScreenPoint(payload.screenX, payload.screenY);
+  refreshCollapsedPreviewCloseSchedule();
+}
+
+/**
+ * 将屏幕物理坐标换算到当前无边框窗口的逻辑坐标，高 DPI 下插入线不会偏移。
+ */
+async function resolveBoxItemDragLocalPoint(
+  screenX: number,
+  screenY: number,
+): Promise<BoxItemDragLocalPoint> {
+  const [position, size, scaleFactor] = await Promise.all([
+    currentWindow.outerPosition(),
+    currentWindow.outerSize(),
+    currentWindow.scaleFactor(),
+  ]);
+  const inside =
+    screenX >= position.x &&
+    screenY >= position.y &&
+    screenX <= position.x + size.width &&
+    screenY <= position.y + size.height;
+
+  return {
+    inside,
+    x: (screenX - position.x) / scaleFactor,
+    y: (screenY - position.y) / scaleFactor,
+  };
+}
+
+/**
+ * Drop 命中当前 Box 时按目标决定是本 Box 排序、移动到末尾，还是跨 Box 重新收纳。
+ */
+async function commitBoxItemDragDrop(
+  payload: BoxItemDragPayload,
+  insertTarget: BoxGridDragInsertTarget | null,
+): Promise<void> {
+  if (!box.value) {
+    return;
+  }
+
+  if (payload.sourceBoxId === box.value.id) {
+    if (insertTarget) {
+      await desktopStore.reorderBoxItem(
+        box.value.id,
+        payload.item.path,
+        insertTarget.path,
+        insertTarget.placement,
+      );
+      return;
+    }
+
+    await desktopStore.moveBoxItemToEnd(box.value.id, payload.item.path);
+    return;
+  }
+
+  await desktopStore.assignDroppedPathsToBox([payload.item.path], box.value.id);
+  if (insertTarget) {
+    await desktopStore.reorderBoxItem(
+      box.value.id,
+      payload.item.path,
+      insertTarget.path,
+      insertTarget.placement,
+    );
+  }
+}
+
+/**
+ * 根据同一行图标中心点计算稳定插入槽位，并把竖线放在相邻图标间隙的视觉中心。
  */
 function resolveBoxGridDragInsertTarget(
   clientX: number,
   clientY: number,
   container: HTMLElement,
+  excludedPath: string,
 ): BoxGridDragInsertTarget | null {
-  const iconElements = Array.from(
+  const containerRect = container.getBoundingClientRect();
+  const candidates = Array.from(
     container.querySelectorAll<HTMLElement>("[data-box-item-path]"),
-  );
-  let nearestTarget: (BoxGridDragInsertTarget & { distance: number }) | null = null;
+  )
+    .map((iconElement) => ({
+      path: iconElement.dataset.boxItemPath ?? "",
+      rect: iconElement.getBoundingClientRect(),
+    }))
+    .filter(({ path }) => path && path !== excludedPath);
 
-  for (const iconElement of iconElements) {
-    const targetPath = iconElement.dataset.boxItemPath;
-    if (!targetPath || targetPath === draggingBoxItemPath.value) {
-      continue;
-    }
-
-    const rect = iconElement.getBoundingClientRect();
-    const verticalDistance =
-      clientY < rect.top ? rect.top - clientY : Math.max(clientY - rect.bottom, 0);
-    if (verticalDistance > DESKTOP_ICON_VIEW.dragInsertRowTolerance) {
-      continue;
-    }
-
-    const centerX = rect.left + rect.width / 2;
-    const distance = Math.abs(clientX - centerX) + verticalDistance * 3;
-    if (nearestTarget && nearestTarget.distance <= distance) {
-      continue;
-    }
-
-    nearestTarget = {
-      distance,
-      path: targetPath,
-      placement: clientX > centerX ? "after" : "before",
-    };
+  if (candidates.length === 0) {
+    return null;
   }
 
-  return nearestTarget
-    ? {
-        path: nearestTarget.path,
-        placement: nearestTarget.placement,
-      }
-    : null;
+  const rowItems = candidates
+    .filter(({ rect }) => {
+      const verticalDistance =
+        clientY < rect.top ? rect.top - clientY : Math.max(clientY - rect.bottom, 0);
+
+      return verticalDistance <= DESKTOP_ICON_VIEW.dragInsertRowTolerance;
+    })
+    .sort((left, right) => left.rect.left - right.rect.left);
+
+  if (rowItems.length === 0) {
+    return null;
+  }
+
+  const insertIndex = rowItems.reduce(
+    (count, item) => (clientX > item.rect.left + item.rect.width / 2 ? count + 1 : count),
+    0,
+  );
+  const targetIndex = Math.min(insertIndex, rowItems.length - 1);
+  const targetItem = rowItems[targetIndex];
+  const placement: DesktopBoxItemDropPlacement =
+    insertIndex >= rowItems.length ? "after" : "before";
+  const lineX = resolveDragInsertLineX(rowItems, insertIndex);
+  const rowTop = Math.min(...rowItems.map((item) => item.rect.top));
+  const rowBottom = Math.max(...rowItems.map((item) => item.rect.bottom));
+
+  return {
+    indicatorStyle: {
+      height: `${Math.max(rowBottom - rowTop - 8, 24)}px`,
+      left: `${lineX - containerRect.left + container.scrollLeft}px`,
+      top: `${rowTop - containerRect.top + container.scrollTop + 4}px`,
+    },
+    path: targetItem.path,
+    placement,
+  };
 }
 
 /**
- * 浏览器拖拽事件的 client 坐标可以判断是否仍在当前透明 Box 窗口内。
+ * 插入线坐标优先取相邻图标的真实间隙中心，首尾位置则贴近目标图标外侧但不挤到内容上。
  */
-function isPointerInsideCurrentWindow(event: PointerEvent): boolean {
-  return (
-    event.clientX > 0 &&
-    event.clientY > 0 &&
-    event.clientX < window.innerWidth &&
-    event.clientY < window.innerHeight
-  );
+function resolveDragInsertLineX(
+  rowItems: Array<{ rect: DOMRect; path: string }>,
+  insertIndex: number,
+): number {
+  if (insertIndex <= 0) {
+    return rowItems[0].rect.left - DESKTOP_ICON_VIEW.dragInsertEdgeOffset;
+  }
+
+  if (insertIndex >= rowItems.length) {
+    return rowItems[rowItems.length - 1].rect.right + DESKTOP_ICON_VIEW.dragInsertEdgeOffset;
+  }
+
+  return (rowItems[insertIndex - 1].rect.right + rowItems[insertIndex].rect.left) / 2;
 }
 
 /**
@@ -516,50 +1772,13 @@ function openNativeItemContextMenu(event: MouseEvent, item: DesktopItem): void {
 }
 
 /**
- * Box 标题位置从更多菜单直接切换，适合用户在整理时即时调整窗口布局。
- */
-async function updateTitlePositionFromMenu(position: DesktopBoxTitlePosition): Promise<void> {
-  if (!box.value) {
-    return;
-  }
-
-  await desktopStore.updateBoxTitlePosition(box.value.id, position);
-}
-
-/**
- * 菜单只由右上角更多按钮触发，Box 区域右键交还系统默认处理。
+ * 独立菜单窗口可能正处于进入或退出动画中；Box 发生拖动、缩放或标题编辑前统一请求它关闭。
  */
 function closeContextMenu(): void {
-  contextMenu.value.open = false;
-}
-
-/**
- * Box 菜单只负责唤起设置页，具体设置仍由主窗口统一承载。
- */
-async function openSettingsFromMenu(): Promise<void> {
-  closeContextMenu();
-  await openSettingsWindow();
-}
-
-/**
- * 右键刷新只重新读取桌面目录，不改变任何 Box 布局。
- */
-async function refreshDesktopFromMenu(): Promise<void> {
-  closeContextMenu();
-  await desktopStore.refreshSnapshot();
-}
-
-/**
- * 删除 Box 只删除当前分组窗口和映射，真实桌面文件不会被删除。
- */
-async function deleteCurrentBox(): Promise<void> {
-  if (!box.value) {
-    return;
-  }
-
-  closeContextMenu();
-  await desktopStore.deleteBox(box.value.id);
-  await currentWindow.close();
+  void closeBoxContextMenuWindow(props.boxId).catch((error) => {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+  });
+  refreshCollapsedPreviewCloseSchedule();
 }
 
 /**
@@ -639,20 +1858,39 @@ async function persistCurrentWindowBounds(): Promise<void> {
  * 缩放事件只安排最终保存，不在拖动过程中写 SQLite。
  */
 function scheduleResizePersist(): void {
+  if (isApplyingCollapseWindowSize) {
+    return;
+  }
+
   clearResizePersistTimer();
   resizePersistTimer = window.setTimeout(() => {
     resizePersistTimer = null;
-    finishResizePersist();
+    persistResizeBounds();
   }, RESIZE_PERSIST_SETTLE_MS);
 }
 
 /**
- * 缩放结束后保存最终边界，并同步给设置页与其他 Box 窗口。
+ * 缩放静止或释放时保存最终边界，并同步给设置页与其他 Box 窗口。
  */
-function finishResizePersist(): void {
-  clearResizeReleaseEvents();
+function persistResizeBounds(): void {
   clearResizePersistTimer();
   void persistCurrentWindowBounds();
+}
+
+/**
+ * 鼠标释放才结束 resize 交互；窗口 resize 静止保存不会提前触发自动收缩。
+ */
+function finishResizeInteraction(): void {
+  const wasResizing = isResizingBox.value;
+
+  isResizingBox.value = false;
+  resizeReleasedStableTicks = 0;
+  clearResizeReleaseEvents();
+  clearResizeInteractionReleaseProbe();
+  persistResizeBounds();
+  if (wasResizing) {
+    refreshCollapsedPreviewCloseSchedule();
+  }
 }
 
 /**
@@ -661,16 +1899,17 @@ function finishResizePersist(): void {
 function bindResizeReleaseEvents(): void {
   clearResizeReleaseEvents();
 
-  window.addEventListener("mouseup", finishResizePersist, { capture: true, once: true });
-  window.addEventListener("pointerup", finishResizePersist, { capture: true, once: true });
-  document.addEventListener("mouseup", finishResizePersist, { capture: true, once: true });
-  document.addEventListener("pointerup", finishResizePersist, { capture: true, once: true });
+  window.addEventListener("mouseup", finishResizeInteraction, { capture: true, once: true });
+  window.addEventListener("pointerup", finishResizeInteraction, { capture: true, once: true });
+  document.addEventListener("mouseup", finishResizeInteraction, { capture: true, once: true });
+  document.addEventListener("pointerup", finishResizeInteraction, { capture: true, once: true });
   resizeReleaseCleanup = () => {
-    window.removeEventListener("mouseup", finishResizePersist, { capture: true });
-    window.removeEventListener("pointerup", finishResizePersist, { capture: true });
-    document.removeEventListener("mouseup", finishResizePersist, { capture: true });
-    document.removeEventListener("pointerup", finishResizePersist, { capture: true });
+    window.removeEventListener("mouseup", finishResizeInteraction, { capture: true });
+    window.removeEventListener("pointerup", finishResizeInteraction, { capture: true });
+    document.removeEventListener("mouseup", finishResizeInteraction, { capture: true });
+    document.removeEventListener("pointerup", finishResizeInteraction, { capture: true });
   };
+  startResizeInteractionReleaseProbe();
 }
 
 /**
@@ -694,11 +1933,56 @@ function clearResizePersistTimer(): void {
 }
 
 /**
+ * WebView 在原生 resize 期间可能收不到 mouseup，短轮询左键状态作为结束交互的兜底。
+ */
+function startResizeInteractionReleaseProbe(): void {
+  clearResizeInteractionReleaseProbe();
+  resizeInteractionReleaseProbeTimer = window.setInterval(() => {
+    void isPrimaryMouseButtonPressed()
+      .then((isPressed) => {
+        if (isPressed) {
+          resizeReleasedStableTicks = 0;
+          return;
+        }
+
+        const hasMinimumResizeTimeElapsed =
+          performance.now() - resizeStartedAt >=
+          BOX_WINDOW_INTERACTION_TIMING.resizeReleaseProbeMinMs;
+        if (!hasMinimumResizeTimeElapsed) {
+          return;
+        }
+
+        resizeReleasedStableTicks += 1;
+        if (
+          resizeReleasedStableTicks >= BOX_WINDOW_INTERACTION_TIMING.resizeReleaseProbeStableTicks
+        ) {
+          finishResizeInteraction();
+        }
+      })
+      .catch(() => undefined);
+  }, BOX_ITEM_DRAG_INTERACTION.pollIntervalMs);
+}
+
+/**
+ * 清理 resize 释放兜底轮询，避免窗口卸载或缩放结束后继续读取全局鼠标状态。
+ */
+function clearResizeInteractionReleaseProbe(): void {
+  if (!resizeInteractionReleaseProbeTimer) {
+    return;
+  }
+
+  window.clearInterval(resizeInteractionReleaseProbeTimer);
+  resizeInteractionReleaseProbeTimer = null;
+}
+
+/**
  * 同时清理缩放相关的监听和计时器，用于窗口卸载时释放异步回调。
  */
 function clearResizePersistState(): void {
   clearResizeReleaseEvents();
   clearResizePersistTimer();
+  clearResizeInteractionReleaseProbe();
+  isResizingBox.value = false;
 }
 
 /**
@@ -738,6 +2022,8 @@ async function startManualDragging(event: MouseEvent): Promise<void> {
     return;
   }
 
+  isManualDraggingBox.value = true;
+  openCollapsedPreviewForActiveInteraction();
   const [windowPosition, windowSize, cursor, scaleFactor, monitor] = await Promise.all([
     currentWindow.outerPosition(),
     currentWindow.outerSize(),
@@ -778,8 +2064,10 @@ function stopManualDragging(shouldPersist: boolean): void {
   const dragState = manualDragState;
 
   manualDragState = null;
+  isManualDraggingBox.value = false;
   manualDragCleanup?.();
   manualDragCleanup = null;
+  refreshCollapsedPreviewCloseSchedule();
 
   if (shouldPersist && dragState) {
     void persistManualDragPosition(dragState.lastPosition);
@@ -939,27 +2227,41 @@ function resolveManualDragPosition(
 </script>
 
 <template>
-  <main class="h-screen w-screen overflow-hidden bg-transparent p-0" @click="closeContextMenu">
+  <main
+    class="h-screen w-screen overflow-hidden bg-transparent p-0"
+    :class="isBoxItemDragActive || box?.locked ? 'cursor-default' : ''"
+    @click="closeContextMenu"
+  >
     <article
       v-if="box"
-      class="dasktop-box-surface relative flex h-full w-full flex-col overflow-hidden text-slate-950 shadow-[0_10px_28px_rgba(15,23,42,0.10)] dark:text-white dark:shadow-[0_10px_28px_rgba(0,0,0,0.24)]"
+      ref="boxSurfaceRef"
+      class="dasktop-box-surface relative flex h-full w-full flex-col overflow-hidden text-slate-950 dark:text-white"
       :style="boxSurfaceStyle"
       @dragover.prevent="handleBoxGridDragOver"
       @drop.prevent="handleBoxGridDrop"
+      @mouseenter="handleBoxMouseEnter"
+      @mouseleave="handleBoxMouseLeave"
     >
-      <span
-        v-for="handle in resizeHandles"
-        :key="handle.direction"
-        class="absolute z-40"
-        :class="handle.className"
-        @mousedown.stop.prevent="startResizing(handle.direction, $event)"
-      />
+      <template v-if="canResizeBox">
+        <span
+          v-for="handle in resizeHandles"
+          :key="handle.direction"
+          class="absolute z-40"
+          :class="handle.className"
+          @mousedown.stop.prevent="startResizing(handle.direction, $event)"
+          @mouseenter="handleResizeHandleMouseEnter"
+          @mouseleave="handleResizeHandleMouseLeave"
+        />
+      </template>
 
       <header
-        class="relative flex h-10 shrink-0 select-none items-center justify-center px-3"
-        :class="box.titlePosition === 'bottom' ? 'order-2' : 'order-0'"
+        class="relative flex h-10 shrink-0 select-none items-center justify-center px-3 transition-opacity duration-150 ease-out"
+        :class="boxTitleOrderClass"
+        :style="boxTitleAreaStyle"
         @mousedown.left="startDragging"
         @dblclick.stop.prevent
+        @mouseenter="handleBoxTitleMouseEnter"
+        @mouseleave="handleBoxTitleMouseLeave"
       >
         <input
           v-if="isEditingTitle"
@@ -988,7 +2290,7 @@ function resolveManualDragPosition(
           aria-label="打开 Box 菜单"
           class="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-[6px] text-slate-600 transition-colors hover:bg-white/50 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
           type="button"
-          @click.stop="openContextMenu"
+          @click.stop="toggleContextMenu"
           @mousedown.stop
         >
           <MoreHorizontal :size="18" />
@@ -997,19 +2299,23 @@ function resolveManualDragPosition(
 
       <div
         ref="boxGridRef"
-        class="dasktop-scrollarea dasktop-box-scrollarea grid min-h-0 flex-1 overflow-auto p-2.5"
+        class="dasktop-scrollarea dasktop-box-scrollarea relative grid min-h-0 flex-1 p-2.5 transition-[opacity,transform] duration-180 ease-out"
         :class="
-          boxItems.length === 0
-            ? 'content-center place-items-center justify-center'
-            : 'content-start items-start justify-start'
+          [
+            boxGridOverflowClass,
+            boxItems.length === 0
+              ? 'content-center place-items-center justify-center'
+              : 'content-start items-start justify-start',
+          ]
         "
-        :style="boxGridStyle"
+        :style="[boxGridStyle, boxBodyStyle]"
       >
         <DesktopIcon
           v-for="item in boxItems"
           :key="item.path"
           :double-click-open="desktopStore.settings.doubleClickOpenItems"
-          :drag-insert-position="dragInsertTargetPath === item.path ? dragInsertPlacement : null"
+          :drag-interaction-disabled="isBoxItemDragActive"
+          :dragging="draggingBoxItemPath === item.path"
           :icon-size="desktopStore.settings.boxIconSize"
           :item="item"
           :label-text-size="desktopStore.settings.boxLabelTextSize"
@@ -1019,9 +2325,15 @@ function resolveManualDragPosition(
           :show-label="desktopStore.settings.showItemLabels"
           :show-shortcut-arrow="desktopStore.settings.showShortcutArrow"
           @box-pointer-drag-end="finishBoxItemPointerDrag"
-          @box-pointer-drag-move="moveBoxItemPointerDrag"
           @box-pointer-drag-start="startBoxItemPointerDrag"
           @native-context-menu="openNativeItemContextMenu"
+        />
+
+        <div
+          v-if="dragInsertLineStyle"
+          aria-hidden="true"
+          class="dasktop-box-drag-insert-line pointer-events-none absolute z-20 w-[2px] rounded-full bg-[#2f6bff]"
+          :style="dragInsertLineStyle"
         />
 
         <div
@@ -1033,48 +2345,5 @@ function resolveManualDragPosition(
         </div>
       </div>
     </article>
-
-    <nav
-      v-if="box && contextMenu.open"
-      class="dasktop-box-menu fixed z-[100] grid min-w-[176px] overflow-hidden rounded-[10px] border border-[#d9dce3] bg-[#fbfbfd] p-1 text-slate-800 shadow-[0_18px_45px_rgba(15,23,42,0.24)] dark:border-[#30333c] dark:bg-[#202228] dark:text-slate-100"
-      :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
-      @click.stop
-    >
-      <button
-        class="flex h-8 items-center rounded-[7px] px-3 text-left text-[12px] transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
-        type="button"
-        @click="openSettingsFromMenu"
-      >
-        <Settings class="mr-2 text-slate-500 dark:text-slate-400" :size="14" />
-        打开设置
-      </button>
-      <button
-        class="flex h-8 items-center rounded-[7px] px-3 text-left text-[12px] transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
-        type="button"
-        @click="refreshDesktopFromMenu"
-      >
-        <RefreshCw class="mr-2 text-slate-500 dark:text-slate-400" :size="14" />
-        刷新桌面
-      </button>
-      <span class="my-1 h-px bg-[#e4e6eb] dark:bg-[#30333c]" />
-      <div class="grid gap-2 px-2 py-1.5">
-        <span class="text-[11px] font-medium text-slate-500 dark:text-slate-400">标题位置</span>
-        <SegmentedControl
-          :model-value="box.titlePosition"
-          :option-width-px="BOX_TITLE_POSITION_OPTION_WIDTH"
-          :options="BOX_TITLE_POSITION_OPTIONS"
-          @change="updateTitlePositionFromMenu"
-        />
-      </div>
-      <span class="my-1 h-px bg-[#e4e6eb] dark:bg-[#30333c]" />
-      <button
-        class="flex h-8 items-center rounded-[7px] px-3 text-left text-[12px] text-red-600 transition-colors hover:bg-[#fff0f0] dark:text-red-400 dark:hover:bg-[#3a2528]"
-        type="button"
-        @click="deleteCurrentBox"
-      >
-        <Trash2 class="mr-2" :size="14" />
-        删除 Box
-      </button>
-    </nav>
   </main>
 </template>
