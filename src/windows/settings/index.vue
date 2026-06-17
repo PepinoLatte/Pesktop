@@ -14,7 +14,6 @@ import {
   setAutostartEnabled,
   setTrayNativeDesktopIconsHiddenChecked,
 } from "@/entities/appSettings/api";
-import { confirmDesktopBoxDeletion } from "@/entities/desktopBox/deleteConfirmation";
 import { useDesktopStore } from "@/entities/desktopBox/store";
 import { closeBoxWindow, openBoxWindow } from "@/entities/desktopBox/windows";
 import { SETTINGS_WINDOW_SYNC_TIMING } from "@/entities/desktopBox/layout";
@@ -162,14 +161,9 @@ async function toggleBoxLockedFromSettings(box: DesktopBox): Promise<void> {
 }
 
 /**
- * 设置页删除 Box 只移除分组和映射；真实文件不会被删除，删除前必须由用户二次确认。
+ * 设置页收到的删除事件已经由按钮完成二段式确认，这里只执行真实删除和窗口关闭。
  */
 async function deleteBoxFromSettings(box: DesktopBox): Promise<void> {
-  const itemCount = desktopStore.getBoxItemPaths(box.id).length;
-  if (!confirmDesktopBoxDeletion(box, itemCount)) {
-    return;
-  }
-
   await desktopStore.deleteBox(box.id);
   await closeBoxWindow(box.id);
 }

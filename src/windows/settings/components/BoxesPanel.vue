@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ArrowUpRight, FolderPlus, Lock, LockOpen, RefreshCw, Trash2 } from "@lucide/vue";
+import { useDesktopBoxDeleteConfirmation } from "@/entities/desktopBox/deleteConfirmation";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 
 /**
@@ -24,11 +25,60 @@ const emit = defineEmits<{
   toggleBoxLocked: [box: DesktopBox];
 }>();
 
+const {
+  clearBoxDeleteConfirmation,
+  isConfirmingBoxDelete,
+  requestBoxDeleteConfirmation,
+} = useDesktopBoxDeleteConfirmation();
+
 /**
  * 设置列表需要给空标题 Box 一个识别名称，真实 Box 标题仍保持用户保存的空文本。
  */
 function displayBoxTitle(box: DesktopBox): string {
   return box.title || "未命名 Box";
+}
+
+/**
+ * 创建新 Box 属于非危险操作，执行前清掉任何悬挂的删除确认态。
+ */
+function createBoxFromPanel(): void {
+  clearBoxDeleteConfirmation();
+  emit("createBox");
+}
+
+/**
+ * 打开 Box 时恢复删除按钮普通态，避免用户返回设置页后还看到旧确认状态。
+ */
+function openBoxFromPanel(box: DesktopBox): void {
+  clearBoxDeleteConfirmation();
+  emit("openBox", box);
+}
+
+/**
+ * 锁定切换和删除无关，点击后取消二次确认可以降低误删概率。
+ */
+function toggleBoxLockedFromPanel(box: DesktopBox): void {
+  clearBoxDeleteConfirmation();
+  emit("toggleBoxLocked", box);
+}
+
+/**
+ * 删除按钮采用二段式交互，第一次点击只切换按钮状态，第二次点击才向父级发出删除事件。
+ */
+function deleteBoxFromPanel(box: DesktopBox): void {
+  if (!requestBoxDeleteConfirmation(box)) {
+    return;
+  }
+
+  emit("deleteBox", box);
+}
+
+/**
+ * 刷新桌面文件前重置危险操作状态，避免刷新后列表变化但确认态仍指向旧 Box。
+ */
+function refreshFromPanel(): void {
+  clearBoxDeleteConfirmation();
+  emit("refresh");
 }
 </script>
 
@@ -43,7 +93,7 @@ function displayBoxTitle(box: DesktopBox): string {
       <button
         class="inline-flex h-9 items-center gap-2 rounded-[9px] bg-[#ff5c5c] px-4 text-[13px] font-semibold text-white shadow-[0_10px_24px_rgba(255,92,92,0.24)] transition-colors hover:bg-[#ee4d4d]"
         type="button"
-        @click="emit('createBox')"
+        @click="createBoxFromPanel"
       >
         <FolderPlus :size="16" />
         新增 Box
@@ -74,7 +124,7 @@ function displayBoxTitle(box: DesktopBox): string {
         <button
           class="grid min-w-0 py-3 text-left"
           type="button"
-          @click="emit('openBox', box)"
+          @click="openBoxFromPanel(box)"
         >
           <strong class="block truncate text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">{{ displayBoxTitle(box) }}</strong>
           <span class="mt-1 block text-[12px] text-[#707684] dark:text-[#9ca0aa]">
@@ -88,7 +138,7 @@ function displayBoxTitle(box: DesktopBox): string {
             class="grid size-8 place-items-center rounded-[7px] text-[#68707d] transition-colors hover:bg-[#eef0f4] hover:text-[#17181c] dark:text-[#a7abb5] dark:hover:bg-[#242730] dark:hover:text-[#f4f4f5]"
             :title="box.locked ? '解除锁定 Box' : '锁定 Box'"
             type="button"
-            @click="emit('toggleBoxLocked', box)"
+            @click="toggleBoxLockedFromPanel(box)"
           >
             <LockOpen v-if="box.locked" :size="15" />
             <Lock v-else :size="15" />
@@ -98,19 +148,27 @@ function displayBoxTitle(box: DesktopBox): string {
             class="grid size-8 place-items-center rounded-[7px] text-[#68707d] transition-colors hover:bg-[#eef0f4] hover:text-[#17181c] dark:text-[#a7abb5] dark:hover:bg-[#242730] dark:hover:text-[#f4f4f5]"
             title="打开 Box"
             type="button"
-            @click="emit('openBox', box)"
+            @click="openBoxFromPanel(box)"
           >
             <ArrowUpRight :size="16" />
           </button>
-          <button
-            aria-label="删除 Box"
-            class="grid size-8 place-items-center rounded-[7px] text-red-500 transition-colors hover:bg-[#fff0f0] hover:text-red-600 dark:text-red-400 dark:hover:bg-[#3a2528]"
-            title="删除 Box"
-            type="button"
-            @click="emit('deleteBox', box)"
-          >
-            <Trash2 :size="15" />
-          </button>
+          <span class="flex h-8 w-[78px] justify-end">
+            <button
+              :aria-label="isConfirmingBoxDelete(box) ? '确认删除 Box' : '删除 Box'"
+              class="inline-flex h-8 items-center justify-center rounded-[7px] transition-colors"
+              :class="
+                isConfirmingBoxDelete(box)
+                  ? 'w-[78px] gap-1.5 bg-red-600 px-2 text-[12px] font-medium text-white hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600'
+                  : 'w-8 text-red-500 hover:bg-[#fff0f0] hover:text-red-600 dark:text-red-400 dark:hover:bg-[#3a2528]'
+              "
+              :title="isConfirmingBoxDelete(box) ? '再次点击确认删除，真实文件不会被删除' : '删除 Box'"
+              type="button"
+              @click="deleteBoxFromPanel(box)"
+            >
+              <Trash2 :size="15" />
+              <span v-if="isConfirmingBoxDelete(box)">确认</span>
+            </button>
+          </span>
         </div>
       </article>
 
@@ -123,7 +181,7 @@ function displayBoxTitle(box: DesktopBox): string {
     <button
       class="mt-4 inline-flex h-9 items-center gap-2 rounded-[9px] border border-[#dfe2e8] bg-[#ffffff] px-4 text-[13px] font-medium text-[#555b66] transition-colors hover:bg-[#f6f7fa] hover:text-[#17181c] dark:border-[#292c34] dark:bg-[#181a20] dark:text-[#a7abb5] dark:hover:bg-[#202229] dark:hover:text-[#f4f4f5]"
       type="button"
-      @click="emit('refresh')"
+      @click="refreshFromPanel"
     >
       <RefreshCw :size="15" />
       刷新桌面文件

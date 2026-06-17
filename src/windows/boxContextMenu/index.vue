@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
-import { Eye, RefreshCw, Settings, Trash2 } from "@lucide/vue";
+import { Eye, FolderPlus, RefreshCw, Settings, Trash2 } from "@lucide/vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { animate } from "motion";
@@ -15,8 +15,8 @@ import {
   notifyBoxContextMenuReady,
   notifyBoxContextMenuState,
 } from "@/shared/ipc/boxContextMenu";
-import { confirmDesktopBoxDeletion } from "@/entities/desktopBox/deleteConfirmation";
-import { closeBoxWindow, openSettingsWindow } from "@/entities/desktopBox/windows";
+import { useDesktopBoxDeleteConfirmation } from "@/entities/desktopBox/deleteConfirmation";
+import { closeBoxWindow, openBoxWindow, openSettingsWindow } from "@/entities/desktopBox/windows";
 
 const currentWindow = getCurrentWindow();
 const desktopStore = useDesktopStore();
@@ -24,6 +24,11 @@ const activeBoxId = ref<string | null>(null);
 const isMenuRendered = ref(false);
 const menuRef = ref<HTMLElement | null>(null);
 const unlistenFns: UnlistenFn[] = [];
+const {
+  clearBoxDeleteConfirmation,
+  isConfirmingBoxDelete,
+  requestBoxDeleteConfirmation,
+} = useDesktopBoxDeleteConfirmation();
 let menuAnimation: ReturnType<typeof animate> | null = null;
 let menuAnimationVersion = 0;
 let lastBlurCloseAt = 0;
@@ -135,6 +140,7 @@ async function prepareMenuOpen(boxId: string, requestId: string): Promise<void> 
   activeOpenRequestId = requestId;
   activeBoxId.value = boxId;
   isMenuRendered.value = true;
+  clearBoxDeleteConfirmation();
   menuAnimationVersion += 1;
 
   await nextTick();
@@ -212,6 +218,7 @@ async function closeAnimated(requestedBoxId?: string): Promise<void> {
     return;
   }
 
+  clearBoxDeleteConfirmation();
   if (!closingBoxId && !isMenuRendered.value) {
     await currentWindow.hide();
     return;
@@ -305,6 +312,17 @@ async function openSettingsFromMenu(): Promise<void> {
 }
 
 /**
+ * 新增 Box 复用桌面 Store 和窗口打开逻辑，确保菜单入口与设置页创建行为一致。
+ */
+async function createBoxFromMenu(): Promise<void> {
+  clearBoxDeleteConfirmation();
+  void closeAnimated();
+  const createdBox = await desktopStore.createBox();
+
+  await openBoxWindow(createdBox, { focus: true });
+}
+
+/**
  * 刷新只重新读取桌面目录，不改变任何 Box 布局和真实文件位置。
  */
 async function refreshDesktopFromMenu(): Promise<void> {
@@ -320,6 +338,7 @@ async function updateTitlePositionFromMenu(position: DesktopBoxTitlePosition): P
     return;
   }
 
+  clearBoxDeleteConfirmation();
   await desktopStore.updateBoxTitlePosition(box.value.id, position);
 }
 
@@ -331,6 +350,7 @@ async function updateBoxAutoCollapseFromMenu(mode: BoxAutoCollapseMode): Promise
     return;
   }
 
+  clearBoxDeleteConfirmation();
   await desktopStore.updateBoxCollapsed(box.value.id, mode === "rollup");
 }
 
@@ -342,6 +362,7 @@ async function toggleBoxLockedFromMenu(): Promise<void> {
     return;
   }
 
+  clearBoxDeleteConfirmation();
   await desktopStore.updateBoxLocked(box.value.id, !box.value.locked);
 }
 
@@ -353,6 +374,7 @@ async function updateIdleOpacityFromMenu(event: Event): Promise<void> {
     return;
   }
 
+  clearBoxDeleteConfirmation();
   const nextOpacity = Number((event.target as HTMLInputElement).value);
   await desktopStore.updateBoxTitleOpacity(box.value.id, nextOpacity);
 }
@@ -366,8 +388,7 @@ async function deleteCurrentBox(): Promise<void> {
   }
 
   const targetBoxId = box.value.id;
-  const itemCount = desktopStore.getBoxItemPaths(targetBoxId).length;
-  if (!confirmDesktopBoxDeletion(box.value, itemCount)) {
+  if (!requestBoxDeleteConfirmation(box.value)) {
     return;
   }
 
@@ -386,9 +407,9 @@ async function deleteCurrentBox(): Promise<void> {
       class="dasktop-box-menu grid h-full w-full gap-1 overflow-hidden rounded-[10px] border border-[#d9dce3] bg-[#fbfbfd] p-1.5 text-slate-800 shadow-[0_18px_45px_rgba(15,23,42,0.24)] dark:border-[#30333c] dark:bg-[#202228] dark:text-slate-100"
       @click.stop
     >
-      <div class="grid grid-cols-2 gap-1">
+      <div class="grid grid-cols-3 gap-1">
         <button
-          class="flex items-center justify-center gap-1.5 rounded-[8px] px-2 py-1 text-[12px] font-medium transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
+          class="flex items-center justify-center gap-1 rounded-[8px] px-1.5 py-1 text-[12px] font-medium transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
           type="button"
           @click="openSettingsFromMenu"
         >
@@ -396,7 +417,17 @@ async function deleteCurrentBox(): Promise<void> {
           设置
         </button>
         <button
-          class="flex items-center justify-center gap-1.5 rounded-[8px] px-2 py-1 text-[12px] font-medium transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
+          aria-label="新增 Box"
+          class="flex items-center justify-center gap-1 rounded-[8px] px-1.5 py-1 text-[12px] font-medium transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
+          title="新增 Box"
+          type="button"
+          @click="createBoxFromMenu"
+        >
+          <FolderPlus class="text-slate-500 dark:text-slate-400" :size="15" />
+          新增
+        </button>
+        <button
+          class="flex items-center justify-center gap-1 rounded-[8px] px-1.5 py-1 text-[12px] font-medium transition-colors hover:bg-[#eceef3] dark:hover:bg-[#2b2e37]"
           type="button"
           @click="refreshDesktopFromMenu"
         >
@@ -460,12 +491,19 @@ async function deleteCurrentBox(): Promise<void> {
       </div>
       <span class="my-0.5 h-px bg-[#e4e6eb] dark:bg-[#30333c]" />
       <button
-        class="flex items-center rounded-[7px] px-2.5 py-1 text-left text-[12px] text-red-600 transition-colors hover:bg-[#fff0f0] dark:text-red-400 dark:hover:bg-[#3a2528]"
+        :aria-label="isConfirmingBoxDelete(box) ? '确认删除 Box' : '删除 Box'"
+        class="flex items-center rounded-[7px] px-2.5 py-1 text-left text-[12px] transition-colors"
+        :class="
+          isConfirmingBoxDelete(box)
+            ? 'bg-red-600 text-white hover:bg-red-700 dark:bg-red-500 dark:text-white dark:hover:bg-red-600'
+            : 'text-red-600 hover:bg-[#fff0f0] dark:text-red-400 dark:hover:bg-[#3a2528]'
+        "
+        :title="isConfirmingBoxDelete(box) ? '再次点击确认删除，真实文件不会被删除' : '删除 Box'"
         type="button"
         @click="deleteCurrentBox"
       >
         <Trash2 class="mr-2" :size="14" />
-        删除 Box
+        {{ isConfirmingBoxDelete(box) ? "确认删除" : "删除 Box" }}
       </button>
     </nav>
   </main>
