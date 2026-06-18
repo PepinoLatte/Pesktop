@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "author": "Aug_Sakura",
+  "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.5.3",
   "engines": {
