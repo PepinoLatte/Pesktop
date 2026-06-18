@@ -13,7 +13,11 @@ import { useBoxTitleEditing } from "./composables/useBoxTitleEditing";
 import { useBoxWindowFrame } from "./composables/useBoxWindowFrame";
 import { useDesktopStore } from "@/entities/desktopBox/store";
 import type { DesktopItem } from "@/entities/desktopItem/types";
-import { showNativeItemContextMenu } from "@/entities/desktopItem/api";
+import {
+  registerBoxNativeDropTarget,
+  showNativeItemContextMenu,
+  unregisterBoxNativeDropTarget,
+} from "@/entities/desktopItem/api";
 import { listenBoxItemDrag, listenBoxItemDragAccepted } from "@/shared/ipc/boxItemDrag";
 import { preloadBoxContextMenuWindow } from "@/entities/desktopBox/windows";
 import { listenBoxContextMenuState } from "@/shared/ipc/boxContextMenu";
@@ -342,6 +346,13 @@ onMounted(async () => {
   );
 
   /**
+   * WebView2 默认 DropTarget 只接受文件路径；这里接管 Box 子窗口拖放以支持 Windows Shell 虚拟桌面图标。
+   */
+  await registerBoxNativeDropTarget(currentWindow.label).catch((error) => {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+  });
+
+  /**
    * ready 放在核心监听注册之后，批量启动统一显示时 Box 已经能响应拖拽、菜单和原生 Drop
    */
   void notifyBoxWindowReady(props.boxId).catch((error) => {
@@ -365,6 +376,7 @@ async function initializeDesktopStoreForBoxWindow(): Promise<boolean> {
  * 卸载时按拖拽、窗口、菜单、动画、监听的顺序清理，防止异步回调在窗口关闭后继续写状态
  */
 onUnmounted(() => {
+  void unregisterBoxNativeDropTarget(currentWindow.label).catch(() => undefined);
   cancelActiveBoxItemDrag();
   cancelExternalFileDrag();
   clearExternalFileDragReleaseProbe();

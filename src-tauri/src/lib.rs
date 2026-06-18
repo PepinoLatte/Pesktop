@@ -26,10 +26,12 @@ pub fn run() {
             commands::is_autostart_enabled,
             commands::is_primary_mouse_button_pressed,
             commands::open_desktop_item,
+            commands::register_box_native_drop_target,
             commands::set_autostart_enabled,
             commands::set_native_desktop_icons_hidden,
             commands::set_tray_native_desktop_icons_hidden_checked,
             commands::show_native_item_context_menu,
+            commands::unregister_box_native_drop_target,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build dasktop");

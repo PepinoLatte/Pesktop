@@ -38,6 +38,12 @@ pub fn get_desktop_items_by_paths(paths: Vec<String>) -> Result<Vec<DesktopItem>
 /// 使用系统默认程序打开桌面项目，保持快捷方式、文件夹和普通文件与 Windows Explorer 一致
 #[tauri::command]
 pub fn open_desktop_item(path: String) -> Result<(), String> {
+    if let Some(shell_id) = path.strip_prefix("shell::") {
+        let parsing_name = crate::desktop::resolve_shell_parsing_name(shell_id)
+            .ok_or_else(|| "系统桌面项目类型暂不支持".to_string())?;
+        return open_shell_item_with_system_default(parsing_name);
+    }
+
     let item_path = Path::new(&path);
     if !item_path.exists() {
         return Err("桌面项目不存在，可能已经被移动或删除".to_string());
@@ -54,6 +60,17 @@ pub fn show_native_item_context_menu(
     screen_x: i32,
     screen_y: i32,
 ) -> Result<(), String> {
+    if let Some(shell_id) = path.strip_prefix("shell::") {
+        let parsing_name = crate::desktop::resolve_shell_parsing_name(shell_id)
+            .ok_or_else(|| "系统桌面项目类型暂不支持".to_string())?;
+        return show_native_context_menu_for_parsing_name(
+            &window,
+            parsing_name,
+            screen_x,
+            screen_y,
+        );
+    }
+
     let item_path = Path::new(&path);
     if !item_path.exists() {
         return Err("桌面项目不存在，可能已经被移动或删除".to_string());
@@ -66,6 +83,29 @@ pub fn show_native_item_context_menu(
 #[tauri::command]
 pub fn set_native_desktop_icons_hidden(hidden: bool) -> Result<(), String> {
     crate::desktop::set_native_desktop_icons_hidden(hidden)
+}
+
+/// Box 窗口挂载后注册自定义 Windows DropTarget，用来接受 `此电脑`、`回收站` 这类 Shell 虚拟图标
+#[tauri::command]
+pub fn register_box_native_drop_target(app: AppHandle, window_label: String) -> Result<(), String> {
+    if !window_label.starts_with("box_") {
+        return Err("只有 Box 窗口可以注册原生拖放目标".to_string());
+    }
+
+    crate::desktop::register_box_native_drop(&app, &window_label)
+}
+
+/// Box 窗口卸载时注销自定义 DropTarget，避免窗口关闭后仍保留旧 HWND 的 COM 引用
+#[tauri::command]
+pub fn unregister_box_native_drop_target(
+    app: AppHandle,
+    window_label: String,
+) -> Result<(), String> {
+    if !window_label.starts_with("box_") {
+        return Ok(());
+    }
+
+    crate::desktop::unregister_box_native_drop(&app, &window_label)
 }
 
 /// 读取系统开机自启状态；状态来源是官方 autostart 插件，不写入前端 SQLite 设置表
@@ -137,6 +177,41 @@ fn open_path_with_system_default(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Shell 虚拟项没有真实路径，必须直接把 parsing name 交给 Explorer 同源打开逻辑
+#[cfg(target_os = "windows")]
+fn open_shell_item_with_system_default(parsing_name: &str) -> Result<(), String> {
+    let parsing_name_wide = parsing_name
+        .encode_utf16()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let operation_wide = "open\0".encode_utf16().collect::<Vec<_>>();
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(operation_wide.as_ptr()),
+            PCWSTR(parsing_name_wide.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+
+    if result.0 as isize <= 32 {
+        return Err(format!(
+            "系统无法打开该桌面项目，错误码 {}",
+            result.0 as isize
+        ));
+    }
+
+    Ok(())
+}
+
+/// 非 Windows 平台没有 Shell 虚拟桌面项，保持显式错误避免误写兼容分支
+#[cfg(not(target_os = "windows"))]
+fn open_shell_item_with_system_default(_parsing_name: &str) -> Result<(), String> {
+    Err("当前平台暂不支持打开系统桌面项目".to_string())
+}
+
 /// 通过 `IContextMenu` 获取 Explorer 同源菜单，选中项用 Shell 返回的命令 ID 执行
 #[cfg(target_os = "windows")]
 fn show_native_context_menu_for_path(
@@ -160,6 +235,45 @@ fn show_native_context_menu_for_path(
         CoTaskMemFree(Some(pidl as *const _));
         result
     }
+}
+
+/// Shell 虚拟项右键菜单通过 parsing name 解析 PIDL，避免用不存在的文件路径做前置校验
+#[cfg(target_os = "windows")]
+fn show_native_context_menu_for_parsing_name(
+    window: &tauri::WebviewWindow,
+    parsing_name: &str,
+    screen_x: i32,
+    screen_y: i32,
+) -> Result<(), String> {
+    let hwnd = window
+        .hwnd()
+        .map_err(|error| format!("无法获取窗口句柄：{error}"))?;
+    let wide_path = parsing_name
+        .encode_utf16()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None)
+            .map_err(|error| format!("系统无法解析该桌面项目：{error}"))?;
+
+        let result = show_context_menu_from_pidl(hwnd, pidl, screen_x, screen_y);
+        CoTaskMemFree(Some(pidl as *const _));
+        result
+    }
+}
+
+/// 非 Windows 平台没有 Explorer Shell 菜单，保持显式错误避免前端误以为已生效
+#[cfg(not(target_os = "windows"))]
+fn show_native_context_menu_for_parsing_name(
+    _window: &tauri::WebviewWindow,
+    _parsing_name: &str,
+    _screen_x: i32,
+    _screen_y: i32,
+) -> Result<(), String> {
+    Err("当前平台暂不支持 Windows 原生右键菜单".to_string())
 }
 
 /// 非 Windows 平台没有 Explorer Shell 菜单，保持显式错误避免前端误以为已生效

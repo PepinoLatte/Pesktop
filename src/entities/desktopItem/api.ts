@@ -48,6 +48,24 @@ export function setNativeDesktopIconsHidden(hidden: boolean): Promise<void> {
 }
 
 /**
+ * Box 窗口注册 Windows 原生 DropTarget，补齐 WebView2 默认不接受 Shell 虚拟图标拖入的能力
+ */
+export function registerBoxNativeDropTarget(windowLabel: string): Promise<void> {
+  return invoke("register_box_native_drop_target", {
+    windowLabel,
+  });
+}
+
+/**
+ * Box 窗口销毁前释放自定义 DropTarget，避免旧窗口句柄继续占用原生拖放目标
+ */
+export function unregisterBoxNativeDropTarget(windowLabel: string): Promise<void> {
+  return invoke("unregister_box_native_drop_target", {
+    windowLabel,
+  });
+}
+
+/**
  * 读取系统当前左键状态，用于跨 Box 拖拽时判断释放点，不依赖单个 WebView 的 pointerup
  */
 export function isPrimaryMouseButtonPressed(): Promise<boolean> {

@@ -4,7 +4,44 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::{DesktopItem, DesktopItemKind, DesktopSnapshot};
+use super::{DesktopItem, DesktopItemKind, DesktopItemSource, DesktopSnapshot};
+
+const SHELL_ITEM_PATH_PREFIX: &str = "shell::";
+
+/// 已知 Shell 虚拟桌面项使用稳定业务 ID 映射，避免把不可持久化的 PIDL 直接写入前端数据库
+struct KnownShellDesktopItem {
+    id: &'static str,
+    name: &'static str,
+    parsing_name: &'static str,
+}
+
+const KNOWN_SHELL_DESKTOP_ITEMS: &[KnownShellDesktopItem] = &[
+    KnownShellDesktopItem {
+        id: "this-pc",
+        name: "此电脑",
+        parsing_name: "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
+    },
+    KnownShellDesktopItem {
+        id: "user-files",
+        name: "用户的文件",
+        parsing_name: "::{59031A47-3F72-44A7-89C5-5595FE6B30EE}",
+    },
+    KnownShellDesktopItem {
+        id: "control-panel",
+        name: "控制面板",
+        parsing_name: "::{5399E694-6CE5-4D6C-8FCE-1D8870FDCBA0}",
+    },
+    KnownShellDesktopItem {
+        id: "network",
+        name: "网络",
+        parsing_name: "::{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}",
+    },
+    KnownShellDesktopItem {
+        id: "recycle-bin",
+        name: "回收站",
+        parsing_name: "::{645FF040-5081-101B-9F08-00AA002F954E}",
+    },
+];
 
 /// 扫描用户桌面目录，返回可用于自绘图标的轻量元信息
 pub fn scan_desktop() -> io::Result<DesktopSnapshot> {
@@ -20,6 +57,11 @@ pub fn scan_desktop() -> io::Result<DesktopSnapshot> {
         }
     }
 
+    items.extend(
+        KNOWN_SHELL_DESKTOP_ITEMS
+            .iter()
+            .map(create_shell_desktop_item),
+    );
     items.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
 
     Ok(DesktopSnapshot {
@@ -34,9 +76,18 @@ pub fn scan_paths(paths: &[String]) -> io::Result<Vec<DesktopItem>> {
     let mut items = Vec::new();
 
     for raw_path in paths {
+        let normalized_key = normalize_item_key(raw_path);
+        if !seen_paths.insert(normalized_key) {
+            continue;
+        }
+
+        if let Some(shell_item) = create_shell_desktop_item_from_key(raw_path) {
+            items.push(shell_item);
+            continue;
+        }
+
         let path = PathBuf::from(raw_path);
-        let normalized_key = normalize_path_key(&path);
-        if !seen_paths.insert(normalized_key) || !path.exists() {
+        if !path.exists() {
             continue;
         }
 
@@ -59,7 +110,51 @@ fn create_desktop_item(path: &Path) -> io::Result<DesktopItem> {
             .map(|value| value.to_string_lossy().to_string()),
         kind: resolve_item_kind(path, metadata.is_dir()),
         icon_data_url: resolve_item_icon_data_url(path),
+        source: DesktopItemSource::FileSystem,
+        shell_id: None,
     })
+}
+
+/// 根据稳定 `shell::` 键还原虚拟桌面项，供 Box 启动补齐和原生拖放落库复用
+fn create_shell_desktop_item_from_key(raw_path: &str) -> Option<DesktopItem> {
+    let shell_id = raw_path.strip_prefix(SHELL_ITEM_PATH_PREFIX)?;
+
+    KNOWN_SHELL_DESKTOP_ITEMS
+        .iter()
+        .find(|item| item.id.eq_ignore_ascii_case(shell_id))
+        .map(create_shell_desktop_item)
+}
+
+/// 构造 Shell 虚拟项时使用 parsing name 提取图标，打开和右键菜单也通过同一标识回到系统 Shell
+fn create_shell_desktop_item(item: &KnownShellDesktopItem) -> DesktopItem {
+    DesktopItem {
+        id: format!("shell_{}", item.id),
+        name: item.name.to_string(),
+        path: shell_item_path(item),
+        extension: None,
+        kind: DesktopItemKind::Shell,
+        icon_data_url: resolve_item_icon_data_url(Path::new(item.parsing_name)),
+        source: DesktopItemSource::Shell,
+        shell_id: Some(item.id.to_string()),
+    }
+}
+
+/// 打开、右键菜单和原生拖放都需要从稳定 ID 回到 Shell parsing name，未知项保持显式不支持
+pub fn resolve_shell_parsing_name(shell_id: &str) -> Option<&'static str> {
+    KNOWN_SHELL_DESKTOP_ITEMS
+        .iter()
+        .find(|item| item.id.eq_ignore_ascii_case(shell_id))
+        .map(|item| item.parsing_name)
+}
+
+/// Shell IDList 拖放只能解析出系统 parsing name，这里收敛到当前支持的已知桌面项稳定键
+pub fn resolve_shell_item_path_from_parsing_name(parsing_name: &str) -> Option<String> {
+    let normalized_parsing_name = normalize_shell_parsing_name(parsing_name);
+
+    KNOWN_SHELL_DESKTOP_ITEMS
+        .iter()
+        .find(|item| normalize_shell_parsing_name(item.parsing_name) == normalized_parsing_name)
+        .map(shell_item_path)
 }
 
 /// 根目录这类路径没有 file_name，使用完整路径作为展示名可以避免空白项目
@@ -106,9 +201,34 @@ fn stable_item_id(path: &Path) -> String {
         .collect()
 }
 
-/// Windows 文件系统路径大小写不敏感，批量解析时用归一化键去重但不改变返回的真实路径
-fn normalize_path_key(path: &Path) -> String {
-    path.to_string_lossy().replace('/', "\\").to_lowercase()
+/// Windows 文件系统路径大小写不敏感，Shell 键同样归一化，去重不改变返回给前端的原始主键
+fn normalize_item_key(raw_path: &str) -> String {
+    if raw_path.starts_with(SHELL_ITEM_PATH_PREFIX) {
+        return raw_path.to_lowercase();
+    }
+
+    Path::new(raw_path)
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_lowercase()
+}
+
+/// Shell parsing name 比较只关心 CLSID 语义，避免 Windows 返回不同前缀时同一虚拟项无法收纳
+fn normalize_shell_parsing_name(parsing_name: &str) -> String {
+    let trimmed = parsing_name.trim();
+    if let Some(open_brace) = trimmed.find('{') {
+        if let Some(close_brace_offset) = trimmed[open_brace..].find('}') {
+            let close_brace = open_brace + close_brace_offset + 1;
+            return trimmed[open_brace..close_brace].to_lowercase();
+        }
+    }
+
+    trimmed.trim_start_matches("shell:").to_lowercase()
+}
+
+/// 生成持久化主键时集中处理前缀，避免不同调用点拼出不一致的 Shell 路径
+fn shell_item_path(item: &KnownShellDesktopItem) -> String {
+    format!("{SHELL_ITEM_PATH_PREFIX}{}", item.id)
 }
 
 /// 读取系统 Shell 对该路径解析出的默认展示图像，失败时返回空值交给前端占位图标兜底
