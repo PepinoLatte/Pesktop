@@ -3,7 +3,7 @@ import { DESKTOP_ICON_VIEW } from "../config/desktopIcon";
 import type { DesktopBoxItemDropPlacement } from "@/entities/desktopBox/types";
 
 /**
- * Box 内空隙拖拽命中结果同时保存排序目标和插入线坐标，避免竖线挂在某个图标边缘抖动。
+ * Box 内空隙拖拽命中结果同时保存排序目标和插入线坐标，避免竖线挂在某个图标边缘抖动
  */
 export interface BoxGridDragInsertTarget {
   indicatorStyle: CSSProperties;
@@ -12,7 +12,7 @@ export interface BoxGridDragInsertTarget {
 }
 
 /**
- * 拖拽排序只需要 DOM 边界和业务路径，额外属性不进入几何计算以降低组件耦合。
+ * 拖拽排序只需要 DOM 边界和业务路径，额外属性不进入几何计算以降低组件耦合
  */
 interface BoxGridDragCandidate {
   path: string;
@@ -20,7 +20,7 @@ interface BoxGridDragCandidate {
 }
 
 /**
- * 根据同一行图标中心点计算稳定插入槽位，并把竖线放在相邻图标间隙的视觉中心。
+ * 根据同一行图标中心点计算稳定插入槽位，并把竖线放在相邻图标间隙的视觉中心
  */
 export function resolveBoxGridDragInsertTarget(
   clientX: number,
@@ -79,7 +79,7 @@ export function resolveBoxGridDragInsertTarget(
 }
 
 /**
- * 插入线坐标优先取相邻图标的真实间隙中心，首尾位置则贴近目标图标外侧但不挤到内容上。
+ * 插入线坐标优先取相邻图标的真实间隙中心，首尾位置则贴近目标图标外侧但不挤到内容上
  */
 export function resolveDragInsertLineX(
   rowItems: BoxGridDragCandidate[],

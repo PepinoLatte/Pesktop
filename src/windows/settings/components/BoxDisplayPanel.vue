@@ -9,7 +9,7 @@ import type { DesktopNameDisplayMode } from "@/entities/desktopItem/types";
 import SegmentedControl from "@/shared/ui/SegmentedControl.vue";
 
 /**
- * 文件名样式选项按信息量递减排列，让用户从完整到简洁逐步选择。
+ * 文件名样式选项按信息量递减排列，让用户从完整到简洁逐步选择
  */
 const NAME_DISPLAY_SEGMENT_OPTIONS: Array<{
   label: string;
@@ -21,22 +21,22 @@ const NAME_DISPLAY_SEGMENT_OPTIONS: Array<{
 ];
 
 /**
- * 吸附距离滑块范围直接跟随应用设置范围，避免模板限制和持久化校验脱节。
+ * 吸附距离滑块范围直接跟随应用设置范围，避免模板限制和持久化校验脱节
  */
 const SNAP_THRESHOLD_INPUT = {
   ...APP_SETTING_NUMBER_LIMITS.snapThreshold,
 } as const;
 
 /**
- * Box 显示面板维护所有 Box 共享的项目呈现和打开规则，外观数值项统一交给外观面板。
+ * Box 显示面板维护所有 Box 共享的项目呈现和打开规则，外观数值项统一交给外观面板
  */
 const props = defineProps<{
   /**
-   * 开机自启状态来自系统启动项，和 SQLite 中的渲染偏好分开维护。
+   * 开机自启状态来自系统启动项，和 SQLite 中的渲染偏好分开维护
    */
   autostartEnabled: boolean;
   /**
-   * 设置页父级统一下发内容宽度，避免各面板各自维护页面密度。
+   * 设置页父级统一下发内容宽度，避免各面板各自维护页面密度
    */
   panelWidth: string;
   settings: AppSettings;
@@ -55,14 +55,14 @@ const emit = defineEmits<{
 }>();
 
 /**
- * 吸附距离沿用窗口行为设置，但入口已经合并到当前设置页。
+ * 吸附距离沿用窗口行为设置，但入口已经合并到当前设置页
  */
 function emitSnapThresholdChange(event: Event): void {
   emit("snapThresholdChange", Number((event.target as HTMLInputElement).value));
 }
 
 /**
- * 吸附距离重置到默认阈值，方便用户调乱后快速回到稳定拖动手感。
+ * 吸附距离重置到默认阈值，方便用户调乱后快速回到稳定拖动手感
  */
 function resetSnapThreshold(): void {
   emit("snapThresholdChange", DEFAULT_APP_SETTINGS.snapThreshold);
@@ -73,14 +73,14 @@ function resetSnapThreshold(): void {
   <section class="mx-auto w-full px-8 py-7" :class="panelWidth">
     <div class="mb-6">
       <h1 class="text-[24px] font-semibold tracking-[0] text-[#17181c] dark:text-[#f4f4f5]">设置</h1>
-      <p class="mt-1 text-[13px] text-[#6f7480] dark:text-[#a7abb5]">调整 Box 内项目的展示和打开方式。</p>
+      <p class="mt-1 text-[13px] text-[#6f7480] dark:text-[#a7abb5]">调整 Box 内项目的展示和打开方式</p>
     </div>
 
     <div class="overflow-hidden rounded-[8px] border border-[#dfe2e8] bg-[#ffffff] shadow-[0_10px_28px_rgba(20,24,32,0.06)] dark:border-[#292c34] dark:bg-[#181a20] dark:shadow-none">
       <div class="grid min-h-[72px] grid-cols-[1fr_auto] items-center gap-6 px-5">
         <div class="min-w-0 pr-4">
           <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">快捷方式标记</h2>
-          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">在快捷方式图标左下角显示 Windows 风格箭头。</p>
+          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">在快捷方式图标左下角显示 Windows 风格箭头</p>
         </div>
 
         <label class="relative block h-7 w-12">
@@ -104,7 +104,7 @@ function resetSnapThreshold(): void {
       <div class="grid min-h-[76px] grid-cols-[1fr_auto] items-center gap-6 px-5">
         <div class="min-w-0 pr-4">
           <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">文件名样式</h2>
-          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">控制 Box 中项目名称的后缀显示策略。</p>
+          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">控制 Box 中项目名称的后缀显示策略</p>
         </div>
 
         <SegmentedControl
@@ -119,7 +119,7 @@ function resetSnapThreshold(): void {
       <div class="grid min-h-[72px] grid-cols-[1fr_auto] items-center gap-6 px-5">
         <div class="min-w-0 pr-4">
           <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">显示项目名称</h2>
-          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">在 Box 图标下方展示文件名。</p>
+          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">在 Box 图标下方展示文件名</p>
         </div>
 
         <label class="relative block h-7 w-12">
@@ -143,7 +143,7 @@ function resetSnapThreshold(): void {
       <div class="grid min-h-[72px] grid-cols-[1fr_auto] items-center gap-6 px-5">
         <div class="min-w-0 pr-4">
           <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">双击打开项目</h2>
-          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">开启后需要双击图标才会打开文件或文件夹。</p>
+          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">开启后需要双击图标才会打开文件或文件夹</p>
         </div>
 
         <label class="relative block h-7 w-12">
@@ -167,7 +167,7 @@ function resetSnapThreshold(): void {
       <div class="grid min-h-[72px] grid-cols-[1fr_auto] items-center gap-6 px-5">
         <div class="min-w-0 pr-4">
           <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">按网格调整大小</h2>
-          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">拖动 Box 边缘时按完整图标行列改变尺寸。</p>
+          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">拖动 Box 边缘时按完整图标行列改变尺寸</p>
         </div>
 
         <label class="relative block h-7 w-12">
@@ -191,7 +191,7 @@ function resetSnapThreshold(): void {
       <div class="grid min-h-[72px] grid-cols-[1fr_auto] items-center gap-6 px-5">
         <div class="min-w-0 pr-4">
           <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">边缘吸附</h2>
-          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">拖动 Box 靠近屏幕边缘或其他 Box 时自动贴齐。</p>
+          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">拖动 Box 靠近屏幕边缘或其他 Box 时自动贴齐</p>
         </div>
 
         <label class="relative block h-7 w-12">
@@ -215,7 +215,7 @@ function resetSnapThreshold(): void {
       <div class="grid min-h-[84px] grid-cols-[1fr_300px] items-center gap-6 px-5">
         <div class="min-w-0 pr-4">
           <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">吸附距离</h2>
-          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">数值越大，拖动时越容易贴齐边缘。</p>
+          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">数值越大，拖动时越容易贴齐边缘</p>
         </div>
 
         <div class="flex items-center gap-3">
@@ -249,7 +249,7 @@ function resetSnapThreshold(): void {
       <div class="grid min-h-[72px] grid-cols-[1fr_auto] items-center gap-6 px-5">
         <div class="min-w-0 pr-4">
           <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">开机自启</h2>
-          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">登录 Windows 后自动启动 Dasktop，并按当前 Box 配置恢复桌面整理状态。</p>
+          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">登录 Windows 后自动启动 Dasktop，并按当前 Box 配置恢复桌面整理状态</p>
         </div>
 
         <label class="relative block h-7 w-12">
@@ -273,7 +273,7 @@ function resetSnapThreshold(): void {
       <div class="grid min-h-[72px] grid-cols-[1fr_auto] items-center gap-6 px-5">
         <div class="min-w-0 pr-4">
           <h2 class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">隐藏系统桌面图标</h2>
-          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">运行 Dasktop 时隐藏 Explorer 原生桌面图标层，关闭后恢复显示。</p>
+          <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">运行 Dasktop 时隐藏 Explorer 原生桌面图标层，关闭后恢复显示</p>
         </div>
 
         <label class="relative block h-7 w-12">

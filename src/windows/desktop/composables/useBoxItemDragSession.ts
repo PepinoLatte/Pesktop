@@ -26,7 +26,7 @@ import type {
 } from "./useBoxWindowFrame";
 
 /**
- * 跨窗口拖拽会话保存在来源 Box 中，用于轮询全局鼠标并在未被接收时执行拖出删除映射。
+ * 跨窗口拖拽会话保存在来源 Box 中，用于轮询全局鼠标并在未被接收时执行拖出删除映射
  */
 interface BoxItemGlobalDragState {
   accepted: boolean;
@@ -38,7 +38,7 @@ interface BoxItemGlobalDragState {
 }
 
 /**
- * 外部桌面文件拖入 Box 时没有来源 Box，会话只负责拖影和插入线接力，不参与拖出删除。
+ * 外部桌面文件拖入 Box 时没有来源 Box，会话只负责拖影和插入线接力，不参与拖出删除
  */
 interface ExternalFileDragState {
   item: DesktopItem;
@@ -48,14 +48,14 @@ interface ExternalFileDragState {
 }
 
 /**
- * 外部 Windows 拖拽取消时可延迟清理 hover，保证鼠标仍按下时 Box 不会收缩导致原生拖放链路抖动。
+ * 外部 Windows 拖拽取消时可延迟清理 hover，保证鼠标仍按下时 Box 不会收缩导致原生拖放链路抖动
  */
 interface ExternalFileDragCancelOptions {
   deferHoverClearUntilRelease?: boolean;
 }
 
 /**
- * Box 图标拖拽会话组合式逻辑负责拖影、插入线、跨窗口 drop 和外部文件拖入。
+ * Box 图标拖拽会话组合式逻辑负责拖影、插入线、跨窗口 drop 和外部文件拖入
  */
 export function useBoxItemDragSession(options: {
   box: ComputedRef<DesktopBox | undefined>;
@@ -80,7 +80,7 @@ export function useBoxItemDragSession(options: {
   const draggingBoxItemSourceBoxId = ref<string | null>(null);
   const dragInsertLineStyle = ref<CSSProperties | null>(null);
   /**
-   * 只有 Box 图标拖拽需要临时关闭点击和缩放；Windows 外部文件拖入只展示拖影和落点，避免原生 leave 竞态卡住交互。
+   * 只有 Box 图标拖拽需要临时关闭点击和缩放；Windows 外部文件拖入只展示拖影和落点，避免原生 leave 竞态卡住交互
    */
   const isBoxItemDragActive = computed(() =>
     Boolean(draggingBoxItemPath.value && draggingBoxItemSourceBoxId.value),
@@ -90,7 +90,7 @@ export function useBoxItemDragSession(options: {
   let isBoxItemDragPollTickPending = false;
   let externalFileDragState: ExternalFileDragState | null = null;
   /**
-   * 外部拖拽 enter 需要异步解析文件信息；版本号用于让已经 leave 的旧 enter 结果失效。
+   * 外部拖拽 enter 需要异步解析文件信息；版本号用于让已经 leave 的旧 enter 结果失效
    */
   let externalFileDragRequestVersion = 0;
   let externalFileDragReleaseProbeTimer: ReturnType<typeof window.setInterval> | null = null;
@@ -101,7 +101,7 @@ export function useBoxItemDragSession(options: {
   const settledBoxItemDragSessions = new Set<string>();
 
   /**
-   * Box 图标 pointer 拖拽开始时创建跨窗口会话，并启动全局鼠标轮询和拖影窗口。
+   * Box 图标 pointer 拖拽开始时创建跨窗口会话，并启动全局鼠标轮询和拖影窗口
    */
   function startBoxItemPointerDrag(event: PointerEvent, itemPath: string): void {
     draggingBoxItemPath.value = itemPath;
@@ -112,7 +112,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 外部文件拖入 Box 时声明当前区域可接收文件；内部排序已改用 pointer 拖拽。
+   * 外部文件拖入 Box 时声明当前区域可接收文件；内部排序已改用 pointer 拖拽
    */
   function handleBoxGridDragOver(event: DragEvent): void {
     options.setDragHoveringBox(true);
@@ -122,7 +122,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * DOM drop 只处理外部文件路径；Box 内部排序由 pointer up 提交，避免浏览器 DnD 禁用光标。
+   * DOM drop 只处理外部文件路径；Box 内部排序由 pointer up 提交，避免浏览器 DnD 禁用光标
    */
   async function handleBoxGridDrop(event: DragEvent): Promise<void> {
     if (!options.box.value || externalFileDragState) {
@@ -133,7 +133,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * pointer 释放时只通知全局拖拽会话结束；实际排序由命中的 Box 处理 Drop 事件。
+   * pointer 释放时只通知全局拖拽会话结束；实际排序由命中的 Box 处理 Drop 事件
    */
   async function finishBoxItemPointerDrag(
     event: PointerEvent,
@@ -147,14 +147,14 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 清理排序提示线，避免拖拽离开窗口或落到空白区后保留旧位置。
+   * 清理排序提示线，避免拖拽离开窗口或落到空白区后保留旧位置
    */
   function clearBoxItemDragIndicator(): void {
     dragInsertLineStyle.value = null;
   }
 
   /**
-   * 拖拽来源状态必须和路径一起清理，避免旧来源 Box 让后续外部拖入误隐藏同名项目。
+   * 拖拽来源状态必须和路径一起清理，避免旧来源 Box 让后续外部拖入误隐藏同名项目
    */
   function clearDraggingBoxItemState(): void {
     draggingBoxItemPath.value = null;
@@ -163,7 +163,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 清理拖拽视觉状态时校验 session，避免旧窗口的 cancel/drop 事件覆盖新的同路径拖拽。
+   * 清理拖拽视觉状态时校验 session，避免旧窗口的 cancel/drop 事件覆盖新的同路径拖拽
    */
   function isCurrentBoxItemDragPayload(payload: BoxItemDragPayload): boolean {
     return (
@@ -173,7 +173,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 记录当前窗口正在展示的拖拽载荷；外部文件拖入没有来源 Box，不能驱动禁用点击和缩放的状态。
+   * 记录当前窗口正在展示的拖拽载荷；外部文件拖入没有来源 Box，不能驱动禁用点击和缩放的状态
    */
   function applyDraggingBoxItemPayload(payload: BoxItemDragPayload): void {
     draggingBoxItemPath.value = payload.item.path;
@@ -182,14 +182,14 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 应用当前拖拽插入目标；目标为空时保留 Drop 到末尾的语义但隐藏竖线。
+   * 应用当前拖拽插入目标；目标为空时保留 Drop 到末尾的语义但隐藏竖线
    */
   function applyBoxItemDragIndicator(insertTarget: BoxGridDragInsertTarget | null): void {
     dragInsertLineStyle.value = insertTarget?.indicatorStyle ?? null;
   }
 
   /**
-   * 外部文件进入 Box 时先解析第一项作为拖影代表，其余路径在 Drop 时一起收纳。
+   * 外部文件进入 Box 时先解析第一项作为拖影代表，其余路径在 Drop 时一起收纳
    */
   async function beginExternalFileDrag(
     paths: string[],
@@ -235,7 +235,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 外部文件悬停时持续广播坐标，目标 Box 用同一套逻辑绘制插入线。
+   * 外部文件悬停时持续广播坐标，目标 Box 用同一套逻辑绘制插入线
    */
   async function moveExternalFileDrag(x: number, y: number): Promise<void> {
     const dragState = externalFileDragState;
@@ -250,7 +250,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 外部文件 Drop 后按当前插入点写入 Box，随后关闭拖影。
+   * 外部文件 Drop 后按当前插入点写入 Box，随后关闭拖影
    */
   async function finishExternalFileDrag(
     paths: string[],
@@ -311,7 +311,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 外部拖拽离开窗口时关闭拖影和插入线，真实文件不做任何处理。
+   * 外部拖拽离开窗口时关闭拖影和插入线，真实文件不做任何处理
    */
   function cancelExternalFileDrag(optionsValue: ExternalFileDragCancelOptions = {}): void {
     externalFileDragRequestVersion += 1;
@@ -347,7 +347,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 原生拖拽 leave 后鼠标仍处于按下态，保持临时展开直到释放，避免收缩 setSize 让 WebView 拖放状态卡死。
+   * 原生拖拽 leave 后鼠标仍处于按下态，保持临时展开直到释放，避免收缩 setSize 让 WebView 拖放状态卡死
    */
   function startExternalFileDragReleaseProbe(sessionId: string): void {
     externalFileDragReleaseSessionId = sessionId;
@@ -377,7 +377,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 外部拖拽释放兜底只清理自己的会话，防止旧 leave 的轮询把新拖拽 hover 状态误关闭。
+   * 外部拖拽释放兜底只清理自己的会话，防止旧 leave 的轮询把新拖拽 hover 状态误关闭
    */
   function finishExternalFileDragReleaseProbe(sessionId: string): void {
     if (externalFileDragReleaseSessionId !== sessionId) {
@@ -390,7 +390,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 清理外部拖拽释放轮询；保留会话时用于先停旧 timer 再启动新 timer。
+   * 清理外部拖拽释放轮询；保留会话时用于先停旧 timer 再启动新 timer
    */
   function clearExternalFileDragReleaseProbe(shouldClearSession = true): void {
     if (externalFileDragReleaseProbeTimer) {
@@ -405,7 +405,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * Windows 原生拖放的 move/cancel 到达顺序不稳定；已取消 session 的晚到 move 必须忽略。
+   * Windows 原生拖放的 move/cancel 到达顺序不稳定；已取消 session 的晚到 move 必须忽略
    */
   function ignoreExternalDragSession(sessionId: string): void {
     ignoredExternalDragSessions.add(sessionId);
@@ -415,7 +415,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * Drop/cancel 到达后可能仍有旧的 start/move 处理函数卡在异步坐标换算中；结束标记用于阻止旧事件回写交互状态。
+   * Drop/cancel 到达后可能仍有旧的 start/move 处理函数卡在异步坐标换算中；结束标记用于阻止旧事件回写交互状态
    */
   function markBoxItemDragSessionSettled(sessionId: string): void {
     settledBoxItemDragSessions.add(sessionId);
@@ -425,7 +425,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 已结束会话只拦截非终态事件，Drop/cancel 本身仍需要进入清理分支完成收尾。
+   * 已结束会话只拦截非终态事件，Drop/cancel 本身仍需要进入清理分支完成收尾
    */
   function isSettledBoxItemDragMovePayload(payload: BoxItemDragPayload): boolean {
     return (
@@ -435,7 +435,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 外部原生拖放和 IPC 事件顺序不稳定；已取消或已结束的旧载荷不能再改变 Box 视觉状态。
+   * 外部原生拖放和 IPC 事件顺序不稳定；已取消或已结束的旧载荷不能再改变 Box 视觉状态
    */
   function shouldIgnoreBoxItemDragPayload(payload: BoxItemDragPayload): boolean {
     return (
@@ -447,7 +447,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 清理旧载荷遗留的插入线和拖拽标记；等待鼠标释放时保留 hover，避免 Box 收缩打断 Windows 原生拖放。
+   * 清理旧载荷遗留的插入线和拖拽标记；等待鼠标释放时保留 hover，避免 Box 收缩打断 Windows 原生拖放
    */
   function clearIgnoredBoxItemDragPayloadVisuals(payload: BoxItemDragPayload): void {
     const shouldClearPayloadVisuals =
@@ -472,7 +472,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * Drop 事件可能先于 enter 状态初始化到达，此时临时创建一次会话以复用排序流程。
+   * Drop 事件可能先于 enter 状态初始化到达，此时临时创建一次会话以复用排序流程
    */
   async function createExternalFileDragStateForDrop(
     paths: string[],
@@ -492,7 +492,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 外部拖入只解析第一条路径作为拖影代表，避免为了预览提前写入 Box 映射。
+   * 外部拖入只解析第一条路径作为拖影代表，避免为了预览提前写入 Box 映射
    */
   async function resolveExternalDragPreviewItems(paths: string[]): Promise<DesktopItem[]> {
     const firstPath = paths[0];
@@ -509,7 +509,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 外部文件拖影复用 Box 内部拖拽事件，sourceBoxId 为空表示不会触发拖出删除。
+   * 外部文件拖影复用 Box 内部拖拽事件，sourceBoxId 为空表示不会触发拖出删除
    */
   async function emitExternalFileDragPhase(
     phase: BoxItemDragPayload["phase"],
@@ -534,7 +534,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 拖影沿用当前 Box 的展示配置，保持拖动中的图标大小、文字和圆角与目标工作区一致。
+   * 拖影沿用当前 Box 的展示配置，保持拖动中的图标大小、文字和圆角与目标工作区一致
    */
   function resolveCurrentDragPreviewOptions(): BoxItemDragPreviewOptions {
     return {
@@ -549,7 +549,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 来源 Box 创建拖拽会话后持续广播屏幕坐标，目标 Box 不需要依赖浏览器原生 DnD。
+   * 来源 Box 创建拖拽会话后持续广播屏幕坐标，目标 Box 不需要依赖浏览器原生 DnD
    */
   async function beginBoxItemGlobalDrag(event: PointerEvent, itemPath: string): Promise<void> {
     if (!options.box.value || boxItemGlobalDragState) {
@@ -589,7 +589,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 全局鼠标轮询让拖拽在离开当前 WebView 后仍能更新拖影和目标 Box 插入线。
+   * 全局鼠标轮询让拖拽在离开当前 WebView 后仍能更新拖影和目标 Box 插入线
    */
   function startBoxItemDragPolling(): void {
     clearBoxItemDragPolling();
@@ -599,7 +599,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 每一帧读取鼠标位置和左键状态；左键释放时统一派发 Drop。
+   * 每一帧读取鼠标位置和左键状态；左键释放时统一派发 Drop
    */
   async function pollBoxItemDragCursor(): Promise<void> {
     const dragState = boxItemGlobalDragState;
@@ -629,7 +629,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 清理拖拽轮询定时器，避免 Drop 结束后继续发送旧坐标。
+   * 清理拖拽轮询定时器，避免 Drop 结束后继续发送旧坐标
    */
   function clearBoxItemDragPolling(): void {
     if (!boxItemDragPollTimer) {
@@ -641,7 +641,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * pointerup 仍在当前窗口内时使用实时鼠标坐标结束会话，避免等待下一次轮询。
+   * pointerup 仍在当前窗口内时使用实时鼠标坐标结束会话，避免等待下一次轮询
    */
   async function finishBoxItemGlobalDrag(event: PointerEvent): Promise<void> {
     const cursor = await cursorPosition().catch(() => ({
@@ -653,7 +653,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 结束拖拽时先广播 Drop，再给目标窗口一个短暂提交窗口；无人接收才按拖出 Box 删除映射。
+   * 结束拖拽时先广播 Drop，再给目标窗口一个短暂提交窗口；无人接收才按拖出 Box 删除映射
    */
   async function finishBoxItemGlobalDragAt(screenX: number, screenY: number): Promise<void> {
     const dragState = boxItemGlobalDragState;
@@ -679,7 +679,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 来源窗口销毁或异常结束时取消拖影，避免残留一个始终置顶的小透明窗口。
+   * 来源窗口销毁或异常结束时取消拖影，避免残留一个始终置顶的小透明窗口
    */
   function cancelActiveBoxItemDrag(): void {
     const dragState = boxItemGlobalDragState;
@@ -704,7 +704,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 广播拖拽阶段时复用当前会话数据，保证预览窗和所有 Box 看到同一个 sessionId。
+   * 广播拖拽阶段时复用当前会话数据，保证预览窗和所有 Box 看到同一个 sessionId
    */
   async function emitBoxItemDragPhase(
     phase: BoxItemDragPayload["phase"],
@@ -728,7 +728,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 如果没有任何 Box 回执接收 Drop，就按用户拖出 Box 处理，只删除映射不动真实文件。
+   * 如果没有任何 Box 回执接收 Drop，就按用户拖出 Box 处理，只删除映射不动真实文件
    */
   function scheduleUnacceptedBoxItemDragRemoval(dragState: BoxItemGlobalDragState): void {
     window.setTimeout(() => {
@@ -744,7 +744,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 所有 Box 都监听拖拽事件，但只有鼠标落入当前窗口时才展示插入线或接收 Drop。
+   * 所有 Box 都监听拖拽事件，但只有鼠标落入当前窗口时才展示插入线或接收 Drop
    */
   async function handleBoxItemDragPayload(payload: BoxItemDragPayload): Promise<void> {
     if (!payload.sourceBoxId && payload.phase === "cancel") {
@@ -840,7 +840,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * Drop 命中当前 Box 时按目标决定是本 Box 排序、移动到末尾，还是跨 Box 重新收纳。
+   * Drop 命中当前 Box 时按目标决定是本 Box 排序、移动到末尾，还是跨 Box 重新收纳
    */
   async function commitBoxItemDragDrop(
     payload: BoxItemDragPayload,
@@ -877,7 +877,7 @@ export function useBoxItemDragSession(options: {
   }
 
   /**
-   * 目标 Box 回执会同步给来源拖拽会话，防止拖到其他 Box 时被误判为拖出删除。
+   * 目标 Box 回执会同步给来源拖拽会话，防止拖到其他 Box 时被误判为拖出删除
    */
   function acceptBoxItemDragSession(sessionId: string): void {
     acceptedBoxItemDragSessions.add(sessionId);

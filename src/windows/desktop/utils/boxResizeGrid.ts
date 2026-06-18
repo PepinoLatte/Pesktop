@@ -4,7 +4,7 @@ import type { ResizeDirection } from "../composables/useBoxWindowFrame";
 import { DESKTOP_ICON_VIEW } from "../config/desktopIcon";
 
 /**
- * resize 读取到的是完整窗口边界，吸附时需要同时处理位置和尺寸。
+ * resize 读取到的是完整窗口边界，吸附时需要同时处理位置和尺寸
  */
 export interface BoxResizeWindowBounds {
   height: number;
@@ -14,7 +14,7 @@ export interface BoxResizeWindowBounds {
 }
 
 /**
- * 图标网格单元尺寸由用户配置实时决定，窗口 resize 时据此换算列数和行数。
+ * 图标网格单元尺寸由用户配置实时决定，窗口 resize 时据此换算列数和行数
  */
 interface BoxGridCellMetrics {
   height: number;
@@ -22,7 +22,7 @@ interface BoxGridCellMetrics {
 }
 
 /**
- * 将任意 Box 窗口边界吸附到最近的“列 x 行”网格尺寸，并根据拖拽边保持对侧锚点不漂移。
+ * 将任意 Box 窗口边界吸附到最近的“列 x 行”网格尺寸，并根据拖拽边保持对侧锚点不漂移
  */
 export function resolveBoxResizeGridSnappedBounds(
   bounds: BoxResizeWindowBounds,
@@ -58,7 +58,7 @@ export function resolveBoxResizeGridSnappedBounds(
 }
 
 /**
- * 图标按钮真实高度来自图标、可选双行标签、按钮内边距和图标/标签间距。
+ * 图标按钮真实高度来自图标、可选双行标签、按钮内边距和图标/标签间距
  */
 function resolveBoxGridCellMetrics(settings: AppSettings): BoxGridCellMetrics {
   const labelLineHeight = Math.max(14, Math.ceil(settings.boxLabelTextSize * 1.32));
@@ -79,7 +79,7 @@ function resolveBoxGridCellMetrics(settings: AppSettings): BoxGridCellMetrics {
 }
 
 /**
- * 单轴尺寸按最近单元数量吸附，同时保证最终尺寸不会低于 Tauri 窗口最小尺寸。
+ * 单轴尺寸按最近单元数量吸附，同时保证最终尺寸不会低于 Tauri 窗口最小尺寸
  */
 function resolveSnappedAxisSize(options: {
   cellSize: number;
@@ -108,14 +108,14 @@ function resolveSnappedAxisSize(options: {
 }
 
 /**
- * 从左侧缩放时右边缘应保持在用户拖动后的原位置，吸附只移动左边缘。
+ * 从左侧缩放时右边缘应保持在用户拖动后的原位置，吸附只移动左边缘
  */
 function shouldAnchorRightEdge(direction: ResizeDirection | null): boolean {
   return direction === "West" || direction === "NorthWest" || direction === "SouthWest";
 }
 
 /**
- * 从上方缩放时底边缘应保持在用户拖动后的原位置，吸附只移动上边缘。
+ * 从上方缩放时底边缘应保持在用户拖动后的原位置，吸附只移动上边缘
  */
 function shouldAnchorBottomEdge(direction: ResizeDirection | null): boolean {
   return direction === "North" || direction === "NorthEast" || direction === "NorthWest";

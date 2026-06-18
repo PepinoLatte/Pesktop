@@ -3,7 +3,7 @@ mod app_tray;
 mod commands;
 mod desktop;
 
-/// 启动 Dasktop 的 Tauri 运行时，只注册当前版本真实使用的命令和插件。
+/// 启动 Dasktop 的 Tauri 运行时，只注册当前版本真实使用的命令和插件
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()

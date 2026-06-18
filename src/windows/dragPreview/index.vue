@@ -15,7 +15,7 @@ import DesktopIconGlyph from "@/windows/desktop/components/DesktopIconGlyph.vue"
 import { DRAG_PREVIEW_WINDOW_READY_EVENT } from "./lifecycle";
 
 /**
- * 拖影窗口相对鼠标保留偏移，既能看见拖动对象，又不遮挡用户判断插入位置。
+ * 拖影窗口相对鼠标保留偏移，既能看见拖动对象，又不遮挡用户判断插入位置
  */
 const DRAG_PREVIEW_OFFSET = {
   x: 6,
@@ -23,12 +23,12 @@ const DRAG_PREVIEW_OFFSET = {
 } as const;
 
 /**
- * 透明预览窗额外留出少量画布，避免 Shell 图标阴影和快捷方式角标被窗口边缘裁切。
+ * 透明预览窗额外留出少量画布，避免 Shell 图标阴影和快捷方式角标被窗口边缘裁切
  */
 const DRAG_PREVIEW_WINDOW_MARGIN = 4;
 
 /**
- * 动态窗口尺寸跟随 Box 图标配置，用户调大图标或文件名宽度时拖影也不会被固定窗口裁掉。
+ * 动态窗口尺寸跟随 Box 图标配置，用户调大图标或文件名宽度时拖影也不会被固定窗口裁掉
  */
 interface DragPreviewWindowSize {
   height: number;
@@ -120,7 +120,7 @@ onUnmounted(() => {
 });
 
 /**
- * 拖影图标宽度和 Box 内图标按钮保持同一计算方式，避免拖动中视觉密度突然变化。
+ * 拖影图标宽度和 Box 内图标按钮保持同一计算方式，避免拖动中视觉密度突然变化
  */
 function resolvePreviewItemWidth(nextPreview: BoxItemDragPreviewOptions): number {
   return Math.max(
@@ -130,7 +130,7 @@ function resolvePreviewItemWidth(nextPreview: BoxItemDragPreviewOptions): number
 }
 
 /**
- * 预览窗外壳按当前 Box 图标配置动态缩放，内部布局仍使用与 Box 图标一致的 padding/gap。
+ * 预览窗外壳按当前 Box 图标配置动态缩放，内部布局仍使用与 Box 图标一致的 padding/gap
  */
 function resolvePreviewWindowSize(nextPreview: BoxItemDragPreviewOptions): DragPreviewWindowSize {
   const labelHeight = nextPreview.showItemLabels
@@ -146,7 +146,7 @@ function resolvePreviewWindowSize(nextPreview: BoxItemDragPreviewOptions): DragP
 }
 
 /**
- * 仅在尺寸变化时调用原生窗口调整，减少拖动中不必要的窗口重排。
+ * 仅在尺寸变化时调用原生窗口调整，减少拖动中不必要的窗口重排
  */
 async function resizePreviewWindow(nextPreview: BoxItemDragPreviewOptions): Promise<void> {
   const nextSize = resolvePreviewWindowSize(nextPreview);

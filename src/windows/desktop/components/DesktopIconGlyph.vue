@@ -6,7 +6,7 @@ import type { DesktopItem } from "@/entities/desktopItem/types";
 import { DESKTOP_ICON_VIEW } from "../config/desktopIcon";
 
 /**
- * 快捷方式角标按白底 Windows 蓝箭头绘制，保持原生快捷方式语义但减少旧样式留白。
+ * 快捷方式角标按白底 Windows 蓝箭头绘制，保持原生快捷方式语义但减少旧样式留白
  */
 const WINDOWS_SHORTCUT_BADGE = {
   viewBox: "0 0 16 16",
@@ -19,18 +19,18 @@ const WINDOWS_SHORTCUT_BADGE = {
   strokeColor: "#0964d8",
   strokeWidth: 2.3,
   /**
-   * SVG 折线视觉重心偏右下，渲染时轻微左移以贴近 Windows 角标观感。
+   * SVG 折线视觉重心偏右下，渲染时轻微左移以贴近 Windows 角标观感
    */
   svgOffsetX: -1,
   /**
-   * SVG 折线视觉重心偏右下，渲染时轻微上移以贴近 Windows 角标观感。
+   * SVG 折线视觉重心偏右下，渲染时轻微上移以贴近 Windows 角标观感
    */
   svgOffsetY: -0.5,
   svgSize: 18,
 } as const;
 
 /**
- * 桌面项目图标主体在 Box 和拖影窗口中复用，保证用户调节图标大小后两处视觉一致。
+ * 桌面项目图标主体在 Box 和拖影窗口中复用，保证用户调节图标大小后两处视觉一致
  */
 const props = defineProps<{
   iconSize: number;
@@ -85,7 +85,7 @@ const shortcutBadgeSvgStyle = computed(
 );
 
 /**
- * 快捷方式角标按参考图标尺寸等比缩放，避免拖影和 Box 图标出现比例差。
+ * 快捷方式角标按参考图标尺寸等比缩放，避免拖影和 Box 图标出现比例差
  */
 function scaleShortcutBadgeValue(value: number): number {
   const scale = Math.min(Math.max(shortcutBadgeScale.value, 0.72), 1.25);

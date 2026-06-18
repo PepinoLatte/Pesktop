@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::{DesktopItem, DesktopItemKind, DesktopSnapshot};
 
-/// 扫描用户桌面目录，返回可用于自绘图标的轻量元信息。
+/// 扫描用户桌面目录，返回可用于自绘图标的轻量元信息
 pub fn scan_desktop() -> io::Result<DesktopSnapshot> {
     let desktop_path = resolve_desktop_path();
     let mut items = Vec::new();
@@ -28,7 +28,7 @@ pub fn scan_desktop() -> io::Result<DesktopSnapshot> {
     })
 }
 
-/// 按真实路径解析项目元信息，支持 Box 收纳任意磁盘文件时继续复用 Windows Shell 图标逻辑。
+/// 按真实路径解析项目元信息，支持 Box 收纳任意磁盘文件时继续复用 Windows Shell 图标逻辑
 pub fn scan_paths(paths: &[String]) -> io::Result<Vec<DesktopItem>> {
     let mut seen_paths = HashSet::new();
     let mut items = Vec::new();
@@ -46,7 +46,7 @@ pub fn scan_paths(paths: &[String]) -> io::Result<Vec<DesktopItem>> {
     Ok(items)
 }
 
-/// 将文件系统路径转换成前端可展示的桌面项目；真实打开方式仍由系统 Shell 处理。
+/// 将文件系统路径转换成前端可展示的桌面项目；真实打开方式仍由系统 Shell 处理
 fn create_desktop_item(path: &Path) -> io::Result<DesktopItem> {
     let metadata = fs::metadata(path)?;
 
@@ -62,7 +62,7 @@ fn create_desktop_item(path: &Path) -> io::Result<DesktopItem> {
     })
 }
 
-/// 根目录这类路径没有 file_name，使用完整路径作为展示名可以避免空白项目。
+/// 根目录这类路径没有 file_name，使用完整路径作为展示名可以避免空白项目
 fn resolve_item_name(path: &Path) -> String {
     path.file_name()
         .map(|value| value.to_string_lossy().to_string())
@@ -70,7 +70,7 @@ fn resolve_item_name(path: &Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
-/// 优先使用 Windows 用户桌面路径，拿不到用户目录时才退回当前目录保证命令可返回。
+/// 优先使用 Windows 用户桌面路径，拿不到用户目录时才退回当前目录保证命令可返回
 fn resolve_desktop_path() -> PathBuf {
     if let Ok(profile_path) = env::var("USERPROFILE") {
         return PathBuf::from(profile_path).join("Desktop");
@@ -79,7 +79,7 @@ fn resolve_desktop_path() -> PathBuf {
     env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// 文件类型只用于选择前端图标，不参与真实文件的打开方式判断。
+/// 文件类型只用于选择前端图标，不参与真实文件的打开方式判断
 fn resolve_item_kind(path: &Path, is_dir: bool) -> DesktopItemKind {
     if is_dir {
         return DesktopItemKind::Folder;
@@ -92,7 +92,7 @@ fn resolve_item_kind(path: &Path, is_dir: bool) -> DesktopItemKind {
     }
 }
 
-/// 基于完整路径生成稳定 ID，避免重名文件在前端列表中互相覆盖。
+/// 基于完整路径生成稳定 ID，避免重名文件在前端列表中互相覆盖
 fn stable_item_id(path: &Path) -> String {
     path.to_string_lossy()
         .chars()
@@ -106,12 +106,12 @@ fn stable_item_id(path: &Path) -> String {
         .collect()
 }
 
-/// Windows 文件系统路径大小写不敏感，批量解析时用归一化键去重但不改变返回的真实路径。
+/// Windows 文件系统路径大小写不敏感，批量解析时用归一化键去重但不改变返回的真实路径
 fn normalize_path_key(path: &Path) -> String {
     path.to_string_lossy().replace('/', "\\").to_lowercase()
 }
 
-/// 读取系统 Shell 对该路径解析出的默认展示图像，失败时返回空值交给前端占位图标兜底。
+/// 读取系统 Shell 对该路径解析出的默认展示图像，失败时返回空值交给前端占位图标兜底
 #[cfg(target_os = "windows")]
 fn resolve_item_icon_data_url(path: &Path) -> Option<String> {
     windows_icon::resolve_shell_image_data_url(path)
@@ -119,7 +119,7 @@ fn resolve_item_icon_data_url(path: &Path) -> Option<String> {
         .flatten()
 }
 
-/// 非 Windows 平台暂不伪造图标，避免跨平台扫描结果和系统真实图标语义不一致。
+/// 非 Windows 平台暂不伪造图标，避免跨平台扫描结果和系统真实图标语义不一致
 #[cfg(not(target_os = "windows"))]
 fn resolve_item_icon_data_url(_path: &Path) -> Option<String> {
     None
@@ -150,7 +150,7 @@ mod windows_icon {
 
     const SHELL_IMAGE_SIZE: i32 = 96;
 
-    /// 按 Windows Shell 默认逻辑提取缩略图或图标，并编码成浏览器可直接渲染的 PNG data URL。
+    /// 按 Windows Shell 默认逻辑提取缩略图或图标，并编码成浏览器可直接渲染的 PNG data URL
     pub fn resolve_shell_image_data_url(path: &Path) -> io::Result<Option<String>> {
         if let Ok(Some(thumbnail)) = resolve_shell_thumbnail_data_url(path) {
             return Ok(Some(thumbnail));
@@ -159,7 +159,7 @@ mod windows_icon {
         resolve_shell_icon_data_url(path)
     }
 
-    /// Explorer 同源的 Shell 图像工厂会优先返回文件缩略图，普通文件则返回系统图标。
+    /// Explorer 同源的 Shell 图像工厂会优先返回文件缩略图，普通文件则返回系统图标
     fn resolve_shell_thumbnail_data_url(path: &Path) -> io::Result<Option<String>> {
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
         let wide_path = to_wide_path(path);
@@ -190,7 +190,7 @@ mod windows_icon {
         )))
     }
 
-    /// Shell 图像工厂不可用时，退回路径对应的大图标，保证每个桌面项都有可识别展示。
+    /// Shell 图像工厂不可用时，退回路径对应的大图标，保证每个桌面项都有可识别展示
     fn resolve_shell_icon_data_url(path: &Path) -> io::Result<Option<String>> {
         let wide_path = to_wide_path(path);
         let mut file_info = SHFILEINFOW::default();
@@ -218,7 +218,7 @@ mod windows_icon {
         pixels.map(|png| Some(format!("data:image/png;base64,{}", STANDARD.encode(png))))
     }
 
-    /// Windows API 接收 UTF-16 零结尾路径，保留原始路径可让 `.lnk` 走系统快捷方式解析。
+    /// Windows API 接收 UTF-16 零结尾路径，保留原始路径可让 `.lnk` 走系统快捷方式解析
     fn to_wide_path(path: &Path) -> Vec<u16> {
         path.to_string_lossy()
             .encode_utf16()
@@ -226,7 +226,7 @@ mod windows_icon {
             .collect()
     }
 
-    /// 将 HICON 转换为 PNG 字节；这里显式释放 GDI 对象，避免频繁刷新桌面时泄漏句柄。
+    /// 将 HICON 转换为 PNG 字节；这里显式释放 GDI 对象，避免频繁刷新桌面时泄漏句柄
     unsafe fn icon_to_png_rgba(
         icon: windows::Win32::UI::WindowsAndMessaging::HICON,
     ) -> io::Result<Vec<u8>> {
@@ -241,7 +241,7 @@ mod windows_icon {
         result
     }
 
-    /// 从彩色位图读取 32 位像素并转为 PNG，保持 Alpha 通道以匹配 Windows 原生图标透明边缘。
+    /// 从彩色位图读取 32 位像素并转为 PNG，保持 Alpha 通道以匹配 Windows 原生图标透明边缘
     unsafe fn bitmap_to_png(bitmap: HBITMAP) -> io::Result<Vec<u8>> {
         if bitmap.is_invalid() {
             return Err(io::Error::new(
@@ -309,7 +309,7 @@ mod windows_icon {
         encode_png(width as u32, height as u32, &rgba)
     }
 
-    /// PNG 编码失败不会中断桌面扫描，上层会回退到语义图标。
+    /// PNG 编码失败不会中断桌面扫描，上层会回退到语义图标
     fn encode_png(width: u32, height: u32, rgba: &[u8]) -> io::Result<Vec<u8>> {
         let mut png_bytes = Vec::new();
         {
@@ -327,7 +327,7 @@ mod windows_icon {
         Ok(png_bytes)
     }
 
-    /// Windows API 失败时携带调用点，便于后续定位具体系统能力问题。
+    /// Windows API 失败时携带调用点，便于后续定位具体系统能力问题
     fn last_os_error(operation: &str) -> io::Error {
         let code = unsafe { GetLastError() };
         io::Error::new(

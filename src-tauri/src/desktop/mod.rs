@@ -1,4 +1,4 @@
-//! 桌面扫描模块只读取真实桌面文件元信息，不接管 Windows Shell 渲染层。
+//! 桌面扫描模块只读取真实桌面文件元信息，不接管 Windows Shell 渲染层
 
 mod native_icons;
 mod scanner;

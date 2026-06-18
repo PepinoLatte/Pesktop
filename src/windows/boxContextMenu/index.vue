@@ -37,7 +37,7 @@ let activeOpenRequestId = "";
 type BoxAutoCollapseMode = "always" | "rollup";
 
 /**
- * Box 菜单里的标题位置使用紧凑分段控件，选项属于单个 Box 的窗口偏好。
+ * Box 菜单里的标题位置使用紧凑分段控件，选项属于单个 Box 的窗口偏好
  */
 const BOX_TITLE_POSITION_OPTIONS: Array<{
   label: string;
@@ -48,7 +48,7 @@ const BOX_TITLE_POSITION_OPTIONS: Array<{
 ];
 
 /**
- * 菜单中的分段控件使用固定列宽，防止不同主题字体下文字把菜单撑宽。
+ * 菜单中的分段控件使用固定列宽，防止不同主题字体下文字把菜单撑宽
  */
 const BOX_MENU_SEGMENT_WIDTH = {
   collapse: 54,
@@ -56,7 +56,7 @@ const BOX_MENU_SEGMENT_WIDTH = {
 } as const;
 
 /**
- * 是否自动收起属于当前 Box 自身状态，用开关语义降低配置理解成本。
+ * 是否自动收起属于当前 Box 自身状态，用开关语义降低配置理解成本
  */
 const BOX_AUTO_COLLAPSE_OPTIONS: Array<{
   label: string;
@@ -73,7 +73,7 @@ const box = computed(() =>
 );
 
 /**
- * 自动收起分段控件使用字符串值承载 UI 状态，落库时再转换为 Box 的布尔字段。
+ * 自动收起分段控件使用字符串值承载 UI 状态，落库时再转换为 Box 的布尔字段
  */
 const boxAutoCollapseMode = computed<BoxAutoCollapseMode>(() =>
   box.value?.collapsed ? "rollup" : "always",
@@ -113,7 +113,7 @@ onMounted(async () => {
 });
 
 /**
- * 销毁时清理跨窗口监听和动画句柄，避免开发热更新后重复响应菜单事件。
+ * 销毁时清理跨窗口监听和动画句柄，避免开发热更新后重复响应菜单事件
  */
 onUnmounted(() => {
   menuAnimation?.stop();
@@ -125,7 +125,7 @@ onUnmounted(() => {
 });
 
 /**
- * Escape 是系统菜单的常见关闭方式，给键盘用户保留一致退路。
+ * Escape 是系统菜单的常见关闭方式，给键盘用户保留一致退路
  */
 function handleKeyDown(event: KeyboardEvent): void {
   if (event.key === "Escape") {
@@ -134,7 +134,7 @@ function handleKeyDown(event: KeyboardEvent): void {
 }
 
 /**
- * 隐藏窗口里先渲染菜单并写入动画首帧，避免原生窗口 show 时闪出旧内容。
+ * 隐藏窗口里先渲染菜单并写入动画首帧，避免原生窗口 show 时闪出旧内容
  */
 async function prepareMenuOpen(boxId: string, requestId: string): Promise<void> {
   activeOpenRequestId = requestId;
@@ -159,7 +159,7 @@ async function prepareMenuOpen(boxId: string, requestId: string): Promise<void> 
 }
 
 /**
- * 菜单打开只播放 motion 进入动画，窗口创建和首帧准备已在 hidden 阶段完成。
+ * 菜单打开只播放 motion 进入动画，窗口创建和首帧准备已在 hidden 阶段完成
  */
 async function openAnimated(boxId: string, requestId: string): Promise<void> {
   if (activeOpenRequestId !== requestId) {
@@ -201,7 +201,7 @@ async function openAnimated(boxId: string, requestId: string): Promise<void> {
   try {
     await menuAnimation.finished;
   } catch {
-    // motion 在被新动画打断时会拒绝 finished，版本号会阻止旧动画继续收尾。
+    // motion 在被新动画打断时会拒绝 finished，版本号会阻止旧动画继续收尾
   } finally {
     if (activeAnimationVersion === menuAnimationVersion) {
       menuAnimation = null;
@@ -210,7 +210,7 @@ async function openAnimated(boxId: string, requestId: string): Promise<void> {
 }
 
 /**
- * 菜单关闭先播放 motion 退出动画，再隐藏预载窗口，后续打开可以复用同一个 WebView。
+ * 菜单关闭先播放 motion 退出动画，再隐藏预载窗口，后续打开可以复用同一个 WebView
  */
 async function closeAnimated(requestedBoxId?: string): Promise<void> {
   const closingBoxId = activeBoxId.value;
@@ -256,14 +256,14 @@ async function closeAnimated(requestedBoxId?: string): Promise<void> {
   try {
     await menuAnimation.finished;
   } catch {
-    // 退出动画被新的打开动作打断时不再隐藏窗口，避免快速切换时闪烁。
+    // 退出动画被新的打开动作打断时不再隐藏窗口，避免快速切换时闪烁
   } finally {
     await finishCloseAnimation(activeAnimationVersion);
   }
 }
 
 /**
- * 关闭动画收尾必须检查版本号，避免旧的退出动画覆盖新的菜单打开状态。
+ * 关闭动画收尾必须检查版本号，避免旧的退出动画覆盖新的菜单打开状态
  */
 async function finishCloseAnimation(activeAnimationVersion: number): Promise<void> {
   if (activeAnimationVersion !== menuAnimationVersion) {
@@ -277,7 +277,7 @@ async function finishCloseAnimation(activeAnimationVersion: number): Promise<voi
 }
 
 /**
- * 减少动态效果时直接写入终态，既保留可见性语义，也遵守系统辅助功能设置。
+ * 减少动态效果时直接写入终态，既保留可见性语义，也遵守系统辅助功能设置
  */
 function applyMenuVisibleState(opacity: number, transform: string): void {
   const menuElement = menuRef.value;
@@ -290,21 +290,21 @@ function applyMenuVisibleState(opacity: number, transform: string): void {
 }
 
 /**
- * 动效统一通过 motion 承载，但系统要求减少动态效果时仍需要跳过过渡。
+ * 动效统一通过 motion 承载，但系统要求减少动态效果时仍需要跳过过渡
  */
 function shouldReduceMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 /**
- * 菜单失焦可能由更多按钮二次点击触发，父窗口据此避免把这次 click 当成重新打开。
+ * 菜单失焦可能由更多按钮二次点击触发，父窗口据此避免把这次 click 当成重新打开
  */
 function resolveCloseReason(): "blur" | "request" {
   return performance.now() - lastBlurCloseAt <= 120 ? "blur" : "request";
 }
 
 /**
- * Box 菜单只负责唤起设置页，具体配置仍由主窗口统一承载。
+ * Box 菜单只负责唤起设置页，具体配置仍由主窗口统一承载
  */
 async function openSettingsFromMenu(): Promise<void> {
   void closeAnimated();
@@ -312,7 +312,7 @@ async function openSettingsFromMenu(): Promise<void> {
 }
 
 /**
- * 新增 Box 复用桌面 Store 和窗口打开逻辑，确保菜单入口与设置页创建行为一致。
+ * 新增 Box 复用桌面 Store 和窗口打开逻辑，确保菜单入口与设置页创建行为一致
  */
 async function createBoxFromMenu(): Promise<void> {
   clearBoxDeleteConfirmation();
@@ -323,7 +323,7 @@ async function createBoxFromMenu(): Promise<void> {
 }
 
 /**
- * 刷新只重新读取桌面目录，不改变任何 Box 布局和真实文件位置。
+ * 刷新只重新读取桌面目录，不改变任何 Box 布局和真实文件位置
  */
 async function refreshDesktopFromMenu(): Promise<void> {
   void closeAnimated();
@@ -331,7 +331,7 @@ async function refreshDesktopFromMenu(): Promise<void> {
 }
 
 /**
- * Box 标题位置从菜单直接切换，适合用户在整理时即时调整窗口布局。
+ * Box 标题位置从菜单直接切换，适合用户在整理时即时调整窗口布局
  */
 async function updateTitlePositionFromMenu(position: DesktopBoxTitlePosition): Promise<void> {
   if (!box.value) {
@@ -343,7 +343,7 @@ async function updateTitlePositionFromMenu(position: DesktopBoxTitlePosition): P
 }
 
 /**
- * 自动收起属于当前 Box 的桌面整理习惯，落库后由对应 Box 窗口自行同步窗口高度。
+ * 自动收起属于当前 Box 的桌面整理习惯，落库后由对应 Box 窗口自行同步窗口高度
  */
 async function updateBoxAutoCollapseFromMenu(mode: BoxAutoCollapseMode): Promise<void> {
   if (!box.value) {
@@ -355,7 +355,7 @@ async function updateBoxAutoCollapseFromMenu(mode: BoxAutoCollapseMode): Promise
 }
 
 /**
- * 锁定只冻结当前 Box 的几何操作，不影响内部图标打开、排序和右键。
+ * 锁定只冻结当前 Box 的几何操作，不影响内部图标打开、排序和右键
  */
 async function toggleBoxLockedFromMenu(): Promise<void> {
   if (!box.value) {
@@ -367,7 +367,7 @@ async function toggleBoxLockedFromMenu(): Promise<void> {
 }
 
 /**
- * 闲置可见度从菜单滑块实时保存，0 表示未 hover 时整个 Box 隐形，hover 后仍恢复可见。
+ * 闲置可见度从菜单滑块实时保存，0 表示未 hover 时整个 Box 隐形，hover 后仍恢复可见
  */
 async function updateIdleOpacityFromMenu(event: Event): Promise<void> {
   if (!box.value) {
@@ -380,7 +380,7 @@ async function updateIdleOpacityFromMenu(event: Event): Promise<void> {
 }
 
 /**
- * 删除 Box 只删除分组窗口和映射，真实桌面文件继续交给 Windows 管理。
+ * 删除 Box 只删除分组窗口和映射，真实桌面文件继续交给 Windows 管理
  */
 async function deleteCurrentBox(): Promise<void> {
   if (!box.value) {

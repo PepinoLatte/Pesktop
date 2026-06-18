@@ -4,12 +4,12 @@ import type { Component } from "vue";
 import { animate } from "motion";
 
 /**
- * 分段控件只负责通用选项展示和选择事件，具体业务文案与枚举由调用方维护。
+ * 分段控件只负责通用选项展示和选择事件，具体业务文案与枚举由调用方维护
  */
 const props = withDefaults(
   defineProps<{
     /**
-     * 密度只影响控件自身高度和内边距，业务侧仍通过 optionWidthPx 控制横向容量。
+     * 密度只影响控件自身高度和内边距，业务侧仍通过 optionWidthPx 控制横向容量
      */
     density?: "compact" | "default";
     modelValue: Value;
@@ -37,7 +37,7 @@ const activeIndex = computed(() =>
   ),
 );
 /**
- * 分段项使用固定基础宽度，保证带图标的主题选项和纯文本选项都能居中且不换行。
+ * 分段项使用固定基础宽度，保证带图标的主题选项和纯文本选项都能居中且不换行
  */
 const SEGMENTED_CONTROL_LAYOUT = {
   defaultPaddingWidthPx: 8,
@@ -78,7 +78,7 @@ onUnmounted(() => {
 });
 
 /**
- * 分段控件滑块统一由 motion 驱动，避免不同调用方各写一套 CSS 动画导致节奏不一致。
+ * 分段控件滑块统一由 motion 驱动，避免不同调用方各写一套 CSS 动画导致节奏不一致
  */
 function animateSegmentIndicator(nextTranslateX: number): void {
   const indicatorElement = indicatorRef.value;
@@ -113,7 +113,7 @@ function animateSegmentIndicator(nextTranslateX: number): void {
 }
 
 /**
- * 初始渲染和减少动态效果时直接写入滑块位置，避免首帧出现无意义位移。
+ * 初始渲染和减少动态效果时直接写入滑块位置，避免首帧出现无意义位移
  */
 function applySegmentIndicatorTransform(nextTranslateX: number): void {
   if (!indicatorRef.value) {
@@ -124,7 +124,7 @@ function applySegmentIndicatorTransform(nextTranslateX: number): void {
 }
 
 /**
- * 系统减少动态效果时，分段控件保持即时切换，不额外制造横移动画。
+ * 系统减少动态效果时，分段控件保持即时切换，不额外制造横移动画
  */
 function shouldReduceMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;

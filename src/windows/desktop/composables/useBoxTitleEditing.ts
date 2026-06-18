@@ -2,7 +2,7 @@ import { nextTick, ref, type ComponentPublicInstance, type ComputedRef } from "v
 import type { DesktopBox } from "@/entities/desktopBox/types";
 
 /**
- * 标题编辑组合式逻辑只处理 Box 显示名称，不触碰真实桌面文件名。
+ * 标题编辑组合式逻辑只处理 Box 显示名称，不触碰真实桌面文件名
  */
 export function useBoxTitleEditing(
   box: ComputedRef<DesktopBox | undefined>,
@@ -14,7 +14,7 @@ export function useBoxTitleEditing(
   const titleInputRef = ref<HTMLInputElement | null>(null);
 
   /**
-   * Box 标题双击进入编辑态，只修改 Dasktop 的分组名称，不重命名真实桌面文件。
+   * Box 标题双击进入编辑态，只修改 Dasktop 的分组名称，不重命名真实桌面文件
    */
   function startTitleEditing(event: MouseEvent): void {
     event.stopPropagation();
@@ -33,7 +33,7 @@ export function useBoxTitleEditing(
   }
 
   /**
-   * 保存标题时允许空文本，设置页会用兜底名称识别该 Box，不强迫用户显示标题。
+   * 保存标题时允许空文本，设置页会用兜底名称识别该 Box，不强迫用户显示标题
    */
   async function commitTitleEditing(): Promise<void> {
     if (!box.value || !isEditingTitle.value) {
@@ -54,7 +54,7 @@ export function useBoxTitleEditing(
   }
 
   /**
-   * 取消编辑只还原标题草稿，不触发数据库写入。
+   * 取消编辑只还原标题草稿，不触发数据库写入
    */
   function cancelTitleEditing(): void {
     titleDraft.value = box.value?.title ?? "";
@@ -62,7 +62,7 @@ export function useBoxTitleEditing(
   }
 
   /**
-   * 模板函数 ref 将真实输入框写回组合式逻辑，保证进入编辑态后的聚焦行为稳定可控。
+   * 模板函数 ref 将真实输入框写回组合式逻辑，保证进入编辑态后的聚焦行为稳定可控
    */
   function setTitleInputRef(element: Element | ComponentPublicInstance | null): void {
     titleInputRef.value = element instanceof HTMLInputElement ? element : null;

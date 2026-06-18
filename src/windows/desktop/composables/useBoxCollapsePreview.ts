@@ -12,7 +12,7 @@ import {
 } from "@/entities/desktopBox/layout";
 
 /**
- * 收缩动画最终写回原生窗口时同时包含位置和尺寸，标题在下方时需要用它保持标题视觉锚点。
+ * 收缩动画最终写回原生窗口时同时包含位置和尺寸，标题在下方时需要用它保持标题视觉锚点
  */
 interface LogicalWindowFrame {
   height: number;
@@ -22,14 +22,14 @@ interface LogicalWindowFrame {
 }
 
 /**
- * 屏幕坐标换算结果只暴露 hover 判定所需字段，避免收缩逻辑反向依赖拖拽排序细节。
+ * 屏幕坐标换算结果只暴露 hover 判定所需字段，避免收缩逻辑反向依赖拖拽排序细节
  */
 interface BoxPointerLocalPoint {
   inside: boolean;
 }
 
 /**
- * Box 收缩预览组合式逻辑集中管理临时展开、收起动画和闲置透明度，不直接持久化 Box 数据。
+ * Box 收缩预览组合式逻辑集中管理临时展开、收起动画和闲置透明度，不直接持久化 Box 数据
  */
 export function useBoxCollapsePreview(options: {
   applyWindowFrame: (frame: LogicalWindowFrame) => Promise<void>;
@@ -58,7 +58,7 @@ export function useBoxCollapsePreview(options: {
   );
   const collapsedWindowHeight = computed(() => BOX_TITLE_VISIBILITY.expandedHeight);
   /**
-   * 标题在下方时，内容区高度跟随可视高度变化，让标题自身从下往上收到顶部入口。
+   * 标题在下方时，内容区高度跟随可视高度变化，让标题自身从下往上收到顶部入口
    */
   const isBottomTitleMovingDuringCollapse = computed(() =>
     Boolean(
@@ -125,14 +125,14 @@ export function useBoxCollapsePreview(options: {
     },
   );
   /**
-   * 收缩窗口高度动画期间隐藏内部滚动条，避免 WebView 中间高度小于内容高度时闪出滚动条。
+   * 收缩窗口高度动画期间隐藏内部滚动条，避免 WebView 中间高度小于内容高度时闪出滚动条
    */
   const boxGridOverflowClass = computed(() =>
     isCollapseAnimating.value || isBoxCollapsedToTitle.value ? "overflow-hidden" : "overflow-auto",
   );
   let isApplyingCollapseWindowSize = false;
   /**
-   * 收缩动画可能被快速 hover 切换打断，版本号用于阻止旧动画的异步收尾覆盖新状态。
+   * 收缩动画可能被快速 hover 切换打断，版本号用于阻止旧动画的异步收尾覆盖新状态
    */
   let collapseAnimationVersion = 0;
   let collapseAnimationTween: ReturnType<typeof animate> | null = null;
@@ -142,7 +142,7 @@ export function useBoxCollapsePreview(options: {
   let lastAppliedWindowHeight: number | null = null;
 
   /**
-   * 自动收起关闭后必须释放临时展开状态，否则旧的预览入口会持续把闲置透明度覆盖为完全可见。
+   * 自动收起关闭后必须释放临时展开状态，否则旧的预览入口会持续把闲置透明度覆盖为完全可见
    */
   watch(
     () => options.box.value?.collapsed,
@@ -156,7 +156,7 @@ export function useBoxCollapsePreview(options: {
   );
 
   /**
-   * 根据收缩展示状态调整真实窗口高度，避免透明空白窗口挡住桌面点击。
+   * 根据收缩展示状态调整真实窗口高度，避免透明空白窗口挡住桌面点击
    */
   async function applyCollapseWindowSize(shouldAnimate: boolean): Promise<void> {
     if (!options.box.value) {
@@ -225,7 +225,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * motion 驱动 Box 闲置可见度，hover 进入时即使配置为 0 也能平滑恢复到完全可见。
+   * motion 驱动 Box 闲置可见度，hover 进入时即使配置为 0 也能平滑恢复到完全可见
    */
   function animateBoxIdleOpacity(shouldAnimate: boolean): void {
     const surfaceElement = options.boxSurfaceRef.value;
@@ -258,14 +258,14 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 减少动态效果时直接应用终态，遵守系统辅助功能设置。
+   * 减少动态效果时直接应用终态，遵守系统辅助功能设置
    */
   function shouldReduceMotion(): boolean {
     return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }
 
   /**
-   * 收缩触发闲置透明时延后淡出，让用户先感知 Box 收回动作，再看到透明度过渡。
+   * 收缩触发闲置透明时延后淡出，让用户先感知 Box 收回动作，再看到透明度过渡
    */
   function resolveBoxIdleOpacityAnimationDelay(): number {
     if (boxIdleOpacity.value >= 1 || !isBoxCollapsedToTitle.value) {
@@ -276,7 +276,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 闲置隐藏比 hover 显示略慢，保留柔和淡出；显示仍保持短时长以确保指针进入后立即可操作。
+   * 闲置隐藏比 hover 显示略慢，保留柔和淡出；显示仍保持短时长以确保指针进入后立即可操作
    */
   function resolveBoxIdleOpacityAnimationDuration(): number {
     const durationMs =
@@ -288,7 +288,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 状态切换到“只保留标题”后，Vue 会先计算一次布局；提前给出动画起点可避免底部标题先塌到顶部再弹回。
+   * 状态切换到“只保留标题”后，Vue 会先计算一次布局；提前给出动画起点可避免底部标题先塌到顶部再弹回
    */
   function resolveOptimisticAnimationStartHeight(): number {
     const currentBox = options.box.value;
@@ -320,7 +320,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 收缩态统一保留 Box 顶部标题入口，底部标题通过内部布局从下往上移动到这个入口。
+   * 收缩态统一保留 Box 顶部标题入口，底部标题通过内部布局从下往上移动到这个入口
    */
   function resolveCollapseWindowFrame(width: number, height: number): LogicalWindowFrame {
     if (!options.box.value) {
@@ -341,7 +341,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 所有收缩尺寸写入都在这里记录最终高度，后续动画可用它判断当前窗口是完整态还是标题态。
+   * 所有收缩尺寸写入都在这里记录最终高度，后续动画可用它判断当前窗口是完整态还是标题态
    */
   async function applyCollapseFrame(frame: LogicalWindowFrame): Promise<void> {
     await options.applyWindowFrame(frame);
@@ -349,7 +349,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 收缩动画完成后一次性同步真实窗口高度，避免动画过程中暴露 Windows 原生直角边界。
+   * 收缩动画完成后一次性同步真实窗口高度，避免动画过程中暴露 Windows 原生直角边界
    */
   function finishCollapseWindowResize(
     activeCollapseAnimationVersion: number,
@@ -367,7 +367,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 收缩动画期间屏蔽 resize 落库，最终同步真实窗口高度时也不能覆盖用户保存的 Box 尺寸。
+   * 收缩动画期间屏蔽 resize 落库，最终同步真实窗口高度时也不能覆盖用户保存的 Box 尺寸
    */
   function setCollapseSizeApplyLock(animationMs = 0): void {
     isApplyingCollapseWindowSize = true;
@@ -386,7 +386,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 取消未完成的 motion 收缩动画，用于快速 hover 切换或窗口卸载。
+   * 取消未完成的 motion 收缩动画，用于快速 hover 切换或窗口卸载
    */
   function cancelCollapseAnimationTween(): void {
     if (!collapseAnimationTween) {
@@ -399,7 +399,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 完整清理收缩动画和尺寸锁，避免窗口关闭后继续触发异步 setSize。
+   * 完整清理收缩动画和尺寸锁，避免窗口关闭后继续触发异步 setSize
    */
   function clearCollapseWindowAnimation(): void {
     collapseAnimationVersion += 1;
@@ -417,7 +417,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 清理延迟收起计时器，所有进入 Box、菜单、拖动和缩放的交互都应先取消旧的收起任务。
+   * 清理延迟收起计时器，所有进入 Box、菜单、拖动和缩放的交互都应先取消旧的收起任务
    */
   function clearCollapsedPreviewCloseTimer(): void {
     if (!collapsePreviewCloseTimer) {
@@ -429,7 +429,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 收起预览状态只在自动收起模式内有效，退出该模式或延迟关闭时需要一起清理计时器和标记位。
+   * 收起预览状态只在自动收起模式内有效，退出该模式或延迟关闭时需要一起清理计时器和标记位
    */
   function closeCollapsedPreview(): void {
     clearCollapsedPreviewCloseTimer();
@@ -437,7 +437,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 交互命中 Box 时使用同一套展开入口；拖拽命中也按普通鼠标进入处理，不再维护独立拖拽展开状态。
+   * 交互命中 Box 时使用同一套展开入口；拖拽命中也按普通鼠标进入处理，不再维护独立拖拽展开状态
    */
   function openCollapsedPreviewForActiveInteraction(): void {
     clearCollapsedPreviewCloseTimer();
@@ -447,7 +447,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 判断是否存在需要保持 Box 展开的交互，避免菜单、缩放、拖动过程中被 mouseleave 抢先收起。
+   * 判断是否存在需要保持 Box 展开的交互，避免菜单、缩放、拖动过程中被 mouseleave 抢先收起
    */
   function shouldKeepCollapsedPreviewOpen(): boolean {
     return (
@@ -463,7 +463,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 拖拽坐标命中独立于真实 mouseenter/mouseleave，避免拖拽结束后把普通 hover 状态卡住。
+   * 拖拽坐标命中独立于真实 mouseenter/mouseleave，避免拖拽结束后把普通 hover 状态卡住
    */
   function setDragHoveringBox(isHovering: boolean): void {
     isDragHoveringBox.value = isHovering;
@@ -476,7 +476,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 拖拽结束后用最终屏幕坐标恢复普通 hover 状态，避免拖拽 hover 残留或误清真实鼠标停留。
+   * 拖拽结束后用最终屏幕坐标恢复普通 hover 状态，避免拖拽 hover 残留或误清真实鼠标停留
    */
   async function syncPointerHoverFromScreenPoint(screenX: number, screenY: number): Promise<void> {
     const localPoint = await options.resolvePointerLocalPoint(screenX, screenY);
@@ -491,7 +491,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 鼠标离开后延迟收起，给用户从标题移动到边缘缩放或菜单窗口留出缓冲时间。
+   * 鼠标离开后延迟收起，给用户从标题移动到边缘缩放或菜单窗口留出缓冲时间
    */
   function scheduleCollapsedPreviewClose(): void {
     clearCollapsedPreviewCloseTimer();
@@ -508,7 +508,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 状态退出时统一刷新收起计划，保证透明度淡出只会在收缩动画真正启动后再延迟发生。
+   * 状态退出时统一刷新收起计划，保证透明度淡出只会在收缩动画真正启动后再延迟发生
    */
   function refreshCollapsedPreviewCloseSchedule(): void {
     if (shouldKeepCollapsedPreviewOpen()) {
@@ -520,7 +520,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * Box 区域 hover 进入时取消延迟收起；收缩态窗口只剩标题高度，因此进入可见区域等同于进入标题入口。
+   * Box 区域 hover 进入时取消延迟收起；收缩态窗口只剩标题高度，因此进入可见区域等同于进入标题入口
    */
   function handleBoxMouseEnter(): void {
     isBoxHovered.value = true;
@@ -528,7 +528,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 标题 hover 是收缩 Box 的展开入口，内容是否展开仍由标题区域单独控制。
+   * 标题 hover 是收缩 Box 的展开入口，内容是否展开仍由标题区域单独控制
    */
   function handleBoxTitleMouseEnter(): void {
     isTitleHovered.value = true;
@@ -536,7 +536,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 离开标题后只取消 roll-up 展开入口，内容收回仍等鼠标离开整个 Box。
+   * 离开标题后只取消 roll-up 展开入口，内容收回仍等鼠标离开整个 Box
    */
   function handleBoxTitleMouseLeave(): void {
     isTitleHovered.value = false;
@@ -544,7 +544,7 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 鼠标离开整个 Box 后延迟收回临时展开内容，避免移动到菜单或缩放边缘时立刻收缩。
+   * 鼠标离开整个 Box 后延迟收回临时展开内容，避免移动到菜单或缩放边缘时立刻收缩
    */
   function handleBoxMouseLeave(): void {
     isBoxHovered.value = false;

@@ -18,7 +18,7 @@ import type { AppSettings } from "@/entities/appSettings/types";
 import { resolveBoxResizeGridSnappedBounds } from "../utils/boxResizeGrid";
 
 /**
- * 物理坐标用于和 Tauri 窗口移动事件保持同一坐标体系，高 DPI 下再单独换算逻辑坐标。
+ * 物理坐标用于和 Tauri 窗口移动事件保持同一坐标体系，高 DPI 下再单独换算逻辑坐标
  */
 export interface PhysicalWindowPoint {
   x: number;
@@ -26,7 +26,7 @@ export interface PhysicalWindowPoint {
 }
 
 /**
- * 收缩动画最终写回原生窗口时同时包含位置和尺寸，标题在下方时需要用它保持标题视觉锚点。
+ * 收缩动画最终写回原生窗口时同时包含位置和尺寸，标题在下方时需要用它保持标题视觉锚点
  */
 export interface LogicalWindowFrame {
   height: number;
@@ -36,7 +36,7 @@ export interface LogicalWindowFrame {
 }
 
 /**
- * 屏幕物理坐标换算到当前 Box WebView 的结果，目标窗口据此判断是否命中自身。
+ * 屏幕物理坐标换算到当前 Box WebView 的结果，目标窗口据此判断是否命中自身
  */
 export interface BoxItemDragLocalPoint {
   inside: boolean;
@@ -45,7 +45,7 @@ export interface BoxItemDragLocalPoint {
 }
 
 /**
- * 屏幕工作区使用物理坐标保存，拖动时可直接和窗口物理坐标比较，避免高 DPI 下贴边偏移。
+ * 屏幕工作区使用物理坐标保存，拖动时可直接和窗口物理坐标比较，避免高 DPI 下贴边偏移
  */
 interface PhysicalWorkArea {
   height: number;
@@ -55,7 +55,7 @@ interface PhysicalWorkArea {
 }
 
 /**
- * 手写拖动状态保存鼠标与窗口左上角的偏移，实时移动时复用窗口尺寸和缩放系数。
+ * 手写拖动状态保存鼠标与窗口左上角的偏移，实时移动时复用窗口尺寸和缩放系数
  */
 interface ManualDragState {
   cursorStartX: number;
@@ -72,7 +72,7 @@ interface ManualDragState {
 }
 
 /**
- * 手动 resize 用逻辑坐标保存起始窗口边界，鼠标轮询使用物理坐标再按 DPI 换算。
+ * 手动 resize 用逻辑坐标保存起始窗口边界，鼠标轮询使用物理坐标再按 DPI 换算
  */
 interface ManualResizeState {
   cursorStartX: number;
@@ -94,7 +94,7 @@ export type ResizeDirection =
   | "West";
 
 /**
- * 无边框 Box 需要显式提供缩放热区，否则透明窗口在 Windows 上不一定有稳定边缘命中。
+ * 无边框 Box 需要显式提供缩放热区，否则透明窗口在 Windows 上不一定有稳定边缘命中
  */
 const resizeHandles: Array<{
   direction: ResizeDirection;
@@ -111,7 +111,7 @@ const resizeHandles: Array<{
 ];
 
 /**
- * 只声明当前桌面窗口用到的 Tauri 能力，降低组合式逻辑对具体窗口类的类型耦合。
+ * 只声明当前桌面窗口用到的 Tauri 能力，降低组合式逻辑对具体窗口类的类型耦合
  */
 interface DesktopWindowHandle {
   innerPosition: () => Promise<PhysicalWindowPoint>;
@@ -124,14 +124,14 @@ interface DesktopWindowHandle {
 }
 
 /**
- * Store 更新选项只暴露本模块需要的 sanitize 标记，避免把整个 Store 类型带进窗口几何层。
+ * Store 更新选项只暴露本模块需要的 sanitize 标记，避免把整个 Store 类型带进窗口几何层
  */
 interface UpdateBoxOptions {
   sanitize?: boolean;
 }
 
 /**
- * Box 窗口框架组合式逻辑负责原生窗口位置、尺寸、拖动、缩放和边界落库。
+ * Box 窗口框架组合式逻辑负责原生窗口位置、尺寸、拖动、缩放和边界落库
  */
 export function useBoxWindowFrame(options: {
   box: ComputedRef<DesktopBox | undefined>;
@@ -171,7 +171,7 @@ export function useBoxWindowFrame(options: {
   let resizeReleasedStableTicks = 0;
 
   /**
-   * 初始化时用持久化数据校准窗口尺寸，防止分辨率变化后窗口状态与数据库脱节。
+   * 初始化时用持久化数据校准窗口尺寸，防止分辨率变化后窗口状态与数据库脱节
    */
   async function syncWindowBoundsFromStore(): Promise<void> {
     if (!options.box.value) {
@@ -200,7 +200,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 收缩和展开会主动调整窗口几何状态，需要加移动锁，防止 onMoved 把临时标题位置误写入数据库。
+   * 收缩和展开会主动调整窗口几何状态，需要加移动锁，防止 onMoved 把临时标题位置误写入数据库
    */
   async function applyCollapseWindowFrame(frame: LogicalWindowFrame): Promise<void> {
     const applyVersion = windowPositionApplyVersion + 1;
@@ -222,7 +222,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 外部窗口移动只负责持久化，手写拖动期间的位置由拖动循环统一保存。
+   * 外部窗口移动只负责持久化，手写拖动期间的位置由拖动循环统一保存
    */
   async function handleWindowMoved(x: number, y: number): Promise<void> {
     if (isApplyingWindowPosition || manualDragState) {
@@ -233,7 +233,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * resize 由自定义热区接管，原生边框缩放保持关闭，避免绕过网格化尺寸计算。
+   * resize 由自定义热区接管，原生边框缩放保持关闭，避免绕过网格化尺寸计算
    */
   function syncNativeWindowResizable(): void {
     const applyVersion = windowResizableApplyVersion + 1;
@@ -249,7 +249,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 拖动只从标题栏触发，避免图标区域的拖拽和窗口移动互相抢事件。
+   * 拖动只从标题栏触发，避免图标区域的拖拽和窗口移动互相抢事件
    */
   function startDragging(event: MouseEvent): void {
     if (
@@ -266,7 +266,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 鼠标命中缩放热区时保持展开，防止刚出现 resize 光标就被自动收起打断。
+   * 鼠标命中缩放热区时保持展开，防止刚出现 resize 光标就被自动收起打断
    */
   function handleResizeHandleMouseEnter(): void {
     isResizeHandleHovered.value = true;
@@ -274,7 +274,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 离开缩放热区后回到统一延迟收起调度，避免 resize 边缘和标题区之间闪收。
+   * 离开缩放热区后回到统一延迟收起调度，避免 resize 边缘和标题区之间闪收
    */
   function handleResizeHandleMouseLeave(): void {
     isResizeHandleHovered.value = false;
@@ -282,7 +282,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 缩放从窗口边缘热区触发，保持 Box 没有最小化、最大化、关闭按钮的桌面组件形态。
+   * 缩放从窗口边缘热区触发，保持 Box 没有最小化、最大化、关闭按钮的桌面组件形态
    */
   function startResizing(direction: ResizeDirection, event: MouseEvent): void {
     if (event.button !== 0 || options.box.value?.locked || options.isBoxCollapsedToTitle()) {
@@ -296,7 +296,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 手动 resize 由全局鼠标坐标驱动，便于在拖动过程中实时按网格步进改变窗口尺寸。
+   * 手动 resize 由全局鼠标坐标驱动，便于在拖动过程中实时按网格步进改变窗口尺寸
    */
   async function startManualResizing(direction: ResizeDirection): Promise<void> {
     if (!options.box.value || manualResizeState) {
@@ -339,7 +339,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * resize 期间轮询系统鼠标位置，即使窗口边界移动导致指针离开 WebView 也能继续计算尺寸。
+   * resize 期间轮询系统鼠标位置，即使窗口边界移动导致指针离开 WebView 也能继续计算尺寸
    */
   function startManualResizeFrameLoop(): void {
     clearManualResizeFrameLoop();
@@ -349,7 +349,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 每一帧都基于起始边界和鼠标位移重新计算，避免连续取整导致尺寸误差累积。
+   * 每一帧都基于起始边界和鼠标位移重新计算，避免连续取整导致尺寸误差累积
    */
   async function updateManualResizeFrame(): Promise<void> {
     const resizeState = manualResizeState;
@@ -368,7 +368,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 原生窗口写入可能慢于鼠标轮询，始终只保留最新一帧，避免排队应用过期尺寸。
+   * 原生窗口写入可能慢于鼠标轮询，始终只保留最新一帧，避免排队应用过期尺寸
    */
   function requestManualResizeFrameApply(frame: LogicalWindowFrame): void {
     pendingManualResizeFrame = frame;
@@ -381,7 +381,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 顺序应用最新窗口边界，保证 Tauri setSize/setPosition 不被并发写入打乱。
+   * 顺序应用最新窗口边界，保证 Tauri setSize/setPosition 不被并发写入打乱
    */
   async function flushManualResizeFrameApply(): Promise<void> {
     try {
@@ -402,7 +402,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 根据拖拽方向更新对应边；开启网格时再换算成完整图标行列。
+   * 根据拖拽方向更新对应边；开启网格时再换算成完整图标行列
    */
   function resolveManualResizeFrame(
     cursor: PhysicalWindowPoint,
@@ -419,7 +419,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 未开启网格调整时仍保持最小尺寸约束，避免手动写入小于 Tauri 最小窗口的值。
+   * 未开启网格调整时仍保持最小尺寸约束，避免手动写入小于 Tauri 最小窗口的值
    */
   function resolveResizeFrameForSettings(
     frame: LogicalWindowFrame,
@@ -437,7 +437,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 连续缩放模式只做最小尺寸夹取，左/上边拖动时保持右/下边不漂移。
+   * 连续缩放模式只做最小尺寸夹取，左/上边拖动时保持右/下边不漂移
    */
   function resolveMinimumResizeFrame(
     frame: LogicalWindowFrame,
@@ -455,7 +455,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 从原始起点按拖拽方向计算连续尺寸，后续再由网格或最小尺寸规则收口。
+   * 从原始起点按拖拽方向计算连续尺寸，后续再由网格或最小尺寸规则收口
    */
   function resolveRawResizeFrame(
     startFrame: LogicalWindowFrame,
@@ -480,7 +480,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 窗口边界只按整数像素比较，避免浮点微差导致重复 setSize。
+   * 窗口边界只按整数像素比较，避免浮点微差导致重复 setSize
    */
   function areWindowFramesEqual(left: LogicalWindowFrame, right: LogicalWindowFrame): boolean {
     return (
@@ -492,21 +492,21 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 从左侧缩放时右边缘是用户眼中的固定锚点，网格和连续模式都遵循这一点。
+   * 从左侧缩放时右边缘是用户眼中的固定锚点，网格和连续模式都遵循这一点
    */
   function shouldResizeAnchorRightEdge(direction: ResizeDirection | null): boolean {
     return direction === "West" || direction === "NorthWest" || direction === "SouthWest";
   }
 
   /**
-   * 从上方缩放时底边缘是用户眼中的固定锚点，避免尺寸夹取后窗口向下漂移。
+   * 从上方缩放时底边缘是用户眼中的固定锚点，避免尺寸夹取后窗口向下漂移
    */
   function shouldResizeAnchorBottomEdge(direction: ResizeDirection | null): boolean {
     return direction === "North" || direction === "NorthEast" || direction === "NorthWest";
   }
 
   /**
-   * 清理手动 resize 的鼠标轮询，窗口卸载或松手后不再继续写入尺寸。
+   * 清理手动 resize 的鼠标轮询，窗口卸载或松手后不再继续写入尺寸
    */
   function clearManualResizeFrameLoop(): void {
     if (!manualResizeFrameTimer) {
@@ -518,7 +518,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 持久化窗口位置用于下次启动恢复 Box，并广播给其他独立 Box 作为后续吸附参照。
+   * 持久化窗口位置用于下次启动恢复 Box，并广播给其他独立 Box 作为后续吸附参照
    */
   async function persistWindowPosition(x: number, y: number): Promise<void> {
     if (!options.box.value) {
@@ -538,7 +538,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * Tauri 移动事件返回物理坐标，持久化前转回逻辑坐标，保证高 DPI 下重启位置不漂移。
+   * Tauri 移动事件返回物理坐标，持久化前转回逻辑坐标，保证高 DPI 下重启位置不漂移
    */
   async function persistWindowPositionFromPhysical(x: number, y: number): Promise<void> {
     const scaleFactor = await options.currentWindow.scaleFactor();
@@ -548,7 +548,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 持久化窗口完整边界，用于缩放结束后一次性保存位置和尺寸。
+   * 持久化窗口完整边界，用于缩放结束后一次性保存位置和尺寸
    */
   async function persistWindowBounds(
     x: number,
@@ -570,7 +570,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 读取当前真实窗口边界后落库，避免 resize payload 只包含尺寸而漏掉左上方向缩放的位置变化。
+   * 读取当前真实窗口边界后落库，避免 resize payload 只包含尺寸而漏掉左上方向缩放的位置变化
    */
   async function persistCurrentWindowBounds(
     resizeDirection: ResizeDirection | null = activeResizeDirection,
@@ -601,7 +601,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 缩放事件只安排最终保存，不在拖动过程中写 SQLite。
+   * 缩放事件只安排最终保存，不在拖动过程中写 SQLite
    */
   function scheduleResizePersist(): void {
     if (options.isCollapseWindowSizeApplying() || isApplyingProgrammaticResize) {
@@ -616,7 +616,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 缩放静止或释放时保存最终边界，并同步给设置页与其他 Box 窗口。
+   * 缩放静止或释放时保存最终边界，并同步给设置页与其他 Box 窗口
    */
   function persistResizeBounds(): void {
     clearResizePersistTimer();
@@ -628,7 +628,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 鼠标释放才结束 resize 交互；窗口 resize 静止保存不会提前触发自动收缩。
+   * 鼠标释放才结束 resize 交互；窗口 resize 静止保存不会提前触发自动收缩
    */
   function finishResizeInteraction(): void {
     const wasResizing = isResizingBox.value;
@@ -658,7 +658,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 监听缩放释放事件；系统原生拖拽吞掉释放事件时，resize 静止兜底仍会保存。
+   * 监听缩放释放事件；系统原生拖拽吞掉释放事件时，resize 静止兜底仍会保存
    */
   function bindResizeReleaseEvents(): void {
     clearResizeReleaseEvents();
@@ -677,7 +677,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 清理缩放释放监听，避免重复缩放时多次写入最终边界。
+   * 清理缩放释放监听，避免重复缩放时多次写入最终边界
    */
   function clearResizeReleaseEvents(): void {
     resizeReleaseCleanup?.();
@@ -685,7 +685,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 清理缩放兜底计时器，窗口销毁或已经松手保存时不再重复落库。
+   * 清理缩放兜底计时器，窗口销毁或已经松手保存时不再重复落库
    */
   function clearResizePersistTimer(): void {
     if (!resizePersistTimer) {
@@ -697,7 +697,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * WebView 在原生 resize 期间可能收不到 mouseup，短轮询左键状态作为结束交互的兜底。
+   * WebView 在原生 resize 期间可能收不到 mouseup，短轮询左键状态作为结束交互的兜底
    */
   function startResizeInteractionReleaseProbe(): void {
     clearResizeInteractionReleaseProbe();
@@ -728,7 +728,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 清理 resize 释放兜底轮询，避免窗口卸载或缩放结束后继续读取全局鼠标状态。
+   * 清理 resize 释放兜底轮询，避免窗口卸载或缩放结束后继续读取全局鼠标状态
    */
   function clearResizeInteractionReleaseProbe(): void {
     if (!resizeInteractionReleaseProbeTimer) {
@@ -740,7 +740,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 同时清理缩放相关的监听和计时器，用于窗口卸载时释放异步回调。
+   * 同时清理缩放相关的监听和计时器，用于窗口卸载时释放异步回调
    */
   function clearResizePersistState(): void {
     clearResizeReleaseEvents();
@@ -754,7 +754,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * resize 吸附会主动写回窗口尺寸和左上角，短暂屏蔽由这次写回触发的移动/缩放事件。
+   * resize 吸附会主动写回窗口尺寸和左上角，短暂屏蔽由这次写回触发的移动/缩放事件
    */
   async function applyResizeSnappedWindowBounds(frame: LogicalWindowFrame): Promise<void> {
     const applyVersion = programmaticResizeApplyVersion + 1;
@@ -782,7 +782,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 分辨率或 DPI 变化后，把 Box 拉回当前显示器工作区，避免窗口跑到屏幕外。
+   * 分辨率或 DPI 变化后，把 Box 拉回当前显示器工作区，避免窗口跑到屏幕外
    */
   async function ensureWindowInsideMonitor(): Promise<void> {
     if (!options.box.value || isApplyingWindowPosition) {
@@ -811,7 +811,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 手写拖动从全局鼠标坐标开始，避免 Tauri 原生拖动在松手时回写旧位置。
+   * 手写拖动从全局鼠标坐标开始，避免 Tauri 原生拖动在松手时回写旧位置
    */
   async function startManualDragging(event: MouseEvent): Promise<void> {
     if (!options.box.value || manualDragState) {
@@ -854,7 +854,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 鼠标释放时停止拖动循环，并把最终物理坐标转换成逻辑坐标写入数据库。
+   * 鼠标释放时停止拖动循环，并把最终物理坐标转换成逻辑坐标写入数据库
    */
   function stopManualDragging(shouldPersist: boolean): void {
     const dragState = manualDragState;
@@ -871,7 +871,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 松手时用最后一次计算出的吸附坐标落库，移动过程中只改变窗口位置不写 SQLite。
+   * 松手时用最后一次计算出的吸附坐标落库，移动过程中只改变窗口位置不写 SQLite
    */
   async function persistManualDragPosition(position: PhysicalWindowPoint): Promise<void> {
     await applyWindowPhysicalPosition(position.x, position.y, false);
@@ -879,7 +879,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 释放监听同时挂在 window 和 document，确保窗口跟随鼠标移动时仍能收到 mouseup。
+   * 释放监听同时挂在 window 和 document，确保窗口跟随鼠标移动时仍能收到 mouseup
    */
   function bindManualDragReleaseEvents(): void {
     manualDragCleanup?.();
@@ -908,7 +908,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 鼠标移动时按用户给出的 DOM 示例实时计算位置，只移动窗口不持久化数据库。
+   * 鼠标移动时按用户给出的 DOM 示例实时计算位置，只移动窗口不持久化数据库
    */
   function updateManualDragCursor(event: MouseEvent): void {
     const dragState = manualDragState;
@@ -931,7 +931,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 程序主动移动窗口时统一加锁，避免 setPosition 自己触发的 onMoved 被误判成外部移动。
+   * 程序主动移动窗口时统一加锁，避免 setPosition 自己触发的 onMoved 被误判成外部移动
    */
   async function applyWindowPhysicalPosition(
     x: number,
@@ -957,7 +957,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 拖动吸附实时参考其他 Box 的相邻边和屏幕工作区边缘，不做延迟二次定位。
+   * 拖动吸附实时参考其他 Box 的相邻边和屏幕工作区边缘，不做延迟二次定位
    */
   function resolveManualDragPosition(
     rawPosition: PhysicalWindowPoint,
@@ -1022,7 +1022,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 外部拖放 over/drop 在 Windows WebView2 下是窗口客户区物理坐标，广播前需要转成屏幕物理坐标。
+   * 外部拖放 over/drop 在 Windows WebView2 下是窗口客户区物理坐标，广播前需要转成屏幕物理坐标
    */
   async function resolveWindowClientPhysicalPointToScreen(
     x: number,
@@ -1037,7 +1037,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 将屏幕物理坐标换算到当前无边框窗口的逻辑坐标，高 DPI 下插入线不会偏移。
+   * 将屏幕物理坐标换算到当前无边框窗口的逻辑坐标，高 DPI 下插入线不会偏移
    */
   async function resolveBoxItemDragLocalPoint(
     screenX: number,

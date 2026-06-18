@@ -4,12 +4,12 @@ import packageInfo from "../../../../package.json";
 import type { Component } from "vue";
 
 /**
- * 侧栏只需要识别父级传入的当前设置分区，类型保持在组件内避免保留独立 types 文件。
+ * 侧栏只需要识别父级传入的当前设置分区，类型保持在组件内避免保留独立 types 文件
  */
 type SettingsSection = "boxes" | "boxDisplay" | "appearance" | "about";
 
 /**
- * 导航项结构与父级 sections 常量保持一致，icon 继续使用 Lucide/Vue 组件类型。
+ * 导航项结构与父级 sections 常量保持一致，icon 继续使用 Lucide/Vue 组件类型
  */
 interface SettingsNavItem {
   key: SettingsSection;
@@ -18,7 +18,7 @@ interface SettingsNavItem {
 }
 
 /**
- * 设置侧栏只渲染当前版本的设置入口，旧占位菜单不再保留。
+ * 设置侧栏只渲染当前版本的设置入口，旧占位菜单不再保留
  */
 defineProps<{
   activeSection: SettingsSection;
@@ -30,12 +30,12 @@ const emit = defineEmits<{
 }>();
 
 /**
- * 侧栏品牌区直接使用应用正式 logo，避免设置页与安装包图标分开维护视觉资产。
+ * 侧栏品牌区直接使用应用正式 logo，避免设置页与安装包图标分开维护视觉资产
  */
 const settingsLogoUrl = logoUrl;
 
 /**
- * 版本和作者来自包元数据，发布时只需要维护 package.json 这一处来源。
+ * 版本和作者来自包元数据，发布时只需要维护 package.json 这一处来源
  */
 const appInfo = {
   version: packageInfo.version,
@@ -49,11 +49,11 @@ const appInfo = {
       <img
         :src="settingsLogoUrl"
         alt="Dasktop"
-        class="size-10 shrink-0 rounded-[10px] object-contain shadow-[0_10px_24px_rgba(21,24,32,0.18)]"
+        class="size-10 shrink-0 rounded-[10px] object-contain"
       />
       <div class="min-w-0">
         <div class="truncate text-[17px] font-semibold tracking-[0] text-[#17181c] dark:text-[#f4f4f5]">Dasktop</div>
-        <div class="mt-0.5 text-[12px] text-[#6f7480] dark:text-[#9ca0aa]">桌面 Box 设置</div>
+        <div class="mt-0.5 text-[12px] text-[#6f7480] dark:text-[#9ca0aa]">像 Box 一样管理桌面</div>
       </div>
     </div>
 

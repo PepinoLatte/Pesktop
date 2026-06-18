@@ -30,7 +30,7 @@ const currentWindow = getCurrentWindow();
 const unlistenFns: UnlistenFn[] = [];
 
 /**
- * 桌面 Box 窗口只保留 DOM 锚点和 Store 派生数据，具体交互状态交给下方组合式逻辑维护。
+ * 桌面 Box 窗口只保留 DOM 锚点和 Store 派生数据，具体交互状态交给下方组合式逻辑维护
  */
 const boxSurfaceRef = ref<HTMLElement | null>(null);
 const box = computed(() => desktopStore.boxes.find((item) => item.id === props.boxId));
@@ -38,7 +38,7 @@ const boxItems = computed(() => (box.value ? desktopStore.getBoxItems(box.value.
 const boxGridRef = ref<HTMLElement | null>(null);
 
 /**
- * 组合式逻辑之间需要互相读取状态；使用延迟赋值的读取函数避免 setup 阶段出现循环初始化。
+ * 组合式逻辑之间需要互相读取状态；使用延迟赋值的读取函数避免 setup 阶段出现循环初始化
  */
 let readContextMenuOpen = (): boolean => false;
 let readEditingTitle = (): boolean => false;
@@ -49,7 +49,7 @@ let openCollapsedPreviewForActiveInteractionHandler = (): void => undefined;
 let refreshCollapsedPreviewCloseScheduleHandler = (): void => undefined;
 
 /**
- * 窗口框架层封装 Tauri 位置、尺寸、手动拖动、吸附和 resize 落库，组件只关心事件入口。
+ * 窗口框架层封装 Tauri 位置、尺寸、手动拖动、吸附和 resize 落库，组件只关心事件入口
  */
 const {
   applyCollapseWindowFrame,
@@ -90,7 +90,7 @@ const {
 });
 
 /**
- * 收缩预览层统一处理 roll-up 展开、闲置透明度和收起动画，避免这些状态散落在模板事件里。
+ * 收缩预览层统一处理 roll-up 展开、闲置透明度和收起动画，避免这些状态散落在模板事件里
  */
 const {
   animateBoxIdleOpacity,
@@ -137,7 +137,7 @@ const {
 });
 
 /**
- * 回填跨组合式逻辑读取入口，后续事件触发时能读取到真实的收缩预览状态。
+ * 回填跨组合式逻辑读取入口，后续事件触发时能读取到真实的收缩预览状态
  */
 readBoxCollapsedToTitle = () => isBoxCollapsedToTitle.value;
 readCollapseWindowSizeApplying = () => isApplyingCollapseWindowSize();
@@ -145,7 +145,7 @@ openCollapsedPreviewForActiveInteractionHandler = openCollapsedPreviewForActiveI
 refreshCollapsedPreviewCloseScheduleHandler = refreshCollapsedPreviewCloseSchedule;
 
 /**
- * 拖拽会话层统一处理 Box 内排序、跨 Box 移动、外部文件拖入和拖影 IPC。
+ * 拖拽会话层统一处理 Box 内排序、跨 Box 移动、外部文件拖入和拖影 IPC
  */
 const {
   acceptBoxItemDragSession,
@@ -181,7 +181,7 @@ const {
 });
 
 /**
- * resize 能力同时受锁定、收缩态和 Box 图标拖拽状态影响；外部文件拖入只展示落点，不锁住缩放热区。
+ * resize 能力同时受锁定、收缩态和 Box 图标拖拽状态影响；外部文件拖入只展示落点，不锁住缩放热区
  */
 const canResizeBox = computed(
   () =>
@@ -201,7 +201,7 @@ const boxTitleOrderClass = computed(() =>
 );
 
 /**
- * 网格列宽由图标尺寸和文件名宽度共同决定，保证标签变宽时图标列不会互相覆盖。
+ * 网格列宽由图标尺寸和文件名宽度共同决定，保证标签变宽时图标列不会互相覆盖
  */
 const boxGridStyle = computed(
   () =>
@@ -229,7 +229,7 @@ readContextMenuOpen = () => isContextMenuOpen.value;
 closeActiveContextMenu = closeContextMenu;
 
 /**
- * 标题编辑只修改 Box 展示名，提交前会先关闭独立菜单窗口避免焦点和 blur 顺序互相干扰。
+ * 标题编辑只修改 Box 展示名，提交前会先关闭独立菜单窗口避免焦点和 blur 顺序互相干扰
  */
 const {
   cancelTitleEditing,
@@ -269,7 +269,7 @@ watch(
 );
 
 /**
- * 挂载时先恢复窗口几何和收缩尺寸，再注册跨窗口 IPC 与原生拖放监听，避免早到事件读到未初始化状态。
+ * 挂载时先恢复窗口几何和收缩尺寸，再注册跨窗口 IPC 与原生拖放监听，避免早到事件读到未初始化状态
  */
 onMounted(async () => {
   if (!(await initializeDesktopStoreForBoxWindow())) {
@@ -342,7 +342,7 @@ onMounted(async () => {
   );
 
   /**
-   * ready 放在核心监听注册之后，批量启动统一显示时 Box 已经能响应拖拽、菜单和原生 Drop。
+   * ready 放在核心监听注册之后，批量启动统一显示时 Box 已经能响应拖拽、菜单和原生 Drop
    */
   void notifyBoxWindowReady(props.boxId).catch((error) => {
     desktopStore.lastError = error instanceof Error ? error.message : String(error);
@@ -350,7 +350,7 @@ onMounted(async () => {
 });
 
 /**
- * 启动恢复时优先使用主窗口共享快照；用户单独打开 Box 或快照缺失时回退到完整初始化。
+ * 启动恢复时优先使用主窗口共享快照；用户单独打开 Box 或快照缺失时回退到完整初始化
  */
 async function initializeDesktopStoreForBoxWindow(): Promise<boolean> {
   const startupSnapshotToken = searchParams.get("startupSnapshot");
@@ -362,7 +362,7 @@ async function initializeDesktopStoreForBoxWindow(): Promise<boolean> {
 }
 
 /**
- * 卸载时按拖拽、窗口、菜单、动画、监听的顺序清理，防止异步回调在窗口关闭后继续写状态。
+ * 卸载时按拖拽、窗口、菜单、动画、监听的顺序清理，防止异步回调在窗口关闭后继续写状态
  */
 onUnmounted(() => {
   cancelActiveBoxItemDrag();
@@ -378,7 +378,7 @@ onUnmounted(() => {
 });
 
 /**
- * Windows Shell 右键菜单由后端直接接管，前端只负责传递屏幕坐标和目标路径。
+ * Windows Shell 右键菜单由后端直接接管，前端只负责传递屏幕坐标和目标路径
  */
 function openNativeItemContextMenu(event: MouseEvent, item: DesktopItem): void {
   closeContextMenu();
@@ -417,7 +417,7 @@ function openNativeItemContextMenu(event: MouseEvent, item: DesktopItem): void {
         />
       </template>
 
-      <!-- 标题层级高于内容区，避免底部收缩时图标网格的过渡帧遮住标题文字。 -->
+      <!-- 标题层级高于内容区，避免底部收缩时图标网格的过渡帧遮住标题文字 -->
       <header
         class="relative z-30 flex h-10 shrink-0 select-none items-center justify-center px-3 transition-opacity duration-150 ease-out"
         :class="boxTitleOrderClass"
@@ -505,7 +505,7 @@ function openNativeItemContextMenu(event: MouseEvent, item: DesktopItem): void {
           class="col-span-full flex min-h-[120px] w-full flex-col items-center justify-center px-5 text-center"
         >
           <strong class="block text-center text-[13px] font-semibold text-slate-900 dark:text-white">这个 Box 还是空的</strong>
-          <p class="mt-1 max-w-[180px] text-center text-[12px] leading-5 text-slate-600 dark:text-slate-300">把桌面文件拖进来就能开始整理。</p>
+          <p class="mt-1 max-w-[180px] text-center text-[12px] leading-5 text-slate-600 dark:text-slate-300">把桌面文件拖进来就能开始整理</p>
         </div>
       </div>
     </article>

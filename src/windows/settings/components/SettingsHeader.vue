@@ -2,7 +2,7 @@
 import { Minus, Square, X } from "@lucide/vue";
 
 /**
- * 设置窗口头部只负责拖动和 Windows 风格窗口操作，页面标题交给右侧内容区展示。
+ * 设置窗口头部只负责拖动和 Windows 风格窗口操作，页面标题交给右侧内容区展示
  */
 defineProps<{
   title: string;

@@ -30,12 +30,12 @@ import type { Component } from "vue";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 
 /**
- * 设置页的导航键值统一收口，避免侧栏、标题和内容区域各自维护字符串。
+ * 设置页的导航键值统一收口，避免侧栏、标题和内容区域各自维护字符串
  */
 type SettingsSection = "boxes" | "boxDisplay" | "appearance" | "about";
 
 /**
- * 设置页左侧导航项，icon 使用组件类型以便保持 Lucide 图标风格一致。
+ * 设置页左侧导航项，icon 使用组件类型以便保持 Lucide 图标风格一致
  */
 interface SettingsNavItem {
   key: SettingsSection;
@@ -44,7 +44,7 @@ interface SettingsNavItem {
 }
 
 /**
- * 设置页内容宽度由父窗口统一定义，再下发给各面板以保持视觉密度一致。
+ * 设置页内容宽度由父窗口统一定义，再下发给各面板以保持视觉密度一致
  */
 const SETTINGS_PANEL_WIDTH = {
   default: "max-w-[780px]",
@@ -58,7 +58,7 @@ const startupError = ref("");
 const autostartEnabled = ref(false);
 const unlistenFns: UnlistenFn[] = [];
 /**
- * 设置窗获得焦点时不立刻刷新桌面快照，避免 Shell 缩略图扫描卡住标题栏拖动首帧。
+ * 设置窗获得焦点时不立刻刷新桌面快照，避免 Shell 缩略图扫描卡住标题栏拖动首帧
  */
 const FOCUS_SYNC_DELAY_MS = SETTINGS_WINDOW_SYNC_TIMING.focusSyncDelayMs;
 const DRAG_RELEASE_FALLBACK_MS = SETTINGS_WINDOW_SYNC_TIMING.dragReleaseFallbackMs;
@@ -68,7 +68,7 @@ let isDraggingSettingsWindow = false;
 let dragReleaseCleanup: (() => void) | null = null;
 
 /**
- * 设置页只保留当前真实可用的配置入口，旧占位导航不再兼容。
+ * 设置页只保留当前真实可用的配置入口，旧占位导航不再兼容
  */
 const sections: SettingsNavItem[] = [
   { key: "boxes", label: "Box", icon: Boxes },
@@ -123,7 +123,7 @@ onMounted(async () => {
 });
 
 /**
- * 组件销毁时注销窗口事件，避免开发热更新后重复刷新状态。
+ * 组件销毁时注销窗口事件，避免开发热更新后重复刷新状态
  */
 onUnmounted(() => {
   clearFocusSyncTimer();
@@ -134,7 +134,7 @@ onUnmounted(() => {
 });
 
 /**
- * 设置页启动时批量打开现有 Box，避免窗口数量多时串行等待拖慢桌面恢复。
+ * 设置页启动时批量打开现有 Box，避免窗口数量多时串行等待拖慢桌面恢复
  */
 async function openAllBoxes(): Promise<boolean> {
   startupError.value = "";
@@ -194,7 +194,7 @@ async function openAllBoxes(): Promise<boolean> {
 }
 
 /**
- * 启动恢复时先监听 ready，再创建隐藏 Box，避免 ready 事件早于监听注册导致统一显示卡住。
+ * 启动恢复时先监听 ready，再创建隐藏 Box，避免 ready 事件早于监听注册导致统一显示卡住
  */
 async function createBoxWindowReadyTracker(): Promise<{
   dispose: () => void;
@@ -220,7 +220,7 @@ async function createBoxWindowReadyTracker(): Promise<{
 }
 
 /**
- * 等待目标 Box 首帧准备完成；超时后继续展示窗口，防止异常窗口永久隐藏。
+ * 等待目标 Box 首帧准备完成；超时后继续展示窗口，防止异常窗口永久隐藏
  */
 function waitForReadyBoxIds(
   boxIds: string[],
@@ -261,14 +261,14 @@ function waitForReadyBoxIds(
 }
 
 /**
- * 空列表视为已准备，方便没有成功打开窗口时直接进入错误处理分支。
+ * 空列表视为已准备，方便没有成功打开窗口时直接进入错误处理分支
  */
 function areAllBoxesReady(boxIds: string[], readyBoxIds: Set<string>): boolean {
   return boxIds.every((boxId) => readyBoxIds.has(boxId));
 }
 
 /**
- * 批量打开失败时保留第一条真实错误，并提示失败数量，避免大量窗口错误淹没设置页。
+ * 批量打开失败时保留第一条真实错误，并提示失败数量，避免大量窗口错误淹没设置页
  */
 function formatBatchOpenBoxError(failedResults: PromiseRejectedResult[]): string {
   const [firstFailure] = failedResults;
@@ -279,7 +279,7 @@ function formatBatchOpenBoxError(failedResults: PromiseRejectedResult[]): string
 }
 
 /**
- * 新增 Box 后立即打开独立窗口，确保用户看到的是桌面扩展本体。
+ * 新增 Box 后立即打开独立窗口，确保用户看到的是桌面扩展本体
  */
 async function createAndOpenBox(): Promise<void> {
   const box = await desktopStore.createBox();
@@ -287,14 +287,14 @@ async function createAndOpenBox(): Promise<void> {
 }
 
 /**
- * 设置页里的锁定入口与 Box 更多菜单共用同一 Store 字段，确保窗口拖动和缩放行为一致。
+ * 设置页里的锁定入口与 Box 更多菜单共用同一 Store 字段，确保窗口拖动和缩放行为一致
  */
 async function toggleBoxLockedFromSettings(box: DesktopBox): Promise<void> {
   await desktopStore.updateBoxLocked(box.id, !box.locked);
 }
 
 /**
- * 设置页收到的删除事件已经由按钮完成二段式确认，这里只执行真实删除和窗口关闭。
+ * 设置页收到的删除事件已经由按钮完成二段式确认，这里只执行真实删除和窗口关闭
  */
 async function deleteBoxFromSettings(box: DesktopBox): Promise<void> {
   await desktopStore.deleteBox(box.id);
@@ -302,7 +302,7 @@ async function deleteBoxFromSettings(box: DesktopBox): Promise<void> {
 }
 
 /**
- * 开机自启以系统启动项为准，设置页每次需要展示时都重新读取，避免外部修改后状态滞后。
+ * 开机自启以系统启动项为准，设置页每次需要展示时都重新读取，避免外部修改后状态滞后
  */
 async function syncAutostartEnabled(): Promise<void> {
   try {
@@ -313,7 +313,7 @@ async function syncAutostartEnabled(): Promise<void> {
 }
 
 /**
- * 设置页切换自启后交给 Rust 同步托盘勾选状态，前端只保存后端确认后的真实结果。
+ * 设置页切换自启后交给 Rust 同步托盘勾选状态，前端只保存后端确认后的真实结果
  */
 async function updateAutostartEnabled(value: boolean): Promise<void> {
   try {
@@ -325,7 +325,7 @@ async function updateAutostartEnabled(value: boolean): Promise<void> {
 }
 
 /**
- * 隐藏原生桌面图标的真实写入复用 Store，托盘只跟随最终偏好展示勾选状态。
+ * 隐藏原生桌面图标的真实写入复用 Store，托盘只跟随最终偏好展示勾选状态
  */
 async function updateNativeDesktopIconsHidden(value: boolean): Promise<void> {
   try {
@@ -338,7 +338,7 @@ async function updateNativeDesktopIconsHidden(value: boolean): Promise<void> {
 }
 
 /**
- * 设置页初始化、聚焦刷新和托盘操作后都用当前 Store 状态回写托盘，避免两个入口显示不一致。
+ * 设置页初始化、聚焦刷新和托盘操作后都用当前 Store 状态回写托盘，避免两个入口显示不一致
  */
 async function syncTrayNativeDesktopIconsHidden(): Promise<void> {
   try {
@@ -351,7 +351,7 @@ async function syncTrayNativeDesktopIconsHidden(): Promise<void> {
 }
 
 /**
- * 自定义标题栏通过 Tauri 转交拖动，保持无边框窗口仍可移动。
+ * 自定义标题栏通过 Tauri 转交拖动，保持无边框窗口仍可移动
  */
 function startDragging(event: MouseEvent): void {
   if (event.button !== 0 || event.detail > 1) {
@@ -365,7 +365,7 @@ function startDragging(event: MouseEvent): void {
 }
 
 /**
- * 焦点同步延迟执行，让用户点击标题栏拖动时先进入系统拖动流程，再刷新 SQLite 和桌面快照。
+ * 焦点同步延迟执行，让用户点击标题栏拖动时先进入系统拖动流程，再刷新 SQLite 和桌面快照
  */
 function scheduleFocusSync(): void {
   clearFocusSyncTimer();
@@ -376,7 +376,7 @@ function scheduleFocusSync(): void {
 }
 
 /**
- * 聚焦后同步持久化状态和桌面快照；拖动中收到兜底触发时继续后延，避免刷新抢占拖动。
+ * 聚焦后同步持久化状态和桌面快照；拖动中收到兜底触发时继续后延，避免刷新抢占拖动
  */
 async function syncSettingsWindowState(): Promise<void> {
   if (isDraggingSettingsWindow) {
@@ -391,7 +391,7 @@ async function syncSettingsWindowState(): Promise<void> {
 }
 
 /**
- * 清理焦点同步计时器，避免隐藏或拖动窗口时仍然启动一次昂贵的桌面扫描。
+ * 清理焦点同步计时器，避免隐藏或拖动窗口时仍然启动一次昂贵的桌面扫描
  */
 function clearFocusSyncTimer(): void {
   if (!focusSyncTimer) {
@@ -403,7 +403,7 @@ function clearFocusSyncTimer(): void {
 }
 
 /**
- * 监听拖动释放后再恢复设置同步；原生拖动吞掉释放事件时用短兜底恢复。
+ * 监听拖动释放后再恢复设置同步；原生拖动吞掉释放事件时用短兜底恢复
  */
 function bindDragReleaseListeners(): void {
   clearDragReleaseListeners();
@@ -429,7 +429,7 @@ function bindDragReleaseListeners(): void {
 }
 
 /**
- * 拖动释放监听每次只保留一组，防止多次按住标题栏后重复安排同步。
+ * 拖动释放监听每次只保留一组，防止多次按住标题栏后重复安排同步
  */
 function clearDragReleaseListeners(): void {
   dragReleaseCleanup?.();
@@ -437,21 +437,21 @@ function clearDragReleaseListeners(): void {
 }
 
 /**
- * 最小化只作用于设置窗口，桌面上的 Box 会继续保持显示。
+ * 最小化只作用于设置窗口，桌面上的 Box 会继续保持显示
  */
 function minimizeSettings(): void {
   void currentWindow.minimize();
 }
 
 /**
- * 最大化只作用于设置窗口，不改变任何 Box 的桌面位置和尺寸。
+ * 最大化只作用于设置窗口，不改变任何 Box 的桌面位置和尺寸
  */
 function toggleSettingsMaximize(): void {
   void currentWindow.toggleMaximize();
 }
 
 /**
- * 关闭设置页时隐藏主窗口，Box 右键菜单仍可重新唤起设置。
+ * 关闭设置页时隐藏主窗口，Box 右键菜单仍可重新唤起设置
  */
 function closeSettings(): void {
   void currentWindow.hide();

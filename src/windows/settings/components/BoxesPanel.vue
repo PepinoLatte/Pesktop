@@ -4,13 +4,13 @@ import { useDesktopBoxDeleteConfirmation } from "@/entities/desktopBox/deleteCon
 import type { DesktopBox } from "@/entities/desktopBox/types";
 
 /**
- * Box 面板只做创建、打开和刷新入口，具体窗口行为由 desktop feature 处理。
+ * Box 面板只做创建、打开和刷新入口，具体窗口行为由 desktop feature 处理
  */
 defineProps<{
   boxes: DesktopBox[];
   boxItemCounts: Record<string, number>;
   /**
-   * 设置页父级统一下发内容宽度，避免各面板各自维护页面密度。
+   * 设置页父级统一下发内容宽度，避免各面板各自维护页面密度
    */
   panelWidth: string;
   totalItems: number;
@@ -32,14 +32,14 @@ const {
 } = useDesktopBoxDeleteConfirmation();
 
 /**
- * 设置列表需要给空标题 Box 一个识别名称，真实 Box 标题仍保持用户保存的空文本。
+ * 设置列表需要给空标题 Box 一个识别名称，真实 Box 标题仍保持用户保存的空文本
  */
 function displayBoxTitle(box: DesktopBox): string {
   return box.title || "未命名 Box";
 }
 
 /**
- * 创建新 Box 属于非危险操作，执行前清掉任何悬挂的删除确认态。
+ * 创建新 Box 属于非危险操作，执行前清掉任何悬挂的删除确认态
  */
 function createBoxFromPanel(): void {
   clearBoxDeleteConfirmation();
@@ -47,7 +47,7 @@ function createBoxFromPanel(): void {
 }
 
 /**
- * 打开 Box 时恢复删除按钮普通态，避免用户返回设置页后还看到旧确认状态。
+ * 打开 Box 时恢复删除按钮普通态，避免用户返回设置页后还看到旧确认状态
  */
 function openBoxFromPanel(box: DesktopBox): void {
   clearBoxDeleteConfirmation();
@@ -55,7 +55,7 @@ function openBoxFromPanel(box: DesktopBox): void {
 }
 
 /**
- * 锁定切换和删除无关，点击后取消二次确认可以降低误删概率。
+ * 锁定切换和删除无关，点击后取消二次确认可以降低误删概率
  */
 function toggleBoxLockedFromPanel(box: DesktopBox): void {
   clearBoxDeleteConfirmation();
@@ -63,7 +63,7 @@ function toggleBoxLockedFromPanel(box: DesktopBox): void {
 }
 
 /**
- * 删除按钮采用二段式交互，第一次点击只切换按钮状态，第二次点击才向父级发出删除事件。
+ * 删除按钮采用二段式交互，第一次点击只切换按钮状态，第二次点击才向父级发出删除事件
  */
 function deleteBoxFromPanel(box: DesktopBox): void {
   if (!requestBoxDeleteConfirmation(box)) {
@@ -74,7 +74,7 @@ function deleteBoxFromPanel(box: DesktopBox): void {
 }
 
 /**
- * 刷新桌面文件前重置危险操作状态，避免刷新后列表变化但确认态仍指向旧 Box。
+ * 刷新桌面文件前重置危险操作状态，避免刷新后列表变化但确认态仍指向旧 Box
  */
 function refreshFromPanel(): void {
   clearBoxDeleteConfirmation();
@@ -87,7 +87,7 @@ function refreshFromPanel(): void {
     <div class="mb-6 flex items-end justify-between gap-6">
       <div class="min-w-0">
         <h1 class="text-[24px] font-semibold tracking-[0] text-[#17181c] dark:text-[#f4f4f5]">Box</h1>
-        <p class="mt-1 text-[13px] text-[#6f7480] dark:text-[#a7abb5]">管理桌面上的独立 Box 窗口。</p>
+        <p class="mt-1 text-[13px] text-[#6f7480] dark:text-[#a7abb5]">管理桌面上的独立 Box 窗口</p>
       </div>
 
       <button
@@ -174,7 +174,7 @@ function refreshFromPanel(): void {
 
       <div v-if="boxes.length === 0" class="px-5 py-10 text-center">
         <p class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">还没有 Box</p>
-        <p class="mt-1 text-[12px] text-[#707684] dark:text-[#9ca0aa]">点击右上角创建第一个桌面 Box。</p>
+        <p class="mt-1 text-[12px] text-[#707684] dark:text-[#9ca0aa]">点击右上角创建第一个桌面 Box</p>
       </div>
     </div>
 

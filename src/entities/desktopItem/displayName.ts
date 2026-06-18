@@ -1,7 +1,7 @@
 import type { DesktopItem, DesktopNameDisplayMode } from "@/entities/desktopItem/types";
 
 /**
- * 按当前 Box 文件名显示策略生成展示名称；该逻辑只影响 UI 文本，不改变真实文件名和路径映射。
+ * 按当前 Box 文件名显示策略生成展示名称；该逻辑只影响 UI 文本，不改变真实文件名和路径映射
  */
 export function formatDesktopItemDisplayName(
   item: DesktopItem,

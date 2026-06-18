@@ -40,21 +40,21 @@ button {
 }
 
 /**
- * Box 内文件项需要保持接近 Windows 桌面的默认光标，避免悬停时像网页链接一样出现手型。
+ * Box 内文件项需要保持接近 Windows 桌面的默认光标，避免悬停时像网页链接一样出现手型
  */
 .dasktop-icon-button {
   cursor: default;
 }
 
 /**
- * 拖拽排序期间其他图标不参与 hover 和 pointer 命中，避免拖影经过时出现成片高亮。
+ * 拖拽排序期间其他图标不参与 hover 和 pointer 命中，避免拖影经过时出现成片高亮
  */
 .dasktop-icon-button--drag-interaction-disabled {
   pointer-events: none;
 }
 
 /**
- * 当前被拖动的原位置图标不显示 hover/active 背景，只保留轻微透明，避免和拖影同时高亮。
+ * 当前被拖动的原位置图标不显示 hover/active 背景，只保留轻微透明，避免和拖影同时高亮
  */
 .dasktop-icon-button--dragging,
 .dasktop-icon-button--dragging:hover,
@@ -73,7 +73,7 @@ select:focus-visible {
 }
 
 /**
- * 主题切换只过渡颜色、边框和阴影，避免布局尺寸参与动画导致窗口内容抖动。
+ * 主题切换只过渡颜色、边框和阴影，避免布局尺寸参与动画导致窗口内容抖动
  */
 :root.theme-transition,
 :root.theme-transition * {
@@ -84,14 +84,14 @@ select:focus-visible {
 }
 
 /**
- * 主题切换时保留分段控件滑块的位移动画，避免全局颜色过渡覆盖 transform。
+ * 主题切换时保留分段控件滑块的位移动画，避免全局颜色过渡覆盖 transform
  */
 :root.theme-transition .dasktop-segment-indicator {
   transition-property: background-color, box-shadow, transform;
 }
 
 /**
- * 设置页滚动区域使用细滚动条，避免 Windows 原生宽滚动条破坏桌面应用质感。
+ * 设置页滚动区域使用细滚动条，避免 Windows 原生宽滚动条破坏桌面应用质感
  */
 .dasktop-scrollarea {
   scrollbar-color: rgba(116, 124, 138, 0.52) transparent;
@@ -132,7 +132,7 @@ select:focus-visible {
 }
 
 /**
- * Box 背景只保留半透明底色和毛玻璃滤镜，不叠加渐变或阴影，避免桌面组件显得过重。
+ * Box 背景只保留半透明底色和毛玻璃滤镜，不叠加渐变或阴影，避免桌面组件显得过重
  */
 .dasktop-box-surface {
   background: rgb(246 248 252 / var(--dasktop-box-background-opacity, 0.7));
@@ -145,7 +145,7 @@ select:focus-visible {
 }
 
 /**
- * Box 内滚动条更细，避免在小窗口里占用过多文件展示空间。
+ * Box 内滚动条更细，避免在小窗口里占用过多文件展示空间
  */
 .dasktop-box-scrollarea {
   scrollbar-gutter: auto;
@@ -161,7 +161,7 @@ select:focus-visible {
 }
 
 /**
- * Box 更多菜单的 transform-origin 由 motion 动画复用，入口和退出时保持来自按钮的空间关系。
+ * Box 更多菜单的 transform-origin 由 motion 动画复用，入口和退出时保持来自按钮的空间关系
  */
 .dasktop-box-menu {
   transform-origin: top right;

@@ -7,7 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowExW, ShowWindow, SW_HIDE, SW_SHOW,
 };
 
-/// 设置 Windows Explorer 原生桌面图标 ListView 的可见性，避免影响桌面背景。
+/// 设置 Windows Explorer 原生桌面图标 ListView 的可见性，避免影响桌面背景
 #[cfg(target_os = "windows")]
 pub fn set_native_desktop_icons_hidden(hidden: bool) -> Result<(), String> {
     let desktop_list_view = find_desktop_list_view()
@@ -21,7 +21,7 @@ pub fn set_native_desktop_icons_hidden(hidden: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// 非 Windows 平台没有 Explorer 桌面图标层，保持显式错误避免前端误判已生效。
+/// 非 Windows 平台没有 Explorer 桌面图标层，保持显式错误避免前端误判已生效
 #[cfg(not(target_os = "windows"))]
 pub fn set_native_desktop_icons_hidden(_hidden: bool) -> Result<(), String> {
     Err("当前平台暂不支持隐藏 Windows 原生桌面图标".to_string())

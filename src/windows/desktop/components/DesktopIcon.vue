@@ -11,16 +11,16 @@ import { DESKTOP_ICON_VIEW } from "../config/desktopIcon";
 import DesktopIconGlyph from "./DesktopIconGlyph.vue";
 
 /**
- * Box 内的图标是桌面文件映射视图，优先复用系统原生图标以保持拖入前后的视觉一致性。
+ * Box 内的图标是桌面文件映射视图，优先复用系统原生图标以保持拖入前后的视觉一致性
  */
 const props = defineProps<{
   doubleClickOpen?: boolean;
   /**
-   * Box 图标拖拽期间关闭其他图标的 pointer 命中，避免 hover 背景和拖拽排序反馈互相干扰。
+   * Box 图标拖拽期间关闭其他图标的 pointer 命中，避免 hover 背景和拖拽排序反馈互相干扰
    */
   dragInteractionDisabled?: boolean;
   /**
-   * 当前正在被拖动的图标保留原位置，但不显示 hover 背景，避免和拖影窗口形成双重高亮。
+   * 当前正在被拖动的图标保留原位置，但不显示 hover 背景，避免和拖影窗口形成双重高亮
    */
   dragging?: boolean;
   iconSize?: number;
@@ -40,7 +40,7 @@ const emit = defineEmits<{
 }>();
 
 /**
- * pointer 拖拽状态只用于 Box 内排序，避免浏览器原生 DnD 在透明窗口里显示禁用光标。
+ * pointer 拖拽状态只用于 Box 内排序，避免浏览器原生 DnD 在透明窗口里显示禁用光标
  */
 interface PointerDragState {
   dragging: boolean;
@@ -68,7 +68,7 @@ const resolvedItemWidth = computed(() =>
 );
 const resolvedRadius = computed(() => props.radiusSize ?? DEFAULT_APP_SETTINGS.boxCornerRadius);
 /**
- * Windows 桌面标签会给字母下探部位留空间；这里多留 2px，避免 p/g/y 被两行截断裁掉。
+ * Windows 桌面标签会给字母下探部位留空间；这里多留 2px，避免 p/g/y 被两行截断裁掉
  */
 const labelLineHeight = computed(() => Math.max(14, Math.ceil(resolvedLabelTextSize.value * 1.32)));
 const labelBlockHeight = computed(() => labelLineHeight.value * 2 + 2);
@@ -106,7 +106,7 @@ const labelStyle = computed(
     }) as CSSProperties,
 );
 /**
- * pointer 按下只记录候选拖拽，移动距离超过阈值后才进入排序拖动状态。
+ * pointer 按下只记录候选拖拽，移动距离超过阈值后才进入排序拖动状态
  */
 function onPointerDown(event: PointerEvent, item: DesktopItem): void {
   if (event.button !== 0 || event.detail > 1) {
@@ -130,7 +130,7 @@ function onPointerDown(event: PointerEvent, item: DesktopItem): void {
 }
 
 /**
- * pointer 移动只负责跨过阈值后启动全局拖拽；插入线统一由窗口级拖拽事件计算，避免本地 hover 抖动。
+ * pointer 移动只负责跨过阈值后启动全局拖拽；插入线统一由窗口级拖拽事件计算，避免本地 hover 抖动
  */
 function onPointerMove(event: PointerEvent): void {
   const dragState = pointerDragState;
@@ -148,7 +148,7 @@ function onPointerMove(event: PointerEvent): void {
 }
 
 /**
- * pointerup 才主动结束拖拽；pointercancel 只清理本地监听，真实释放由全局轮询兜底处理。
+ * pointerup 才主动结束拖拽；pointercancel 只清理本地监听，真实释放由全局轮询兜底处理
  */
 function onPointerRelease(event: PointerEvent): void {
   const dragState = pointerDragState;
@@ -166,7 +166,7 @@ function onPointerRelease(event: PointerEvent): void {
 }
 
 /**
- * 清理 pointer 拖拽监听，避免多次按下后产生重复 move/up 回调。
+ * 清理 pointer 拖拽监听，避免多次按下后产生重复 move/up 回调
  */
 function cleanupPointerDrag(): void {
   clearPointerCandidatePolling();
@@ -179,7 +179,7 @@ function cleanupPointerDrag(): void {
 }
 
 /**
- * 候选拖拽阶段也轮询全局鼠标，避免透明 WebView 在快速移出图标后收不到阈值前的 move/up。
+ * 候选拖拽阶段也轮询全局鼠标，避免透明 WebView 在快速移出图标后收不到阈值前的 move/up
  */
 function startPointerCandidatePolling(): void {
   clearPointerCandidatePolling();
@@ -189,7 +189,7 @@ function startPointerCandidatePolling(): void {
 }
 
 /**
- * 轮询候选拖拽的移动距离和释放状态；真正拖拽开始后仍用它兜底清理本地图标状态。
+ * 轮询候选拖拽的移动距离和释放状态；真正拖拽开始后仍用它兜底清理本地图标状态
  */
 async function pollPointerCandidate(): Promise<void> {
   const dragState = pointerDragState;
@@ -230,7 +230,7 @@ async function pollPointerCandidate(): Promise<void> {
 }
 
 /**
- * 清理候选拖拽轮询，避免一次 pointerdown 残留多个全局鼠标读取任务。
+ * 清理候选拖拽轮询，避免一次 pointerdown 残留多个全局鼠标读取任务
  */
 function clearPointerCandidatePolling(): void {
   if (!pointerCandidatePollTimer) {
@@ -243,7 +243,7 @@ function clearPointerCandidatePolling(): void {
 }
 
 /**
- * 候选拖拽跨过阈值后只启动一次真实 Box 拖拽，会继续复用原来的拖影和跨 Box 事件链路。
+ * 候选拖拽跨过阈值后只启动一次真实 Box 拖拽，会继续复用原来的拖影和跨 Box 事件链路
  */
 function startPointerDragFromCandidate(
   dragState: PointerDragState,
@@ -260,7 +260,7 @@ function startPointerDragFromCandidate(
 }
 
 /**
- * 拖出窗口时全局拖拽轮询仍会继续，组件这里只清理本地 pointer 状态和点击抑制。
+ * 拖出窗口时全局拖拽轮询仍会继续，组件这里只清理本地 pointer 状态和点击抑制
  */
 function onPointerWindowBlur(): void {
   const dragState = pointerDragState;
@@ -296,7 +296,7 @@ function onPointerWindowBlur(): void {
 }
 
 /**
- * 拖拽阈值使用欧氏距离，斜向移动和横向移动都有一致的触发手感。
+ * 拖拽阈值使用欧氏距离，斜向移动和横向移动都有一致的触发手感
  */
 function hasPointerExceededDragThreshold(
   event: PointerEvent,
@@ -309,7 +309,7 @@ function hasPointerExceededDragThreshold(
 }
 
 /**
- * 全局轮询使用屏幕坐标判断阈值，覆盖鼠标过快离开 WebView 后没有 DOM pointermove 的边界。
+ * 全局轮询使用屏幕坐标判断阈值，覆盖鼠标过快离开 WebView 后没有 DOM pointermove 的边界
  */
 function hasScreenPointerExceededDragThreshold(
   screenX: number,
@@ -323,14 +323,14 @@ function hasScreenPointerExceededDragThreshold(
 }
 
 /**
- * 右键菜单由父级桥接到 Windows Shell，组件自身不展示浏览器菜单。
+ * 右键菜单由父级桥接到 Windows Shell，组件自身不展示浏览器菜单
  */
 function onContextMenu(event: MouseEvent): void {
   emit("nativeContextMenu", event, props.item);
 }
 
 /**
- * 点击 Box 内图标时交给系统默认程序打开，保持与 Windows 桌面双击一致。
+ * 点击 Box 内图标时交给系统默认程序打开，保持与 Windows 桌面双击一致
  */
 async function openItem(): Promise<void> {
   if (suppressNextClick.value) {
@@ -341,7 +341,7 @@ async function openItem(): Promise<void> {
 }
 
 /**
- * 默认使用双击打开，保留单击选择/拖动的空间；用户关闭该设置后单击直接打开。
+ * 默认使用双击打开，保留单击选择/拖动的空间；用户关闭该设置后单击直接打开
  */
 function handleClick(event: MouseEvent): void {
   if (props.doubleClickOpen === false && event.detail === DESKTOP_ICON_VIEW.openClickDetail) {
@@ -350,7 +350,7 @@ function handleClick(event: MouseEvent): void {
 }
 
 /**
- * 双击打开时只在双击事件中触发，避免第一次单击误启动文件。
+ * 双击打开时只在双击事件中触发，避免第一次单击误启动文件
  */
 function handleDoubleClick(): void {
   if (props.doubleClickOpen !== false) {
