@@ -155,7 +155,11 @@ async function openAllBoxes(): Promise<boolean> {
           openBoxWindow(box, {
             focus: false,
             startupSnapshotToken: startupSnapshotServer.token,
-            visible: false,
+            /**
+             * Windows WebView2 的文件拖放目标在创建阶段绑定到子 HWND；隐藏创建时可能拿不到可注册的子窗口，
+             * 表现为拖入 Box 时系统显示禁用光标。启动恢复保留快照复用，但让 Box 可见创建以保证 DropTarget 生效。
+             */
+            visible: true,
           }),
         ),
       );
