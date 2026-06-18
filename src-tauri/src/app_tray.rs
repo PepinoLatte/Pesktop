@@ -152,8 +152,29 @@ fn handle_tray_menu_event(
                     .unwrap_or(false),
             );
         }
-        MENU_ID_QUIT => app_handle.exit(0),
+        MENU_ID_QUIT => request_graceful_exit(app_handle),
         _ => {}
+    }
+}
+
+/// 托盘“关闭”是真正退出应用，需要让所有 WebViewWindow 先走正常销毁链路。
+///
+/// Windows WebView2/Chromium 在进程退出时会注销 `Chrome_WidgetWin_0` 等内部窗口类。
+/// 如果直接调用 `AppHandle::exit`，隐藏设置窗、Box 窗口和预载菜单窗可能尚未收到
+/// `Destroyed` 事件，底层清理就会和窗口销毁交错，从而打印 class unregister 失败日志。
+/// 这里逐个关闭现有 WebViewWindow，让 Tauri 在最后一个窗口销毁后自然触发退出；最终
+/// 桌面图标恢复仍由 `RunEvent::ExitRequested` 兜底执行。
+fn request_graceful_exit(app_handle: &AppHandle) {
+    let webview_windows = app_handle.webview_windows();
+    if webview_windows.is_empty() {
+        app_handle.exit(0);
+        return;
+    }
+
+    for (label, webview_window) in webview_windows {
+        if let Err(error) = webview_window.close() {
+            eprintln!("failed to close webview window {label} before exit: {error}");
+        }
     }
 }
 
