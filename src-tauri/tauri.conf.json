@@ -39,6 +39,21 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "wix": {
+        "language": {
+          "zh-CN": {
+            "localePath": "bundle/wix/languages/zh-CN.wxl"
+          }
+        }
+      },
+      "nsis": {
+        "languages": ["SimpChinese"],
+        "customLanguageFiles": {
+          "SimpChinese": "bundle/nsis/languages/SimpChinese.nsh"
+        }
+      }
+    }
   }
 }
