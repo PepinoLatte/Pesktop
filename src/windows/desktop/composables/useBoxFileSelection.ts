@@ -1,0 +1,307 @@
+import { computed, ref, watch } from "vue";
+import type { CSSProperties, Ref } from "vue";
+import type { DesktopItem } from "@/entities/desktopItem/types";
+import { DESKTOP_ICON_VIEW } from "@/windows/desktop/config/desktopIcon";
+import {
+  type GridPoint,
+  normalizeRect,
+  rectsIntersect,
+} from "@/windows/desktop/model/selection";
+
+/**
+ * 文件选择层只关心选择状态和键鼠语义，真实文件动作由外部回调执行。
+ */
+interface BoxFileSelectionOptions {
+  boxGridRef: Ref<HTMLElement | null>;
+  boxItems: Ref<DesktopItem[]>;
+  cancelFileRename: () => void;
+  closeContextMenu: () => void;
+  consumeSuppressedItemClick: () => boolean;
+  deleteSelectedItems: () => Promise<void>;
+  getDoubleClickOpenItems: () => boolean;
+  isEditingTitle: () => boolean;
+  openItem: (item: DesktopItem) => Promise<void>;
+  startSelectedItemRename: () => void;
+}
+
+/**
+ * Box 文件选择能力对外暴露给文件网格、文件操作和拖拽逻辑复用。
+ */
+export interface BoxFileSelectionState {
+  handleFileViewKeydown: (event: KeyboardEvent) => Promise<void>;
+  handleGlobalFileViewKeydown: (event: KeyboardEvent) => void;
+  handleGridPointerDown: (event: PointerEvent) => void;
+  handleItemClick: (event: MouseEvent, item: DesktopItem) => void;
+  isItemSelected: (item: DesktopItem) => boolean;
+  isSelecting: Readonly<Ref<boolean>>;
+  resolveSelectedItems: () => DesktopItem[];
+  selectedPaths: Ref<Set<string>>;
+  selectionRectStyle: Readonly<Ref<CSSProperties>>;
+  stopSelectionRectangle: () => void;
+}
+
+/**
+ * 管理 Box 文件区的 Explorer 式选择语义，包括 Ctrl/Meta 多选、框选和快捷键。
+ */
+export function useBoxFileSelection(
+  options: BoxFileSelectionOptions,
+): BoxFileSelectionState {
+  const selectedPaths = ref<Set<string>>(new Set());
+  const selectionStart = ref<GridPoint | null>(null);
+  const selectionCurrent = ref<GridPoint | null>(null);
+  const isSelecting = computed(() => Boolean(selectionStart.value && selectionCurrent.value));
+  const selectionRectStyle = computed<CSSProperties>(() => {
+    if (!selectionStart.value || !selectionCurrent.value) {
+      return { display: "none" };
+    }
+
+    const left = Math.min(selectionStart.value.x, selectionCurrent.value.x);
+    const top = Math.min(selectionStart.value.y, selectionCurrent.value.y);
+    const width = Math.abs(selectionCurrent.value.x - selectionStart.value.x);
+    const height = Math.abs(selectionCurrent.value.y - selectionStart.value.y);
+
+    return {
+      display: width > 0 && height > 0 ? "block" : "none",
+      height: `${height}px`,
+      left: `${left}px`,
+      top: `${top}px`,
+      width: `${width}px`,
+    };
+  });
+
+  watch(
+    options.boxItems,
+    (items) => {
+      pruneSelection(items);
+    },
+  );
+
+  /**
+   * 刷新后只保留仍存在的选中项，避免外部删除文件后键盘操作命中旧路径。
+   */
+  function pruneSelection(items: DesktopItem[]): void {
+    const existingPaths = new Set(items.map((item) => item.path));
+    selectedPaths.value = new Set(
+      [...selectedPaths.value].filter((path) => existingPaths.has(path)),
+    );
+  }
+
+  /**
+   * 选中态以真实路径为主键，刷新后同名文件也不会互相串选中状态。
+   */
+  function isItemSelected(item: DesktopItem): boolean {
+    return selectedPaths.value.has(item.path);
+  }
+
+  /**
+   * 单击负责选中，Ctrl/Meta 单击负责增删选区，行为尽量贴近 Explorer 的多选直觉。
+   */
+  function handleItemClick(event: MouseEvent, item: DesktopItem): void {
+    if (options.consumeSuppressedItemClick()) {
+      return;
+    }
+
+    options.boxGridRef.value?.focus();
+    options.closeContextMenu();
+    if (event.ctrlKey || event.metaKey) {
+      const nextSelection = new Set(selectedPaths.value);
+      if (nextSelection.has(item.path)) {
+        nextSelection.delete(item.path);
+      } else {
+        nextSelection.add(item.path);
+      }
+      selectedPaths.value = nextSelection;
+      return;
+    }
+
+    selectedPaths.value = new Set([item.path]);
+    if (!options.getDoubleClickOpenItems() && event.detail === DESKTOP_ICON_VIEW.openClickDetail) {
+      void options.openItem(item);
+    }
+  }
+
+  /**
+   * 空白区域按下鼠标才启动框选，避免和图标点击、窗口拖动、缩放热区互相抢事件。
+   */
+  function handleGridPointerDown(event: PointerEvent): void {
+    if (event.button !== 0 || !options.boxGridRef.value) {
+      return;
+    }
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest("[data-box-item-path]")) {
+      return;
+    }
+
+    options.boxGridRef.value.focus();
+    const point = resolveGridLocalPoint(event);
+    selectionStart.value = point;
+    selectionCurrent.value = point;
+    if (!event.ctrlKey && !event.metaKey) {
+      selectedPaths.value = new Set();
+    }
+    window.addEventListener("pointermove", handleSelectionPointerMove, { capture: true });
+    window.addEventListener("pointerup", handleSelectionPointerUp, { capture: true, once: true });
+    window.addEventListener("pointercancel", handleSelectionPointerUp, {
+      capture: true,
+      once: true,
+    });
+  }
+
+  /**
+   * 框选移动阶段实时换算网格内坐标，滚动区域内也能得到稳定选择矩形。
+   */
+  function handleSelectionPointerMove(event: PointerEvent): void {
+    selectionCurrent.value = resolveGridLocalPoint(event);
+    applySelectionRectangle();
+  }
+
+  /**
+   * 鼠标释放时做最后一次命中计算，再清理全局 pointer 监听。
+   */
+  function handleSelectionPointerUp(): void {
+    applySelectionRectangle();
+    stopSelectionRectangle();
+  }
+
+  /**
+   * 框选监听挂在 window 上，清理必须成对执行，防止指针离开 Box 后残留选择状态。
+   */
+  function stopSelectionRectangle(): void {
+    window.removeEventListener("pointermove", handleSelectionPointerMove, { capture: true });
+    window.removeEventListener("pointerup", handleSelectionPointerUp, { capture: true });
+    window.removeEventListener("pointercancel", handleSelectionPointerUp, { capture: true });
+    selectionStart.value = null;
+    selectionCurrent.value = null;
+  }
+
+  /**
+   * 将视口坐标换算为滚动容器内坐标，保证滚动后框选命中仍与视觉位置一致。
+   */
+  function resolveGridLocalPoint(event: PointerEvent): GridPoint {
+    const gridRect = options.boxGridRef.value?.getBoundingClientRect();
+    if (!gridRect) {
+      return { x: 0, y: 0 };
+    }
+
+    return {
+      x: event.clientX - gridRect.left + (options.boxGridRef.value?.scrollLeft ?? 0),
+      y: event.clientY - gridRect.top + (options.boxGridRef.value?.scrollTop ?? 0),
+    };
+  }
+
+  /**
+   * 使用 DOM 矩形做交集判断，避免根据网格列数推断位置时受字体和缩放影响。
+   */
+  function applySelectionRectangle(): void {
+    if (!options.boxGridRef.value || !selectionStart.value || !selectionCurrent.value) {
+      return;
+    }
+
+    const selectionRect = normalizeRect(selectionStart.value, selectionCurrent.value);
+    const gridRect = options.boxGridRef.value.getBoundingClientRect();
+    const nextSelection = new Set(selectedPaths.value);
+    for (const item of options.boxItems.value) {
+      const element = options.boxGridRef.value.querySelector<HTMLElement>(
+        `[data-box-item-path="${CSS.escape(item.path)}"]`,
+      );
+      if (!element) {
+        continue;
+      }
+
+      const elementRect = element.getBoundingClientRect();
+      const itemRect = {
+        height: elementRect.height,
+        left: elementRect.left - gridRect.left + options.boxGridRef.value.scrollLeft,
+        top: elementRect.top - gridRect.top + options.boxGridRef.value.scrollTop,
+        width: elementRect.width,
+      };
+      if (rectsIntersect(selectionRect, itemRect)) {
+        nextSelection.add(item.path);
+      }
+    }
+    selectedPaths.value = nextSelection;
+  }
+
+  /**
+   * 文件区键盘快捷键覆盖高频整理操作，标题编辑中会跳过避免误删或误改文件。
+   */
+  async function handleFileViewKeydown(event: KeyboardEvent): Promise<void> {
+    if (options.isEditingTitle()) {
+      return;
+    }
+
+    const selectedItems = resolveSelectedItems();
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+      selectedPaths.value = new Set(options.boxItems.value.map((item) => item.path));
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "F2") {
+      options.startSelectedItemRename();
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "Delete") {
+      event.preventDefault();
+      await options.deleteSelectedItems();
+      return;
+    }
+    if (event.key === "Enter" && selectedItems[0]) {
+      event.preventDefault();
+      await options.openItem(selectedItems[0]);
+      return;
+    }
+    if (event.key === "Escape") {
+      options.cancelFileRename();
+      selectedPaths.value = new Set();
+      event.preventDefault();
+    }
+  }
+
+  /**
+   * F2/Delete/Enter 不依赖文件网格是否正好拿到焦点，避免点击图标后快捷键被窗口吞掉。
+   */
+  function handleGlobalFileViewKeydown(event: KeyboardEvent): void {
+    if (event.defaultPrevented || shouldIgnoreGlobalFileShortcut()) {
+      return;
+    }
+
+    void handleFileViewKeydown(event);
+  }
+
+  /**
+   * 输入框和可编辑区域保留系统键盘行为，避免文件重命名或标题编辑时触发全局快捷键。
+   */
+  function shouldIgnoreGlobalFileShortcut(): boolean {
+    const activeElement = document.activeElement;
+    if (!activeElement) {
+      return false;
+    }
+
+    if (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement) {
+      return true;
+    }
+
+    return activeElement instanceof HTMLElement && activeElement.isContentEditable;
+  }
+
+  /**
+   * 选中项每次从最新扫描结果解析，避免文件刷新后继续操作已不存在的路径。
+   */
+  function resolveSelectedItems(): DesktopItem[] {
+    return options.boxItems.value.filter((item) => selectedPaths.value.has(item.path));
+  }
+
+  return {
+    handleFileViewKeydown,
+    handleGlobalFileViewKeydown,
+    handleGridPointerDown,
+    handleItemClick,
+    isItemSelected,
+    isSelecting,
+    resolveSelectedItems,
+    selectedPaths,
+    selectionRectStyle,
+    stopSelectionRectangle,
+  };
+}
