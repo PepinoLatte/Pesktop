@@ -50,15 +50,7 @@ const emit = defineEmits<{
         />
       </SettingRow>
 
-      <SettingRow title="同名处理" description="控制 Box 传输遇到同名文件时的落盘方式">
-        <SegmentedControl
-          :model-value="props.settings.boxConflictPolicy"
-          :options="BOX_CONFLICT_POLICY_OPTIONS"
-          @change="emit('boxConflictPolicyChange', $event)"
-        />
-      </SettingRow>
-
-      <SettingRow title="拖出桌面" description="控制 Box 内文件拖到桌面后的处理方式">
+      <SettingRow title="拖出 Box" description="控制 Box 内文件拖到桌面后的处理方式">
         <SegmentedControl
           :model-value="props.settings.boxDragOutAction"
           :options="BOX_DROP_ACTION_OPTIONS"
@@ -71,6 +63,14 @@ const emit = defineEmits<{
           :model-value="props.settings.boxDeletePolicy"
           :options="BOX_DELETE_POLICY_OPTIONS"
           @change="emit('boxDeletePolicyChange', $event)"
+        />
+      </SettingRow>
+
+      <SettingRow title="同名处理" description="控制 Box 传输遇到同名文件时的落盘方式">
+        <SegmentedControl
+          :model-value="props.settings.boxConflictPolicy"
+          :options="BOX_CONFLICT_POLICY_OPTIONS"
+          @change="emit('boxConflictPolicyChange', $event)"
         />
       </SettingRow>
     </SettingGroup>
