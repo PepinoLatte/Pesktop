@@ -36,15 +36,6 @@ export interface LogicalWindowFrame {
 }
 
 /**
- * 屏幕物理坐标换算到当前 Box WebView 的结果，目标窗口据此判断是否命中自身
- */
-export interface BoxItemDragLocalPoint {
-  inside: boolean;
-  x: number;
-  y: number;
-}
-
-/**
  * 屏幕工作区使用物理坐标保存，拖动时可直接和窗口物理坐标比较，避免高 DPI 下贴边偏移
  */
 interface PhysicalWorkArea {
@@ -114,7 +105,6 @@ const resizeHandles: Array<{
  * 只声明当前桌面窗口用到的 Tauri 能力，降低组合式逻辑对具体窗口类的类型耦合
  */
 interface DesktopWindowHandle {
-  innerPosition: () => Promise<PhysicalWindowPoint>;
   outerPosition: () => Promise<PhysicalWindowPoint>;
   outerSize: () => Promise<{ height: number; width: number }>;
   scaleFactor: () => Promise<number>;
@@ -402,7 +392,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 根据拖拽方向更新对应边；开启网格时再换算成完整图标行列
+   * 根据拖拽方向更新对应边；开启网格时再换算成完整图标行列。
    */
   function resolveManualResizeFrame(
     cursor: PhysicalWindowPoint,
@@ -419,18 +409,15 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 未开启网格调整时仍保持最小尺寸约束，避免手动写入小于 Tauri 最小窗口的值
+   * 未开启网格调整时仍保持最小尺寸约束，避免手动写入小于 Tauri 最小窗口的值。
    */
   function resolveResizeFrameForSettings(
     frame: LogicalWindowFrame,
     direction: ResizeDirection | null,
   ): LogicalWindowFrame {
-    if (options.getResizeGridSettings().boxResizeGridEnabled) {
-      return resolveBoxResizeGridSnappedBounds(
-        frame,
-        options.getResizeGridSettings(),
-        direction,
-      );
+    const settings = options.getResizeGridSettings();
+    if (settings.boxResizeGridEnabled) {
+      return resolveBoxResizeGridSnappedBounds(frame, settings, direction);
     }
 
     return resolveMinimumResizeFrame(frame, direction);
@@ -1021,46 +1008,6 @@ export function useBoxWindowFrame(options: {
     };
   }
 
-  /**
-   * 外部拖放 over/drop 在 Windows WebView2 下是窗口客户区物理坐标，广播前需要转成屏幕物理坐标
-   */
-  async function resolveWindowClientPhysicalPointToScreen(
-    x: number,
-    y: number,
-  ): Promise<PhysicalWindowPoint> {
-    const position = await options.currentWindow.innerPosition();
-
-    return {
-      x: position.x + x,
-      y: position.y + y,
-    };
-  }
-
-  /**
-   * 将屏幕物理坐标换算到当前无边框窗口的逻辑坐标，高 DPI 下插入线不会偏移
-   */
-  async function resolveBoxItemDragLocalPoint(
-    screenX: number,
-    screenY: number,
-  ): Promise<BoxItemDragLocalPoint> {
-    const [position, size, scaleFactor] = await Promise.all([
-      options.currentWindow.outerPosition(),
-      options.currentWindow.outerSize(),
-      options.currentWindow.scaleFactor(),
-    ]);
-    const inside =
-      screenX >= position.x &&
-      screenY >= position.y &&
-      screenX <= position.x + size.width &&
-      screenY <= position.y + size.height;
-
-    return {
-      inside,
-      x: (screenX - position.x) / scaleFactor,
-      y: (screenY - position.y) / scaleFactor,
-    };
-  }
-
   return {
     applyCollapseWindowFrame,
     clearResizePersistState,
@@ -1072,8 +1019,6 @@ export function useBoxWindowFrame(options: {
     isResizeHandleHovered,
     isResizingBox,
     resizeHandles,
-    resolveBoxItemDragLocalPoint,
-    resolveWindowClientPhysicalPointToScreen,
     scheduleResizePersist,
     startDragging,
     startResizing,

@@ -1,12 +1,25 @@
-import type { DesktopNameDisplayMode } from "@/entities/desktopItem/types";
-
 /**
  * 设置页只保留浅色、跟随系统和深色三种主题，避免与当前 UI 产生不一致的旧状态
  */
 export type ThemeMode = "light" | "system" | "dark";
 
 /**
- * 应用设置只保存当前版本真实使用的偏好，旧外观参数不再兼容
+ * 删除文件夹型 Box 时的文件处理策略，危险操作交给 Windows Shell 保留系统确认和撤销能力
+ */
+export type BoxDeletePolicy = "moveContentsToDesktop" | "keepFolder" | "recycleFolder";
+
+/**
+ * 外部文件拖入 Box 后的处理方式；映射会创建快捷方式，避免移动真实文件位置。
+ */
+export type BoxDropAction = "copy" | "move" | "map";
+
+/**
+ * Box 文件传输遇到同名目标时的处理方式；默认自动重命名以避免系统冲突弹窗。
+ */
+export type BoxConflictPolicy = "rename" | "skip" | "replace";
+
+/**
+ * 应用设置只保存文件夹型 Box 真实使用的偏好，旧版参数不再兼容
  */
 export interface AppSettings {
   /**
@@ -18,19 +31,53 @@ export interface AppSettings {
    */
   boxTheme: ThemeMode;
   /**
-   * Box resize 时是否按完整图标行列调整尺寸，关闭后允许连续像素级缩放
+   * 新建 Box 文件夹的根目录；修改后只影响后续新建 Box，不移动已有 Box 文件夹
+   */
+  collectionRootPath: string;
+  /**
+   * 删除 Box 时如何处理对应的真实收纳文件夹
+   */
+  boxDeletePolicy: BoxDeletePolicy;
+  /**
+   * 外部文件拖入 Box 后执行的真实文件操作
+   */
+  boxDropAction: BoxDropAction;
+  /**
+   * Box 内文件拖出到桌面后执行的真实文件操作；与拖入策略分开保存以适配不同整理习惯
+   */
+  boxDragOutAction: BoxDropAction;
+  /**
+   * Box 文件复制、移动或映射时遇到同名目标的处理策略
+   */
+  boxConflictPolicy: BoxConflictPolicy;
+  /**
+   * 是否显示 Box 内文件名标签；隐藏后 Box 更接近纯图标工作区
+   */
+  showItemLabels: boolean;
+  /**
+   * 快捷方式是否显示角标，关闭后仍不改变真实 `.lnk` 文件
+   */
+  showShortcutArrow: boolean;
+  /**
+   * 是否使用双击打开文件；关闭后单击即可打开，更适合触控板快速整理
+   */
+  doubleClickOpenItems: boolean;
+  /**
+   * 文件名展示规则只影响标签文本，不改变真实文件名
+   */
+  nameDisplayMode: DesktopNameDisplayMode;
+  /**
+   * Box 拖动时是否吸附屏幕或其他 Box 边缘
+   */
+  snapToEdges: boolean;
+  /**
+   * 手动调整 Box 尺寸时是否按当前图标网格吸附，保证窗口边界落在完整行列上
    */
   boxResizeGridEnabled: boolean;
-  snapToEdges: boolean;
-  snapThreshold: number;
   /**
-   * 是否在 Dasktop 运行时隐藏全部 Windows 原生桌面图标
+   * 吸附阈值使用逻辑像素保存，和窗口拖动坐标保持同一体系
    */
-  nativeDesktopIconsHidden: boolean;
-  showItemLabels: boolean;
-  showShortcutArrow: boolean;
-  doubleClickOpenItems: boolean;
-  nameDisplayMode: DesktopNameDisplayMode;
+  snapThreshold: number;
   /**
    * Box 背景透明度使用百分比保存，便于设置页直接用滑块表达
    */
@@ -40,7 +87,7 @@ export interface AppSettings {
    */
   boxCollapseAnimationMs: number;
   /**
-   * Box 内系统图标的最大显示尺寸，真实图像仍由 Windows Shell 解析
+   * Box 内系统图标的显示尺寸，真实图像仍由 Windows Shell 解析
    */
   boxIconSize: number;
   /**
@@ -64,3 +111,4 @@ export interface AppSettings {
    */
   boxCornerRadius: number;
 }
+import type { DesktopNameDisplayMode } from "@/entities/desktopItem/types";

@@ -1,31 +1,21 @@
 /**
- * 桌面文件类型由后端扫描真实桌面目录得到，前端只负责展示与分组映射
+ * Box 文件项类型由 Rust 扫描真实文件夹得到，前端只用它决定后备图标和交互语义。
  */
-export type DesktopItemKind = "file" | "folder" | "shell" | "shortcut" | "unknown";
+export type DesktopItemKind = "file" | "folder" | "shortcut" | "unknown";
 
 /**
- * 桌面项目来源用于区分真实文件和 Windows Shell 虚拟对象，Box 仍统一用 path 作为映射键
- */
-export type DesktopItemSource = "fileSystem" | "shell";
-
-/**
- * Box 图标名称显示模式由全局设置控制，避免不同窗口之间出现同一文件命名规则不一致
+ * 文件名显示模式只影响 Box 内标签文本，不改变真实文件名。
  */
 export type DesktopNameDisplayMode = "full" | "hideShortcutExtension" | "hideAllExtensions";
 
 /**
- * 自绘桌面图标模型，path 是所有持久化映射的稳定主键
+ * 自绘 Box 文件项模型，path 是真实文件操作的稳定主键。
  */
 export interface DesktopItem {
+  extension: string | null;
+  iconDataUrl: string | null;
   id: string;
+  kind: DesktopItemKind;
   name: string;
   path: string;
-  extension: string | null;
-  kind: DesktopItemKind;
-  source: DesktopItemSource;
-  shellId: string | null;
-  /**
-   * Windows Shell 解析出的原生图标，Box 和桌面列表复用同一份数据以避免拖入后视觉不一致
-   */
-  iconDataUrl: string | null;
 }

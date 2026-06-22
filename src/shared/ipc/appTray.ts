@@ -11,12 +11,6 @@ export const TRAY_CREATE_BOX_EVENT = "dasktop://tray-create-box";
 export const AUTOSTART_CHANGED_EVENT = "dasktop://autostart-changed";
 
 /**
- * 托盘菜单请求把 Explorer 原生桌面图标层切换到指定状态，最终写入仍由设置 Store 完成
- */
-export const TRAY_TOGGLE_NATIVE_DESKTOP_ICONS_HIDDEN_EVENT =
-  "dasktop://tray-toggle-native-desktop-icons-hidden";
-
-/**
  * 监听托盘创建 Box 请求；处理方应创建 Box 并打开独立 Box 窗口
  */
 export async function listenTrayCreateBox(
@@ -32,13 +26,4 @@ export async function listenAutostartChanged(
   handler: (event: Event<boolean>) => void | Promise<void>,
 ): Promise<UnlistenFn> {
   return listen<boolean>(AUTOSTART_CHANGED_EVENT, handler);
-}
-
-/**
- * 监听托盘隐藏系统桌面图标请求；payload 是托盘当前勾选后的目标状态
- */
-export async function listenTrayToggleNativeDesktopIconsHidden(
-  handler: (event: Event<boolean>) => void | Promise<void>,
-): Promise<UnlistenFn> {
-  return listen<boolean>(TRAY_TOGGLE_NATIVE_DESKTOP_ICONS_HIDDEN_EVENT, handler);
 }

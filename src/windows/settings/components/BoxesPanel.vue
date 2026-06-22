@@ -1,26 +1,28 @@
 <script setup lang="ts">
-import { ArrowUpRight, FolderPlus, Lock, LockOpen, RefreshCw, Trash2 } from "@lucide/vue";
+import { ArrowUpRight, FolderOpen, FolderPlus, Lock, LockOpen, RefreshCw, Trash2 } from "@lucide/vue";
 import { useDesktopBoxDeleteConfirmation } from "@/entities/desktopBox/deleteConfirmation";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 
 /**
- * Box 面板只做创建、打开和刷新入口，具体窗口行为由 desktop feature 处理
+ * Box 面板只做创建、打开、真实文件夹定位和刷新入口，具体窗口行为由 desktop feature 处理
  */
 defineProps<{
   boxes: DesktopBox[];
-  boxItemCounts: Record<string, number>;
+  /**
+   * 当前新建 Box 使用的收纳根目录，帮助用户确认后续文件夹会创建在哪里
+   */
+  collectionRootPath: string;
   /**
    * 设置页父级统一下发内容宽度，避免各面板各自维护页面密度
    */
   panelWidth: string;
-  totalItems: number;
-  unassignedItems: number;
 }>();
 
 const emit = defineEmits<{
   createBox: [];
   deleteBox: [box: DesktopBox];
   openBox: [box: DesktopBox];
+  openFolder: [box: DesktopBox];
   refresh: [];
   toggleBoxLocked: [box: DesktopBox];
 }>();
@@ -55,6 +57,14 @@ function openBoxFromPanel(box: DesktopBox): void {
 }
 
 /**
+ * 打开真实文件夹不改变 Box 数据，先清掉危险确认态避免误删
+ */
+function openFolderFromPanel(box: DesktopBox): void {
+  clearBoxDeleteConfirmation();
+  emit("openFolder", box);
+}
+
+/**
  * 锁定切换和删除无关，点击后取消二次确认可以降低误删概率
  */
 function toggleBoxLockedFromPanel(box: DesktopBox): void {
@@ -74,7 +84,7 @@ function deleteBoxFromPanel(box: DesktopBox): void {
 }
 
 /**
- * 刷新桌面文件前重置危险操作状态，避免刷新后列表变化但确认态仍指向旧 Box
+ * 刷新状态前重置危险操作状态，避免列表变化但确认态仍指向旧 Box
  */
 function refreshFromPanel(): void {
   clearBoxDeleteConfirmation();
@@ -87,7 +97,9 @@ function refreshFromPanel(): void {
     <div class="mb-6 flex items-end justify-between gap-6">
       <div class="min-w-0">
         <h1 class="text-[24px] font-semibold tracking-[0] text-[#17181c] dark:text-[#f4f4f5]">Box</h1>
-        <p class="mt-1 text-[13px] text-[#6f7480] dark:text-[#a7abb5]">管理桌面上的独立 Box 窗口</p>
+        <p class="mt-1 truncate text-[13px] text-[#6f7480] dark:text-[#a7abb5]">
+          {{ collectionRootPath || "新建 Box 时选择收纳位置" }}
+        </p>
       </div>
 
       <button
@@ -100,18 +112,14 @@ function refreshFromPanel(): void {
       </button>
     </div>
 
-    <div class="mb-4 grid grid-cols-3 gap-3">
+    <div class="mb-4 grid grid-cols-2 gap-3">
       <div class="rounded-[12px] border border-[#dfe2e8] bg-[#ffffff] px-4 py-3 dark:border-[#292c34] dark:bg-[#181a20]">
         <div class="text-[20px] font-semibold text-[#17181c] dark:text-[#f4f4f5]">{{ boxes.length }}</div>
         <div class="mt-1 text-[12px] text-[#707684] dark:text-[#9ca0aa]">Box</div>
       </div>
       <div class="rounded-[12px] border border-[#dfe2e8] bg-[#ffffff] px-4 py-3 dark:border-[#292c34] dark:bg-[#181a20]">
-        <div class="text-[20px] font-semibold text-[#17181c] dark:text-[#f4f4f5]">{{ totalItems }}</div>
-        <div class="mt-1 text-[12px] text-[#707684] dark:text-[#9ca0aa]">已收纳</div>
-      </div>
-      <div class="rounded-[12px] border border-[#dfe2e8] bg-[#ffffff] px-4 py-3 dark:border-[#292c34] dark:bg-[#181a20]">
-        <div class="text-[20px] font-semibold text-[#17181c] dark:text-[#f4f4f5]">{{ unassignedItems }}</div>
-        <div class="mt-1 text-[12px] text-[#707684] dark:text-[#9ca0aa]">桌面未分组</div>
+        <div class="truncate text-[13px] font-semibold text-[#17181c] dark:text-[#f4f4f5]">{{ collectionRootPath || "未设置" }}</div>
+        <div class="mt-1 text-[12px] text-[#707684] dark:text-[#9ca0aa]">收纳根目录</div>
       </div>
     </div>
 
@@ -119,7 +127,7 @@ function refreshFromPanel(): void {
       <article
         v-for="box in boxes"
         :key="box.id"
-        class="grid min-h-[64px] w-full grid-cols-[1fr_auto] items-center gap-5 border-b border-[#eceef3] px-5 text-left transition-colors last:border-b-0 hover:bg-[#f6f7fa] dark:border-[#292c34] dark:hover:bg-[#202229]"
+        class="grid min-h-[68px] w-full grid-cols-[1fr_auto] items-center gap-5 border-b border-[#eceef3] px-5 text-left transition-colors last:border-b-0 hover:bg-[#f6f7fa] dark:border-[#292c34] dark:hover:bg-[#202229]"
       >
         <button
           class="grid min-w-0 py-3 text-left"
@@ -127,8 +135,8 @@ function refreshFromPanel(): void {
           @click="openBoxFromPanel(box)"
         >
           <strong class="block truncate text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">{{ displayBoxTitle(box) }}</strong>
-          <span class="mt-1 block text-[12px] text-[#707684] dark:text-[#9ca0aa]">
-            {{ box.locked ? "已锁定" : "可移动" }} · {{ box.width }} × {{ box.height }} · {{ boxItemCounts[box.id] ?? 0 }} 个项目
+          <span class="mt-1 block truncate text-[12px] text-[#707684] dark:text-[#9ca0aa]">
+            {{ box.locked ? "已锁定" : "可移动" }} · {{ box.width }} × {{ box.height }} · {{ box.folderPath }}
           </span>
         </button>
 
@@ -142,6 +150,15 @@ function refreshFromPanel(): void {
           >
             <LockOpen v-if="box.locked" :size="15" />
             <Lock v-else :size="15" />
+          </button>
+          <button
+            aria-label="打开真实文件夹"
+            class="grid size-8 place-items-center rounded-[7px] text-[#68707d] transition-colors hover:bg-[#eef0f4] hover:text-[#17181c] dark:text-[#a7abb5] dark:hover:bg-[#242730] dark:hover:text-[#f4f4f5]"
+            title="打开真实文件夹"
+            type="button"
+            @click="openFolderFromPanel(box)"
+          >
+            <FolderOpen :size="16" />
           </button>
           <button
             aria-label="打开 Box"
@@ -161,7 +178,7 @@ function refreshFromPanel(): void {
                   ? 'w-[78px] gap-1.5 bg-red-600 px-2 text-[12px] font-medium text-white hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600'
                   : 'w-8 text-red-500 hover:bg-[#fff0f0] hover:text-red-600 dark:text-red-400 dark:hover:bg-[#3a2528]'
               "
-              :title="isConfirmingBoxDelete(box) ? '再次点击确认删除，真实文件不会被删除' : '删除 Box'"
+              :title="isConfirmingBoxDelete(box) ? '再次点击确认删除并执行当前文件夹处理策略' : '删除 Box'"
               type="button"
               @click="deleteBoxFromPanel(box)"
             >
@@ -174,7 +191,7 @@ function refreshFromPanel(): void {
 
       <div v-if="boxes.length === 0" class="px-5 py-10 text-center">
         <p class="text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">还没有 Box</p>
-        <p class="mt-1 text-[12px] text-[#707684] dark:text-[#9ca0aa]">点击右上角创建第一个桌面 Box</p>
+        <p class="mt-1 text-[12px] text-[#707684] dark:text-[#9ca0aa]">点击右上角创建第一个真实文件夹 Box</p>
       </div>
     </div>
 
@@ -184,7 +201,7 @@ function refreshFromPanel(): void {
       @click="refreshFromPanel"
     >
       <RefreshCw :size="15" />
-      刷新桌面文件
+      刷新状态
     </button>
   </section>
 </template>

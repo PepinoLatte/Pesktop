@@ -1,7 +1,6 @@
 import { emit, listen, type Event, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppSettings } from "@/entities/appSettings/types";
-import type { DesktopItem } from "@/entities/desktopItem/types";
-import type { DesktopBox, DesktopBoxItem } from "@/entities/desktopBox/types";
+import type { DesktopBox } from "@/entities/desktopBox/types";
 
 /**
  * 桌面状态同步事件用于连接设置窗和多个独立 Box 窗口，避免各 WebView 的 Pinia 状态互相滞后
@@ -14,7 +13,7 @@ export const DESKTOP_STATE_CHANGED_EVENT = "dasktop-desktop-state-changed";
 export const BOX_WINDOW_READY_EVENT = "dasktop-box-window-ready";
 
 /**
- * 启动快照请求/响应走 Tauri 事件总线，避免把大量 iconDataUrl 写入 localStorage 触发容量上限
+ * 启动快照请求/响应走 Tauri 事件总线，避免每个 Box 窗口重复读取 SQLite
  */
 export const DESKTOP_STARTUP_SNAPSHOT_REQUEST_EVENT =
   "dasktop-desktop-startup-snapshot-request";
@@ -58,12 +57,10 @@ export interface DesktopStartupSnapshotResponsePayload {
 }
 
 /**
- * 启动快照只在主窗口批量打开 Box 时使用，避免每个 Box WebView 重复扫描桌面和读取 SQLite
+ * 启动快照只在主窗口批量打开 Box 时使用，避免每个 Box WebView 重复读取 SQLite
  */
 export interface DesktopStartupSnapshot {
-  boxItems: DesktopBoxItem[];
   boxes: DesktopBox[];
-  desktopItems: DesktopItem[];
   desktopPath: string;
   settings: AppSettings;
 }

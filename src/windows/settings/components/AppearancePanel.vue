@@ -52,6 +52,12 @@ const BOX_VISUAL_SETTING_CONTROLS: Array<{
     ...APP_SETTING_NUMBER_LIMITS.boxCollapseAnimationMs,
   },
   {
+    key: "boxCornerRadius",
+    label: "圆角大小",
+    description: "调整 Box 面板和文件图标悬停区域的圆角",
+    ...APP_SETTING_NUMBER_LIMITS.boxCornerRadius,
+  },
+  {
     key: "boxIconSize",
     label: "图标大小",
     description: "调整 Box 内项目图标的显示尺寸",
@@ -80,12 +86,6 @@ const BOX_VISUAL_SETTING_CONTROLS: Array<{
     label: "文件名宽度",
     description: "控制文件名换行宽度，长名称会在此范围内显示",
     ...APP_SETTING_NUMBER_LIMITS.boxFilenameWidth,
-  },
-  {
-    key: "boxCornerRadius",
-    label: "圆角大小",
-    description: "调整 Box 面板和图标悬停区域的圆角",
-    ...APP_SETTING_NUMBER_LIMITS.boxCornerRadius,
   },
 ];
 

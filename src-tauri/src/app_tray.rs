@@ -9,21 +9,15 @@ const TRAY_ID: &str = "dasktop-tray";
 const MENU_ID_SETTINGS: &str = "settings";
 const MENU_ID_CREATE_BOX: &str = "create-box";
 const MENU_ID_AUTOSTART: &str = "autostart";
-const MENU_ID_NATIVE_DESKTOP_ICONS_HIDDEN: &str = "native-desktop-icons-hidden";
 const MENU_ID_QUIT: &str = "quit";
 
 /// 托盘请求创建 Box 的前端事件；main WebView 作为隐藏控制器复用现有 Store 创建流程
 pub const TRAY_CREATE_BOX_EVENT: &str = "dasktop://tray-create-box";
 /// 自启状态变化事件用于同步隐藏设置窗里的开关状态
 pub const AUTOSTART_CHANGED_EVENT: &str = "dasktop://autostart-changed";
-/// 托盘请求切换 Explorer 原生桌面图标层，由前端 Store 继续负责持久化和系统命令调用
-pub const TRAY_TOGGLE_NATIVE_DESKTOP_ICONS_HIDDEN_EVENT: &str =
-    "dasktop://tray-toggle-native-desktop-icons-hidden";
-
 /// 托盘菜单中需要跨入口同步的可变控件状态
 pub struct AppTrayState {
     autostart_item: CheckMenuItem<Wry>,
-    native_desktop_icons_hidden_item: CheckMenuItem<Wry>,
 }
 
 /// 初始化系统托盘图标和右键菜单；菜单只分发动作，具体 Box 生命周期仍由前端统一处理
@@ -37,36 +31,21 @@ pub fn setup_app_tray(app: &App) -> tauri::Result<()> {
         autostart_enabled,
         None::<&str>,
     )?;
-    let native_desktop_icons_hidden_item = CheckMenuItem::with_id(
-        app,
-        MENU_ID_NATIVE_DESKTOP_ICONS_HIDDEN,
-        "隐藏系统桌面图标",
-        true,
-        false,
-        None::<&str>,
-    )?;
     let menu = MenuBuilder::new(app)
         .text(MENU_ID_SETTINGS, "设置")
         .text(MENU_ID_CREATE_BOX, "新增 Box")
         .separator()
         .item(&autostart_item)
-        .item(&native_desktop_icons_hidden_item)
         .separator()
         .text(MENU_ID_QUIT, "关闭")
         .build()?;
     let autostart_item_for_menu = autostart_item.clone();
-    let native_desktop_icons_hidden_item_for_menu = native_desktop_icons_hidden_item.clone();
     let mut tray_builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("Dasktop")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app_handle, event| {
-            handle_tray_menu_event(
-                app_handle,
-                &event,
-                &autostart_item_for_menu,
-                &native_desktop_icons_hidden_item_for_menu,
-            );
+            handle_tray_menu_event(app_handle, &event, &autostart_item_for_menu);
         })
         .on_tray_icon_event(|tray, event| {
             if is_left_click_release(&event) {
@@ -79,10 +58,7 @@ pub fn setup_app_tray(app: &App) -> tauri::Result<()> {
     }
 
     tray_builder.build(app)?;
-    app.manage(AppTrayState {
-        autostart_item,
-        native_desktop_icons_hidden_item,
-    });
+    app.manage(AppTrayState { autostart_item });
     Ok(())
 }
 
@@ -110,27 +86,10 @@ pub fn set_autostart_enabled(app: &AppHandle, enabled: bool) -> Result<bool, Str
     Ok(enabled)
 }
 
-/// 同步托盘中“隐藏系统桌面图标”勾选状态；真实偏好仍以设置页 Store 为准
-pub fn set_native_desktop_icons_hidden_checked(
-    app: &AppHandle,
-    hidden: bool,
-) -> Result<bool, String> {
-    let tray_state = app
-        .try_state::<AppTrayState>()
-        .ok_or_else(|| "系统托盘尚未初始化，无法同步桌面图标隐藏状态".to_string())?;
-    tray_state
-        .native_desktop_icons_hidden_item
-        .set_checked(hidden)
-        .map_err(|error| format!("无法同步托盘桌面图标隐藏状态：{error}"))?;
-
-    Ok(hidden)
-}
-
 fn handle_tray_menu_event(
     app_handle: &AppHandle,
     event: &MenuEvent,
     autostart_item: &CheckMenuItem<Wry>,
-    native_desktop_icons_hidden_item: &CheckMenuItem<Wry>,
 ) {
     match event.id().as_ref() {
         MENU_ID_SETTINGS => show_settings_window(app_handle),
@@ -144,14 +103,6 @@ fn handle_tray_menu_event(
                 }
             }
         }
-        MENU_ID_NATIVE_DESKTOP_ICONS_HIDDEN => {
-            request_toggle_native_desktop_icons_hidden(
-                app_handle,
-                native_desktop_icons_hidden_item
-                    .is_checked()
-                    .unwrap_or(false),
-            );
-        }
         MENU_ID_QUIT => request_graceful_exit(app_handle),
         _ => {}
     }
@@ -164,7 +115,7 @@ fn handle_tray_menu_event(
 /// `Destroyed` 事件，底层清理就会和窗口销毁交错，从而打印 class unregister 失败日志
 /// 这里逐个关闭现有 WebViewWindow，让 Tauri 在最后一个窗口销毁后自然触发退出；最终
 /// 桌面图标恢复仍由 `RunEvent::ExitRequested` 兜底执行
-fn request_graceful_exit(app_handle: &AppHandle) {
+pub(crate) fn request_graceful_exit(app_handle: &AppHandle) {
     let webview_windows = app_handle.webview_windows();
     if webview_windows.is_empty() {
         app_handle.exit(0);
@@ -206,16 +157,6 @@ fn show_settings_window(app_handle: &AppHandle) {
 fn request_create_box(app_handle: &AppHandle) {
     if let Err(error) = app_handle.emit_to("main", TRAY_CREATE_BOX_EVENT, ()) {
         eprintln!("failed to request tray box creation: {error}");
-    }
-}
-
-fn request_toggle_native_desktop_icons_hidden(app_handle: &AppHandle, hidden: bool) {
-    if let Err(error) = app_handle.emit_to(
-        "main",
-        TRAY_TOGGLE_NATIVE_DESKTOP_ICONS_HIDDEN_EVENT,
-        hidden,
-    ) {
-        eprintln!("failed to request native desktop icons visibility toggle: {error}");
     }
 }
 

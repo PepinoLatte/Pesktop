@@ -1,5 +1,11 @@
 import type { DesktopNameDisplayMode } from "@/entities/desktopItem/types";
-import type { AppSettings, ThemeMode } from "./types";
+import type {
+  AppSettings,
+  BoxConflictPolicy,
+  BoxDeletePolicy,
+  BoxDropAction,
+  ThemeMode,
+} from "./types";
 
 /**
  * 数值型设置键由 AppSettings 自动推导，新增数值设置时会被类型系统要求补齐范围
@@ -9,13 +15,19 @@ export type AppSettingNumberKey = {
 }[keyof AppSettings];
 
 /**
+ * 布尔型设置键由 AppSettings 自动推导，设置页开关保存时复用统一逻辑
+ */
+export type AppSettingBooleanKey = {
+  [Key in keyof AppSettings]: AppSettings[Key] extends boolean ? Key : never;
+}[keyof AppSettings];
+
+/**
  * 应用设置表和键名统一收口，避免 Store、数据库和设置面板各自硬编码字符串
  */
 export const APP_SETTINGS_STORAGE = {
   databaseUrl: "sqlite:dasktop.db",
   tables: {
     appSettings: "app_settings",
-    boxItems: "box_items",
     boxes: "boxes",
   },
 } as const;
@@ -26,7 +38,11 @@ export const APP_SETTINGS_STORAGE = {
 export const APP_SETTING_KEYS = {
   boxBackgroundOpacity: "boxBackgroundOpacity",
   boxCollapseAnimationMs: "boxCollapseAnimationMs",
+  boxConflictPolicy: "boxConflictPolicy",
   boxCornerRadius: "boxCornerRadius",
+  boxDeletePolicy: "boxDeletePolicy",
+  boxDragOutAction: "boxDragOutAction",
+  boxDropAction: "boxDropAction",
   boxFilenameWidth: "boxFilenameWidth",
   boxIconGapX: "boxIconGapX",
   boxIconGapY: "boxIconGapY",
@@ -34,9 +50,9 @@ export const APP_SETTING_KEYS = {
   boxLabelTextSize: "boxLabelTextSize",
   boxResizeGridEnabled: "boxResizeGridEnabled",
   boxTheme: "boxTheme",
+  collectionRootPath: "collectionRootPath",
   doubleClickOpenItems: "doubleClickOpenItems",
   nameDisplayMode: "nameDisplayMode",
-  nativeDesktopIconsHidden: "nativeDesktopIconsHidden",
   settingsTheme: "settingsTheme",
   showItemLabels: "showItemLabels",
   showShortcutArrow: "showShortcutArrow",
@@ -45,26 +61,30 @@ export const APP_SETTING_KEYS = {
 } as const satisfies Record<keyof AppSettings, keyof AppSettings>;
 
 /**
- * 默认设置只包含当前版本真实生效的字段，旧外观参数不再兼容
+ * 默认设置只包含文件夹型 Box 真实生效的字段，旧版参数不再兼容
  */
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   settingsTheme: "system",
   boxTheme: "system",
-  boxResizeGridEnabled: true,
-  snapToEdges: true,
-  snapThreshold: 20,
-  nativeDesktopIconsHidden: false,
+  collectionRootPath: "",
+  boxDeletePolicy: "moveContentsToDesktop",
+  boxDropAction: "move",
+  boxDragOutAction: "move",
+  boxConflictPolicy: "rename",
   showItemLabels: true,
   showShortcutArrow: true,
   doubleClickOpenItems: true,
-  nameDisplayMode: "full",
+  nameDisplayMode: "hideShortcutExtension",
+  snapToEdges: true,
+  boxResizeGridEnabled: true,
+  snapThreshold: 20,
   boxBackgroundOpacity: 70,
   boxCollapseAnimationMs: 420,
-  boxIconSize: 44,
+  boxIconSize: 48,
   boxLabelTextSize: 12,
-  boxIconGapX: 4,
-  boxIconGapY: 4,
-  boxFilenameWidth: 72,
+  boxIconGapX: 6,
+  boxIconGapY: 6,
+  boxFilenameWidth: 82,
   boxCornerRadius: 8,
 };
 
@@ -109,6 +129,29 @@ export const DESKTOP_NAME_DISPLAY_MODES = [
   "hideShortcutExtension",
   "hideAllExtensions",
 ] as const satisfies readonly DesktopNameDisplayMode[];
+
+/**
+ * Box 删除策略集中定义，设置页和数据库校验使用同一组可选值
+ */
+export const BOX_DELETE_POLICIES = [
+  "moveContentsToDesktop",
+  "keepFolder",
+  "recycleFolder",
+] as const satisfies readonly BoxDeletePolicy[];
+
+/**
+ * 拖入策略集中定义，设置页、数据库校验和后端命令共用同一组可选值
+ */
+export const BOX_DROP_ACTIONS = ["copy", "move", "map"] as const satisfies readonly BoxDropAction[];
+
+/**
+ * 同名文件处理策略集中定义，默认重命名用于彻底绕开 Windows 冲突弹窗层级问题
+ */
+export const BOX_CONFLICT_POLICIES = [
+  "rename",
+  "skip",
+  "replace",
+] as const satisfies readonly BoxConflictPolicy[];
 
 /**
  * 数值设置统一做范围夹取和小数精度归一，避免无效历史数据撑破布局

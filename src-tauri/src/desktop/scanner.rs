@@ -1,163 +1,113 @@
-use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use super::{DesktopItem, DesktopItemKind, DesktopItemSource, DesktopSnapshot};
+use super::{DesktopItem, DesktopItemKind, DesktopSnapshot};
 
-const SHELL_ITEM_PATH_PREFIX: &str = "shell::";
-
-/// 已知 Shell 虚拟桌面项使用稳定业务 ID 映射，避免把不可持久化的 PIDL 直接写入前端数据库
-struct KnownShellDesktopItem {
-    id: &'static str,
-    name: &'static str,
-    parsing_name: &'static str,
-}
-
-const KNOWN_SHELL_DESKTOP_ITEMS: &[KnownShellDesktopItem] = &[
-    KnownShellDesktopItem {
-        id: "this-pc",
-        name: "此电脑",
-        parsing_name: "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
-    },
-    KnownShellDesktopItem {
-        id: "user-files",
-        name: "用户的文件",
-        parsing_name: "::{59031A47-3F72-44A7-89C5-5595FE6B30EE}",
-    },
-    KnownShellDesktopItem {
-        id: "control-panel",
-        name: "控制面板",
-        parsing_name: "::{5399E694-6CE5-4D6C-8FCE-1D8870FDCBA0}",
-    },
-    KnownShellDesktopItem {
-        id: "network",
-        name: "网络",
-        parsing_name: "::{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}",
-    },
-    KnownShellDesktopItem {
-        id: "recycle-bin",
-        name: "回收站",
-        parsing_name: "::{645FF040-5081-101B-9F08-00AA002F954E}",
-    },
-];
-
-/// 扫描用户桌面目录，返回可用于自绘图标的轻量元信息
+/// 读取当前用户桌面路径；文件夹型 Box 只需要删除策略目标目录，不再扫描桌面图标列表。
 pub fn scan_desktop() -> io::Result<DesktopSnapshot> {
     let desktop_path = resolve_desktop_path();
-    let mut items = Vec::new();
-
-    if desktop_path.exists() {
-        for entry in fs::read_dir(&desktop_path)? {
-            let entry = entry?;
-            let path = entry.path();
-
-            items.push(create_desktop_item(&path)?);
-        }
-    }
-
-    items.extend(
-        KNOWN_SHELL_DESKTOP_ITEMS
-            .iter()
-            .map(create_shell_desktop_item),
-    );
-    items.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
 
     Ok(DesktopSnapshot {
         desktop_path: desktop_path.to_string_lossy().to_string(),
-        items,
     })
 }
 
-/// 按真实路径解析项目元信息，支持 Box 收纳任意磁盘文件时继续复用 Windows Shell 图标逻辑
-pub fn scan_paths(paths: &[String]) -> io::Result<Vec<DesktopItem>> {
-    let mut seen_paths = HashSet::new();
-    let mut items = Vec::new();
-
-    for raw_path in paths {
-        let normalized_key = normalize_item_key(raw_path);
-        if !seen_paths.insert(normalized_key) {
-            continue;
-        }
-
-        if let Some(shell_item) = create_shell_desktop_item_from_key(raw_path) {
-            items.push(shell_item);
-            continue;
-        }
-
-        let path = PathBuf::from(raw_path);
-        if !path.exists() {
-            continue;
-        }
-
-        items.push(create_desktop_item(&path)?);
+/// 扫描 Box 真实收纳文件夹的直接子项，供 WebView 自绘文件网格使用。
+pub fn scan_box_folder(folder_path: &str) -> io::Result<Vec<DesktopItem>> {
+    let folder = PathBuf::from(folder_path);
+    if !folder.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Box folder does not exist",
+        ));
     }
 
+    let mut items = Vec::new();
+    for entry in fs::read_dir(folder)? {
+        let entry = entry?;
+        items.push(create_desktop_item(&entry.path())?);
+    }
+
+    items.sort_by(compare_desktop_items);
     Ok(items)
 }
 
-/// 将文件系统路径转换成前端可展示的桌面项目；真实打开方式仍由系统 Shell 处理
+/// 优先使用系统登记的桌面 Known Folder，桌面被 OneDrive 或策略重定向时也能拿到真实目标目录。
+#[cfg(target_os = "windows")]
+fn resolve_desktop_path() -> PathBuf {
+    resolve_windows_known_desktop_path()
+        .or_else(resolve_profile_desktop_path)
+        .unwrap_or_else(resolve_current_dir)
+}
+
+/// 非 Windows 平台没有当前产品语义里的 Explorer 桌面目录，保留用户目录兜底便于开发调试。
+#[cfg(not(target_os = "windows"))]
+fn resolve_desktop_path() -> PathBuf {
+    resolve_profile_desktop_path().unwrap_or_else(resolve_current_dir)
+}
+
+/// `USERPROFILE\Desktop` 只作为兜底路径；它不一定等于 Windows 当前真实桌面目录。
+fn resolve_profile_desktop_path() -> Option<PathBuf> {
+    env::var("USERPROFILE")
+        .ok()
+        .map(|profile_path| PathBuf::from(profile_path).join("Desktop"))
+}
+
+/// 桌面路径无法解析时仍返回当前目录，避免前端初始化被系统目录异常完全阻断。
+fn resolve_current_dir() -> PathBuf {
+    env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// 调用 Windows Shell Known Folder API 读取当前用户真实桌面，覆盖 D 盘、OneDrive 和组策略重定向场景。
+#[cfg(target_os = "windows")]
+fn resolve_windows_known_desktop_path() -> Option<PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_Desktop, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
+
+    let path = unsafe { SHGetKnownFolderPath(&FOLDERID_Desktop, KF_FLAG_DEFAULT, None).ok()? };
+    let path_text_result = unsafe { path.to_string() };
+    unsafe {
+        CoTaskMemFree(Some(path.as_ptr() as *const _));
+    }
+
+    path_text_result
+        .ok()
+        .filter(|path_text| !path_text.is_empty())
+        .map(PathBuf::from)
+}
+
+/// 将真实文件系统路径转换成前端展示模型；打开、重命名和删除仍以后续路径操作为准。
 fn create_desktop_item(path: &Path) -> io::Result<DesktopItem> {
     let metadata = fs::metadata(path)?;
+    let is_dir = metadata.is_dir();
 
     Ok(DesktopItem {
-        id: stable_item_id(path),
-        name: resolve_item_name(path),
-        path: path.to_string_lossy().to_string(),
         extension: path
             .extension()
             .map(|value| value.to_string_lossy().to_string()),
-        kind: resolve_item_kind(path, metadata.is_dir()),
         icon_data_url: resolve_item_icon_data_url(path),
-        source: DesktopItemSource::FileSystem,
-        shell_id: None,
+        id: stable_item_id(path),
+        kind: resolve_item_kind(path, is_dir),
+        name: resolve_item_name(path),
+        path: path.to_string_lossy().to_string(),
     })
 }
 
-/// 根据稳定 `shell::` 键还原虚拟桌面项，供 Box 启动补齐和原生拖放落库复用
-fn create_shell_desktop_item_from_key(raw_path: &str) -> Option<DesktopItem> {
-    let shell_id = raw_path.strip_prefix(SHELL_ITEM_PATH_PREFIX)?;
+/// 文件夹优先、名称其次的排序接近 Explorer 默认直觉，避免刷新后项目位置随机跳动。
+fn compare_desktop_items(left: &DesktopItem, right: &DesktopItem) -> std::cmp::Ordering {
+    let left_is_folder = matches!(left.kind, DesktopItemKind::Folder);
+    let right_is_folder = matches!(right.kind, DesktopItemKind::Folder);
 
-    KNOWN_SHELL_DESKTOP_ITEMS
-        .iter()
-        .find(|item| item.id.eq_ignore_ascii_case(shell_id))
-        .map(create_shell_desktop_item)
+    right_is_folder
+        .cmp(&left_is_folder)
+        .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+        .then_with(|| left.path.to_lowercase().cmp(&right.path.to_lowercase()))
 }
 
-/// 构造 Shell 虚拟项时使用 parsing name 提取图标，打开和右键菜单也通过同一标识回到系统 Shell
-fn create_shell_desktop_item(item: &KnownShellDesktopItem) -> DesktopItem {
-    DesktopItem {
-        id: format!("shell_{}", item.id),
-        name: item.name.to_string(),
-        path: shell_item_path(item),
-        extension: None,
-        kind: DesktopItemKind::Shell,
-        icon_data_url: resolve_item_icon_data_url(Path::new(item.parsing_name)),
-        source: DesktopItemSource::Shell,
-        shell_id: Some(item.id.to_string()),
-    }
-}
-
-/// 打开、右键菜单和原生拖放都需要从稳定 ID 回到 Shell parsing name，未知项保持显式不支持
-pub fn resolve_shell_parsing_name(shell_id: &str) -> Option<&'static str> {
-    KNOWN_SHELL_DESKTOP_ITEMS
-        .iter()
-        .find(|item| item.id.eq_ignore_ascii_case(shell_id))
-        .map(|item| item.parsing_name)
-}
-
-/// Shell IDList 拖放只能解析出系统 parsing name，这里收敛到当前支持的已知桌面项稳定键
-pub fn resolve_shell_item_path_from_parsing_name(parsing_name: &str) -> Option<String> {
-    let normalized_parsing_name = normalize_shell_parsing_name(parsing_name);
-
-    KNOWN_SHELL_DESKTOP_ITEMS
-        .iter()
-        .find(|item| normalize_shell_parsing_name(item.parsing_name) == normalized_parsing_name)
-        .map(shell_item_path)
-}
-
-/// 根目录这类路径没有 file_name，使用完整路径作为展示名可以避免空白项目
+/// 根目录这类路径没有 file_name，使用完整路径作为兜底展示名可以避免空白项目。
 fn resolve_item_name(path: &Path) -> String {
     path.file_name()
         .map(|value| value.to_string_lossy().to_string())
@@ -165,16 +115,7 @@ fn resolve_item_name(path: &Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
-/// 优先使用 Windows 用户桌面路径，拿不到用户目录时才退回当前目录保证命令可返回
-fn resolve_desktop_path() -> PathBuf {
-    if let Ok(profile_path) = env::var("USERPROFILE") {
-        return PathBuf::from(profile_path).join("Desktop");
-    }
-
-    env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-}
-
-/// 文件类型只用于选择前端图标，不参与真实文件的打开方式判断
+/// 文件类型只用于选择前端后备图标，不参与真实文件的打开方式判断。
 fn resolve_item_kind(path: &Path, is_dir: bool) -> DesktopItemKind {
     if is_dir {
         return DesktopItemKind::Folder;
@@ -187,7 +128,7 @@ fn resolve_item_kind(path: &Path, is_dir: bool) -> DesktopItemKind {
     }
 }
 
-/// 基于完整路径生成稳定 ID，避免重名文件在前端列表中互相覆盖
+/// 基于完整路径生成稳定 ID，避免重名文件在前端列表中互相覆盖。
 fn stable_item_id(path: &Path) -> String {
     path.to_string_lossy()
         .chars()
@@ -201,37 +142,7 @@ fn stable_item_id(path: &Path) -> String {
         .collect()
 }
 
-/// Windows 文件系统路径大小写不敏感，Shell 键同样归一化，去重不改变返回给前端的原始主键
-fn normalize_item_key(raw_path: &str) -> String {
-    if raw_path.starts_with(SHELL_ITEM_PATH_PREFIX) {
-        return raw_path.to_lowercase();
-    }
-
-    Path::new(raw_path)
-        .to_string_lossy()
-        .replace('/', "\\")
-        .to_lowercase()
-}
-
-/// Shell parsing name 比较只关心 CLSID 语义，避免 Windows 返回不同前缀时同一虚拟项无法收纳
-fn normalize_shell_parsing_name(parsing_name: &str) -> String {
-    let trimmed = parsing_name.trim();
-    if let Some(open_brace) = trimmed.find('{') {
-        if let Some(close_brace_offset) = trimmed[open_brace..].find('}') {
-            let close_brace = open_brace + close_brace_offset + 1;
-            return trimmed[open_brace..close_brace].to_lowercase();
-        }
-    }
-
-    trimmed.trim_start_matches("shell:").to_lowercase()
-}
-
-/// 生成持久化主键时集中处理前缀，避免不同调用点拼出不一致的 Shell 路径
-fn shell_item_path(item: &KnownShellDesktopItem) -> String {
-    format!("{SHELL_ITEM_PATH_PREFIX}{}", item.id)
-}
-
-/// 读取系统 Shell 对该路径解析出的默认展示图像，失败时返回空值交给前端占位图标兜底
+/// 读取系统 Shell 对该路径解析出的默认展示图像，失败时返回空值交给前端占位图标兜底。
 #[cfg(target_os = "windows")]
 fn resolve_item_icon_data_url(path: &Path) -> Option<String> {
     windows_icon::resolve_shell_image_data_url(path)
@@ -239,7 +150,7 @@ fn resolve_item_icon_data_url(path: &Path) -> Option<String> {
         .flatten()
 }
 
-/// 非 Windows 平台暂不伪造图标，避免跨平台扫描结果和系统真实图标语义不一致
+/// 非 Windows 平台暂不伪造图标，避免跨平台扫描结果和系统真实图标语义不一致。
 #[cfg(not(target_os = "windows"))]
 fn resolve_item_icon_data_url(_path: &Path) -> Option<String> {
     None
@@ -270,7 +181,7 @@ mod windows_icon {
 
     const SHELL_IMAGE_SIZE: i32 = 96;
 
-    /// 按 Windows Shell 默认逻辑提取缩略图或图标，并编码成浏览器可直接渲染的 PNG data URL
+    /// 按 Windows Shell 默认逻辑提取缩略图或图标，并编码成浏览器可直接渲染的 PNG data URL。
     pub fn resolve_shell_image_data_url(path: &Path) -> io::Result<Option<String>> {
         if let Ok(Some(thumbnail)) = resolve_shell_thumbnail_data_url(path) {
             return Ok(Some(thumbnail));
@@ -279,7 +190,7 @@ mod windows_icon {
         resolve_shell_icon_data_url(path)
     }
 
-    /// Explorer 同源的 Shell 图像工厂会优先返回文件缩略图，普通文件则返回系统图标
+    /// Explorer 同源的 Shell 图像工厂会优先返回文件缩略图，普通文件则返回系统图标。
     fn resolve_shell_thumbnail_data_url(path: &Path) -> io::Result<Option<String>> {
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
         let wide_path = to_wide_path(path);
@@ -310,7 +221,7 @@ mod windows_icon {
         )))
     }
 
-    /// Shell 图像工厂不可用时，退回路径对应的大图标，保证每个桌面项都有可识别展示
+    /// Shell 图像工厂不可用时退回路径对应的大图标，保证每个文件项都有可识别展示。
     fn resolve_shell_icon_data_url(path: &Path) -> io::Result<Option<String>> {
         let wide_path = to_wide_path(path);
         let mut file_info = SHFILEINFOW::default();
@@ -338,7 +249,7 @@ mod windows_icon {
         pixels.map(|png| Some(format!("data:image/png;base64,{}", STANDARD.encode(png))))
     }
 
-    /// Windows API 接收 UTF-16 零结尾路径，保留原始路径可让 `.lnk` 走系统快捷方式解析
+    /// Windows API 接收 UTF-16 零结尾路径，保留原始路径可让 `.lnk` 走系统快捷方式解析。
     fn to_wide_path(path: &Path) -> Vec<u16> {
         path.to_string_lossy()
             .encode_utf16()
@@ -346,7 +257,7 @@ mod windows_icon {
             .collect()
     }
 
-    /// 将 HICON 转换为 PNG 字节；这里显式释放 GDI 对象，避免频繁刷新桌面时泄漏句柄
+    /// 将 HICON 转换为 PNG 字节；这里显式释放 GDI 对象，避免频繁刷新文件夹时泄漏句柄。
     unsafe fn icon_to_png_rgba(
         icon: windows::Win32::UI::WindowsAndMessaging::HICON,
     ) -> io::Result<Vec<u8>> {
@@ -361,7 +272,7 @@ mod windows_icon {
         result
     }
 
-    /// 从彩色位图读取 32 位像素并转为 PNG，保持 Alpha 通道以匹配 Windows 原生图标透明边缘
+    /// 从彩色位图读取 32 位像素并转为 PNG，保持 Alpha 通道以匹配 Windows 原生图标透明边缘。
     unsafe fn bitmap_to_png(bitmap: HBITMAP) -> io::Result<Vec<u8>> {
         if bitmap.is_invalid() {
             return Err(io::Error::new(
@@ -429,7 +340,7 @@ mod windows_icon {
         encode_png(width as u32, height as u32, &rgba)
     }
 
-    /// PNG 编码失败不会中断桌面扫描，上层会回退到语义图标
+    /// PNG 编码失败不会中断文件夹扫描，上层会回退到语义图标。
     fn encode_png(width: u32, height: u32, rgba: &[u8]) -> io::Result<Vec<u8>> {
         let mut png_bytes = Vec::new();
         {
@@ -447,7 +358,7 @@ mod windows_icon {
         Ok(png_bytes)
     }
 
-    /// Windows API 失败时携带调用点，便于后续定位具体系统能力问题
+    /// Windows API 失败时携带调用点，便于后续定位具体系统能力问题。
     fn last_os_error(operation: &str) -> io::Error {
         let code = unsafe { GetLastError() };
         io::Error::new(

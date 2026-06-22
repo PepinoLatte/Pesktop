@@ -11,30 +11,22 @@ pub mod keys {
     pub const BOX_COLLAPSE_ANIMATION_MS: &str = "boxCollapseAnimationMs";
     /// Box 整体和图标命中区域圆角
     pub const BOX_CORNER_RADIUS: &str = "boxCornerRadius";
-    /// Box 文件名换行宽度
-    pub const BOX_FILENAME_WIDTH: &str = "boxFilenameWidth";
-    /// Box 图标横向间距
-    pub const BOX_ICON_GAP_X: &str = "boxIconGapX";
-    /// Box 图标纵向间距
-    pub const BOX_ICON_GAP_Y: &str = "boxIconGapY";
-    /// Box 图标显示尺寸
-    pub const BOX_ICON_SIZE: &str = "boxIconSize";
-    /// Box 文件名字号
-    pub const BOX_LABEL_TEXT_SIZE: &str = "boxLabelTextSize";
+    /// Box 手动 resize 是否按图标网格吸附
+    pub const BOX_RESIZE_GRID_ENABLED: &str = "boxResizeGridEnabled";
+    /// Box 传输遇到同名文件时的处理策略，必须与前端 `BoxConflictPolicy` 保持同名语义
+    pub const BOX_CONFLICT_POLICY: &str = "boxConflictPolicy";
+    /// 删除 Box 时真实文件夹的处理策略，必须与前端 `BoxDeletePolicy` 保持同名语义
+    pub const BOX_DELETE_POLICY: &str = "boxDeletePolicy";
+    /// Box 文件拖出到桌面后的处理策略，必须与前端 `BoxDropAction` 保持同名语义
+    pub const BOX_DRAG_OUT_ACTION: &str = "boxDragOutAction";
+    /// 外部文件拖入 Box 后的处理策略，必须与前端 `BoxDropAction` 保持同名语义
+    pub const BOX_DROP_ACTION: &str = "boxDropAction";
     /// Box 窗口主题模式
     pub const BOX_THEME: &str = "boxTheme";
-    /// Box 内项目是否需要双击打开
-    pub const DOUBLE_CLICK_OPEN_ITEMS: &str = "doubleClickOpenItems";
-    /// Box 内文件名后缀显示策略
-    pub const NAME_DISPLAY_MODE: &str = "nameDisplayMode";
-    /// 是否在 Dasktop 运行时隐藏全部 Windows 原生桌面图标
-    pub const NATIVE_DESKTOP_ICONS_HIDDEN: &str = "nativeDesktopIconsHidden";
+    /// 新建 Box 的真实文件夹根目录；修改后只影响后续 Box，历史 Box 使用自身 `folderPath`
+    pub const COLLECTION_ROOT_PATH: &str = "collectionRootPath";
     /// 设置页主题模式
     pub const SETTINGS_THEME: &str = "settingsTheme";
-    /// Box 内是否显示项目名称
-    pub const SHOW_ITEM_LABELS: &str = "showItemLabels";
-    /// Box 内是否显示快捷方式箭头标记
-    pub const SHOW_SHORTCUT_ARROW: &str = "showShortcutArrow";
     /// Box 吸附阈值
     pub const SNAP_THRESHOLD: &str = "snapThreshold";
     /// Box 是否吸附屏幕或其他 Box 边缘

@@ -12,15 +12,14 @@ import SettingsSidebar from "./components/SettingsSidebar.vue";
 import {
   isAutostartEnabled,
   setAutostartEnabled,
-  setTrayNativeDesktopIconsHiddenChecked,
 } from "@/entities/appSettings/api";
 import { useDesktopStore } from "@/entities/desktopBox/store";
+import { chooseCollectionRootFolder, openBoxFolder } from "@/entities/desktopBox/api";
 import { closeBoxWindow, openBoxWindow, showBoxWindow } from "@/entities/desktopBox/windows";
 import { SETTINGS_WINDOW_SYNC_TIMING } from "@/entities/desktopBox/layout";
 import {
   listenAutostartChanged,
   listenTrayCreateBox,
-  listenTrayToggleNativeDesktopIconsHidden,
 } from "@/shared/ipc/appTray";
 import {
   createDesktopStartupSnapshotServer,
@@ -56,6 +55,7 @@ const desktopStore = useDesktopStore();
 const activeSection = ref<SettingsSection>("boxes");
 const startupError = ref("");
 const autostartEnabled = ref(false);
+const isMigratingCollectionRoot = ref(false);
 const unlistenFns: UnlistenFn[] = [];
 /**
  * 设置窗获得焦点时不立刻刷新桌面快照，避免 Shell 缩略图扫描卡住标题栏拖动首帧
@@ -80,17 +80,10 @@ const sections: SettingsNavItem[] = [
 const activeTitle = computed(
   () => sections.find((section) => section.key === activeSection.value)?.label ?? "设置",
 );
-const totalItems = computed(() => desktopStore.totalBoxItems);
-const boxItemCounts = computed(() =>
-  Object.fromEntries(
-    desktopStore.boxes.map((box) => [box.id, desktopStore.getBoxItemPaths(box.id).length]),
-  ),
-);
-
+const migratableBoxCount = computed(() => desktopStore.getMigratableBoxes().length);
 onMounted(async () => {
   await desktopStore.initialize();
   await syncAutostartEnabled();
-  await syncTrayNativeDesktopIconsHidden();
   unlistenFns.push(
     await listenAutostartChanged(({ payload }) => {
       autostartEnabled.value = payload;
@@ -99,11 +92,6 @@ onMounted(async () => {
   unlistenFns.push(
     await listenTrayCreateBox(async () => {
       await createAndOpenBox();
-    }),
-  );
-  unlistenFns.push(
-    await listenTrayToggleNativeDesktopIconsHidden(async ({ payload }) => {
-      await updateNativeDesktopIconsHidden(payload);
     }),
   );
   unlistenFns.push(
@@ -156,8 +144,7 @@ async function openAllBoxes(): Promise<boolean> {
             focus: false,
             startupSnapshotToken: startupSnapshotServer.token,
             /**
-             * Windows WebView2 的文件拖放目标在创建阶段绑定到子 HWND；隐藏创建时可能拿不到可注册的子窗口，
-             * 表现为拖入 Box 时系统显示禁用光标。启动恢复保留快照复用，但让 Box 可见创建以保证 DropTarget 生效。
+             * WebView 文件区首帧依赖窗口完成布局，启动恢复先显示再等待 ready 可减少空白闪烁。
              */
             visible: true,
           }),
@@ -286,8 +273,12 @@ function formatBatchOpenBoxError(failedResults: PromiseRejectedResult[]): string
  * 新增 Box 后立即打开独立窗口，确保用户看到的是桌面扩展本体
  */
 async function createAndOpenBox(): Promise<void> {
-  const box = await desktopStore.createBox();
-  await openBoxWindow(box, { focus: true });
+  try {
+    const box = await desktopStore.createBox();
+    await openBoxWindow(box, { focus: true });
+  } catch (error) {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+  }
 }
 
 /**
@@ -301,8 +292,12 @@ async function toggleBoxLockedFromSettings(box: DesktopBox): Promise<void> {
  * 设置页收到的删除事件已经由按钮完成二段式确认，这里只执行真实删除和窗口关闭
  */
 async function deleteBoxFromSettings(box: DesktopBox): Promise<void> {
-  await desktopStore.deleteBox(box.id);
-  await closeBoxWindow(box.id);
+  try {
+    await desktopStore.deleteBox(box.id);
+    await closeBoxWindow(box.id);
+  } catch (error) {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+  }
 }
 
 /**
@@ -329,26 +324,54 @@ async function updateAutostartEnabled(value: boolean): Promise<void> {
 }
 
 /**
- * 隐藏原生桌面图标的真实写入复用 Store，托盘只跟随最终偏好展示勾选状态
+ * 设置页选择收纳根目录只影响后续新建 Box，不移动已有真实文件夹
  */
-async function updateNativeDesktopIconsHidden(value: boolean): Promise<void> {
+async function chooseCollectionRootFromSettings(): Promise<void> {
   try {
-    await desktopStore.updateNativeDesktopIconsHidden(value);
+    const selectedPath = await chooseCollectionRootFolder();
+    if (selectedPath) {
+      await desktopStore.updateCollectionRootPath(selectedPath);
+    }
   } catch (error) {
     desktopStore.lastError = error instanceof Error ? error.message : String(error);
-  } finally {
-    await syncTrayNativeDesktopIconsHidden();
   }
 }
 
 /**
- * 设置页初始化、聚焦刷新和托盘操作后都用当前 Store 状态回写托盘，避免两个入口显示不一致
+ * 打开当前收纳根目录，帮助用户确认迁移目标和新建 Box 的真实磁盘位置。
  */
-async function syncTrayNativeDesktopIconsHidden(): Promise<void> {
+async function openCollectionRootFromSettings(): Promise<void> {
   try {
-    await setTrayNativeDesktopIconsHiddenChecked(
-      desktopStore.settings.nativeDesktopIconsHidden,
-    );
+    await desktopStore.openCollectionRootPath();
+  } catch (error) {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+  }
+}
+
+/**
+ * 收纳位置迁移是真实文件移动，设置页只允许一次迁移任务进行，避免重复点击造成路径竞争。
+ */
+async function migrateCollectionRootFromSettings(): Promise<void> {
+  if (isMigratingCollectionRoot.value) {
+    return;
+  }
+
+  isMigratingCollectionRoot.value = true;
+  try {
+    await desktopStore.migrateExistingBoxFolders();
+  } catch (error) {
+    desktopStore.lastError = error instanceof Error ? error.message : String(error);
+  } finally {
+    isMigratingCollectionRoot.value = false;
+  }
+}
+
+/**
+ * 打开 Box 对应的真实文件夹，便于用户确认原生 Explorer 视图背后的磁盘位置
+ */
+async function openBoxFolderFromSettings(box: DesktopBox): Promise<void> {
+  try {
+    await openBoxFolder(box.folderPath);
   } catch (error) {
     desktopStore.lastError = error instanceof Error ? error.message : String(error);
   }
@@ -390,7 +413,6 @@ async function syncSettingsWindowState(): Promise<void> {
 
   await desktopStore.reloadPersistedState();
   await syncAutostartEnabled();
-  await syncTrayNativeDesktopIconsHidden();
   await desktopStore.refreshSnapshot(false);
 }
 
@@ -499,28 +521,32 @@ function closeSettings(): void {
           <BoxDisplayPanel
             v-else-if="activeSection === 'boxDisplay'"
             :autostart-enabled="autostartEnabled"
+            :migratable-box-count="migratableBoxCount"
+            :migration-busy="isMigratingCollectionRoot"
             :panel-width="SETTINGS_PANEL_WIDTH.default"
             :settings="desktopStore.settings"
             @autostart-enabled-change="updateAutostartEnabled"
-            @box-resize-grid-enabled-change="desktopStore.updateBoxResizeGridEnabled"
-            @double-click-open-items-change="desktopStore.updateDoubleClickOpenItems"
-            @item-labels-change="desktopStore.updateShowItemLabels"
+            @box-boolean-setting-change="desktopStore.updateBooleanSetting"
+            @box-conflict-policy-change="desktopStore.updateBoxConflictPolicy"
+            @box-delete-policy-change="desktopStore.updateBoxDeletePolicy"
+            @box-drag-out-action-change="desktopStore.updateBoxDragOutAction"
+            @box-drop-action-change="desktopStore.updateBoxDropAction"
+            @collection-root-choose="chooseCollectionRootFromSettings"
+            @collection-root-migrate="migrateCollectionRootFromSettings"
+            @collection-root-open="openCollectionRootFromSettings"
             @name-display-mode-change="desktopStore.updateNameDisplayMode"
-            @native-desktop-icons-hidden-change="updateNativeDesktopIconsHidden"
-            @show-shortcut-arrow-change="desktopStore.updateShowShortcutArrow"
             @snap-threshold-change="desktopStore.updateSnapThreshold"
             @snap-to-edges-change="desktopStore.updateSnapToEdges"
           />
           <BoxesPanel
             v-else-if="activeSection === 'boxes'"
             :boxes="desktopStore.boxes"
-            :box-item-counts="boxItemCounts"
+            :collection-root-path="desktopStore.settings.collectionRootPath"
             :panel-width="SETTINGS_PANEL_WIDTH.wide"
-            :total-items="totalItems"
-            :unassigned-items="desktopStore.unassignedItems.length"
             @create-box="createAndOpenBox"
             @delete-box="deleteBoxFromSettings"
             @open-box="openBoxWindow"
+            @open-folder="openBoxFolderFromSettings"
             @refresh="desktopStore.refreshSnapshot"
             @toggle-box-locked="toggleBoxLockedFromSettings"
           />

@@ -13,34 +13,32 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
-            if let Err(error) = desktop::set_native_desktop_icons_hidden(false) {
-                eprintln!("failed to show native desktop icons on startup: {error}");
-            }
             app_tray::setup_app_tray(app)?;
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::get_desktop_items_by_paths,
+            commands::choose_collection_root_folder,
+            commands::create_box_folder,
+            commands::delete_desktop_items,
+            commands::delete_box_folder,
             commands::get_desktop_snapshot,
+            commands::handle_box_dragged_paths_to_desktop,
+            commands::handle_box_dropped_paths,
             commands::is_autostart_enabled,
             commands::is_primary_mouse_button_pressed,
+            commands::list_box_folder_items,
+            commands::migrate_box_folder,
             commands::open_desktop_item,
+            commands::open_box_folder,
             commands::register_box_native_drop_target,
+            commands::rename_desktop_item,
             commands::set_autostart_enabled,
-            commands::set_native_desktop_icons_hidden,
-            commands::set_tray_native_desktop_icons_hidden_checked,
             commands::show_native_item_context_menu,
             commands::unregister_box_native_drop_target,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build dasktop");
 
-    app.run(|_app_handle, event| {
-        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
-            if let Err(error) = desktop::set_native_desktop_icons_hidden(false) {
-                eprintln!("failed to show native desktop icons on exit: {error}");
-            }
-        }
-    });
+    app.run(|_app_handle, _event| {});
 }

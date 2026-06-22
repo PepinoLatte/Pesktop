@@ -40,29 +40,17 @@ button {
 }
 
 /**
- * Box 内文件项需要保持接近 Windows 桌面的默认光标，避免悬停时像网页链接一样出现手型
+ * Box 文件图标按钮承担 Explorer 式选中、框选和拖拽手感，不使用链接/按钮式手型光标。
  */
-.dasktop-icon-button {
+.dasktop-icon-button,
+.dasktop-icon-button img,
+.dasktop-icon-button svg,
+.dasktop-icon-button span {
   cursor: default;
 }
 
-/**
- * 拖拽排序期间其他图标不参与 hover 和 pointer 命中，避免拖影经过时出现成片高亮
- */
-.dasktop-icon-button--drag-interaction-disabled {
-  pointer-events: none;
-}
-
-/**
- * 当前被拖动的原位置图标不显示 hover/active 背景，只保留轻微透明，避免和拖影同时高亮
- */
-.dasktop-icon-button--dragging,
-.dasktop-icon-button--dragging:hover,
-.dasktop-icon-button--dragging:active,
-.dark .dasktop-icon-button--dragging,
-.dark .dasktop-icon-button--dragging:hover,
-.dark .dasktop-icon-button--dragging:active {
-  background: transparent;
+.dasktop-icon-button input {
+  cursor: text;
 }
 
 button:focus-visible,

@@ -1,18 +1,21 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { AppSettings } from "@/entities/appSettings/types";
 import type {
-  DesktopBox,
-  DesktopBoxItem,
-  DesktopBoxTitlePosition,
-} from "@/entities/desktopBox/types";
+  AppSettings,
+  BoxConflictPolicy,
+  BoxDeletePolicy,
+  BoxDropAction,
+} from "@/entities/appSettings/types";
+import type { DesktopBox, DesktopBoxTitlePosition } from "@/entities/desktopBox/types";
 import {
   APP_SETTINGS_STORAGE,
   DEFAULT_APP_SETTINGS,
-  DESKTOP_NAME_DISPLAY_MODES,
-  SUPPORTED_APP_SETTING_KEYS,
   THEME_MODES,
   APP_SETTING_KEYS,
   APP_SETTING_NUMBER_LIMITS,
+  BOX_CONFLICT_POLICIES,
+  BOX_DELETE_POLICIES,
+  BOX_DROP_ACTIONS,
+  DESKTOP_NAME_DISPLAY_MODES,
   sanitizeNumberAppSetting,
   type AppSettingNumberKey,
 } from "@/entities/appSettings/defaults";
@@ -26,7 +29,7 @@ const numericSettingKeys = Object.keys(APP_SETTING_NUMBER_LIMITS) as AppSettingN
 const DESKTOP_BOX_TITLE_POSITIONS = ["top", "bottom"] as const;
 
 /**
- * SQLite 连接复用可以避免拖拽过程中反复打开数据库
+ * SQLite 连接复用可以避免窗口同步和拖动保存时反复打开数据库
  */
 async function getDatabase(): Promise<Database> {
   if (!databasePromise) {
@@ -37,15 +40,19 @@ async function getDatabase(): Promise<Database> {
 }
 
 /**
- * 初始化 V1 需要的最小表结构；分组只保存映射，不触碰真实桌面文件
+ * 初始化文件夹型 Box 的表结构；旧映射表直接删除，不保留路径关联兼容分支
  */
 export async function initializeStorage(): Promise<void> {
   const database = await getDatabase();
+
+  await database.execute("DROP TABLE IF EXISTS box_items");
+  await resetIncompatibleBoxesTable(database);
 
   await database.execute(`
     CREATE TABLE IF NOT EXISTS ${APP_SETTINGS_STORAGE.tables.boxes} (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
+      folder_path TEXT NOT NULL,
       collapsed INTEGER NOT NULL DEFAULT 0,
       locked INTEGER NOT NULL DEFAULT 0,
       title_opacity INTEGER NOT NULL DEFAULT 100,
@@ -59,17 +66,6 @@ export async function initializeStorage(): Promise<void> {
   `);
 
   await database.execute(`
-    CREATE TABLE IF NOT EXISTS ${APP_SETTINGS_STORAGE.tables.boxItems} (
-      box_id TEXT NOT NULL,
-      item_path TEXT NOT NULL,
-      order_index INTEGER NOT NULL DEFAULT 0,
-      updated_at INTEGER NOT NULL,
-      PRIMARY KEY (box_id, item_path),
-      FOREIGN KEY (box_id) REFERENCES ${APP_SETTINGS_STORAGE.tables.boxes}(id) ON DELETE CASCADE
-    )
-  `);
-
-  await database.execute(`
     CREATE TABLE IF NOT EXISTS ${APP_SETTINGS_STORAGE.tables.appSettings} (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -79,18 +75,38 @@ export async function initializeStorage(): Promise<void> {
 }
 
 /**
- * 读取所有 Box 布局和映射；真实桌面文件仍由桌面快照提供
+ * 当前版本不迁移旧映射结构；缺少真实文件夹路径的旧 boxes 表会被整体重建为空状态
+ */
+async function resetIncompatibleBoxesTable(database: Database): Promise<void> {
+  const rows = await database.select<Array<Record<string, unknown>>>(`
+    PRAGMA table_info(${APP_SETTINGS_STORAGE.tables.boxes})
+  `);
+  if (rows.length === 0) {
+    return;
+  }
+
+  const columnNames = new Set(rows.map((row) => String(row.name)));
+  if (columnNames.has("folder_path")) {
+    return;
+  }
+
+  await database.execute(`DROP TABLE IF EXISTS ${APP_SETTINGS_STORAGE.tables.boxes}`);
+}
+
+/**
+ * 读取所有 Box 布局和真实文件夹路径；Box 内容由 Explorer 原生视图按 folderPath 展示
  */
 export async function loadBoxes(): Promise<DesktopBox[]> {
   const database = await getDatabase();
   const rows = await database.select<Array<Record<string, unknown>>>(`
-    SELECT id, title, collapsed, locked, title_opacity, title_position, x, y, width, height
+    SELECT id, title, folder_path, collapsed, locked, title_opacity, title_position, x, y, width, height
     FROM ${APP_SETTINGS_STORAGE.tables.boxes}
     ORDER BY updated_at ASC
   `);
 
   return rows.map((row) => ({
     collapsed: sanitizeDesktopBoxBoolean(row.collapsed),
+    folderPath: String(row.folder_path),
     id: String(row.id),
     locked: sanitizeDesktopBoxBoolean(row.locked),
     title: String(row.title),
@@ -104,35 +120,18 @@ export async function loadBoxes(): Promise<DesktopBox[]> {
 }
 
 /**
- * 读取 Box 和文件路径的关联表；Store 会基于它计算每个 Box 的项目列表和统计信息
- */
-export async function loadBoxItems(): Promise<DesktopBoxItem[]> {
-  const database = await getDatabase();
-  const rows = await database.select<Array<Record<string, unknown>>>(`
-    SELECT box_id, item_path, order_index
-    FROM ${APP_SETTINGS_STORAGE.tables.boxItems}
-    ORDER BY box_id ASC, order_index ASC, updated_at ASC
-  `);
-
-  return rows.map((row) => ({
-    boxId: String(row.box_id),
-    itemPath: String(row.item_path),
-    orderIndex: Number(row.order_index),
-  }));
-}
-
-/**
- * 保存单个 Box 状态；文件映射由 box_items 关联表独立维护，避免布局更新误写项目列表
+ * 保存单个 Box 状态；真实文件移动由 Windows Explorer 或后端 Shell 命令处理，不写关联表
  */
 export async function saveBox(box: DesktopBox): Promise<void> {
   const database = await getDatabase();
 
   await database.execute(
     `
-      INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxes} (id, title, collapsed, locked, title_opacity, title_position, x, y, width, height, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxes} (id, title, folder_path, collapsed, locked, title_opacity, title_position, x, y, width, height, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
+        folder_path = excluded.folder_path,
         collapsed = excluded.collapsed,
         locked = excluded.locked,
         title_opacity = excluded.title_opacity,
@@ -146,6 +145,7 @@ export async function saveBox(box: DesktopBox): Promise<void> {
     [
       box.id,
       box.title,
+      box.folderPath,
       box.collapsed ? 1 : 0,
       box.locked ? 1 : 0,
       sanitizeDesktopBoxTitleOpacity(box.titleOpacity),
@@ -160,85 +160,11 @@ export async function saveBox(box: DesktopBox): Promise<void> {
 }
 
 /**
- * 批量将桌面项目重新归入目标 Box；同一路径会先从其他 Box 移除，再写入目标关联
- */
-export async function assignBoxItems(boxId: string, itemPaths: string[]): Promise<void> {
-  const database = await getDatabase();
-  const normalizedBoxId = typeof boxId === "string" ? boxId.trim() : "";
-  const uniqueItemPaths = Array.from(new Set(itemPaths)).filter(Boolean);
-
-  if (!normalizedBoxId) {
-    throw new Error("无法收纳项目：目标 Box 无效");
-  }
-  if (uniqueItemPaths.length === 0) {
-    return;
-  }
-
-  const orderRows = await database.select<Array<Record<string, unknown>>>(
-    `SELECT MAX(order_index) AS max_order FROM ${APP_SETTINGS_STORAGE.tables.boxItems} WHERE box_id = $1`,
-    [normalizedBoxId],
-  );
-  let nextOrderIndex = Number(orderRows[0]?.max_order ?? -1) + 1;
-
-  for (const itemPath of uniqueItemPaths) {
-    await database.execute(
-      `DELETE FROM ${APP_SETTINGS_STORAGE.tables.boxItems} WHERE item_path = $1`,
-      [itemPath],
-    );
-    await database.execute(
-      `
-        INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxItems} (box_id, item_path, order_index, updated_at)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT(box_id, item_path) DO UPDATE SET
-          order_index = excluded.order_index,
-          updated_at = excluded.updated_at
-      `,
-      [normalizedBoxId, itemPath, nextOrderIndex, Date.now()],
-    );
-    nextOrderIndex += 1;
-  }
-}
-
-/**
- * 保存单个 Box 内的手动排序，只更新关联表顺序，不触碰真实桌面文件
- */
-export async function saveBoxItemOrder(boxId: string, itemPaths: string[]): Promise<void> {
-  const database = await getDatabase();
-
-  for (const [orderIndex, itemPath] of itemPaths.entries()) {
-    await database.execute(
-      `
-        UPDATE ${APP_SETTINGS_STORAGE.tables.boxItems}
-        SET order_index = $1, updated_at = $2
-        WHERE box_id = $3 AND item_path = $4
-      `,
-      [orderIndex, Date.now(), boxId, itemPath],
-    );
-  }
-}
-
-/**
- * 从 Box 中移除单个映射，真实桌面项目继续保留在 Windows 桌面目录
- */
-export async function deleteBoxItem(boxId: string, itemPath: string): Promise<void> {
-  const database = await getDatabase();
-
-  await database.execute(
-    `DELETE FROM ${APP_SETTINGS_STORAGE.tables.boxItems} WHERE box_id = $1 AND item_path = $2`,
-    [boxId, itemPath],
-  );
-}
-
-/**
- * 删除 Box 记录只影响 Dasktop 映射，不删除桌面文件本体
+ * 删除 Box 记录只影响 Dasktop 窗口状态；真实文件夹处理必须先由调用方完成并确认成功
  */
 export async function deleteBoxRecord(boxId: string): Promise<void> {
   const database = await getDatabase();
 
-  await database.execute(
-    `DELETE FROM ${APP_SETTINGS_STORAGE.tables.boxItems} WHERE box_id = $1`,
-    [boxId],
-  );
   await database.execute(`DELETE FROM ${APP_SETTINGS_STORAGE.tables.boxes} WHERE id = $1`, [boxId]);
 }
 
@@ -251,7 +177,7 @@ export async function loadSettings(): Promise<AppSettings> {
     SELECT key, value FROM ${APP_SETTINGS_STORAGE.tables.appSettings}
   `);
   const settings = { ...DEFAULT_APP_SETTINGS };
-  const supportedKeys = new Set<keyof AppSettings>(SUPPORTED_APP_SETTING_KEYS);
+  const supportedKeys = new Set<keyof AppSettings>(Object.values(APP_SETTING_KEYS));
 
   for (const row of rows) {
     const key = String(row.key) as keyof AppSettings;
@@ -265,7 +191,7 @@ export async function loadSettings(): Promise<AppSettings> {
 }
 
 /**
- * 设置读取只接受当前版本定义的值，旧主题和旧字段不会被迁移回新状态
+ * 设置读取只接受当前版本定义的值，旧版字段不会被迁移回新状态
  */
 function sanitizeSettingValue<Key extends keyof AppSettings>(
   key: Key,
@@ -276,14 +202,35 @@ function sanitizeSettingValue<Key extends keyof AppSettings>(
   }
 
   if (
-    key === APP_SETTING_KEYS.boxResizeGridEnabled ||
     key === APP_SETTING_KEYS.snapToEdges ||
-    key === APP_SETTING_KEYS.nativeDesktopIconsHidden ||
+    key === APP_SETTING_KEYS.boxResizeGridEnabled ||
     key === APP_SETTING_KEYS.showItemLabels ||
     key === APP_SETTING_KEYS.showShortcutArrow ||
     key === APP_SETTING_KEYS.doubleClickOpenItems
   ) {
     return (typeof value === "boolean" ? value : DEFAULT_APP_SETTINGS[key]) as AppSettings[Key];
+  }
+
+  if (key === APP_SETTING_KEYS.collectionRootPath) {
+    return (typeof value === "string" ? value : DEFAULT_APP_SETTINGS[key]) as AppSettings[Key];
+  }
+
+  if (key === APP_SETTING_KEYS.boxDeletePolicy) {
+    return (isBoxDeletePolicy(value)
+      ? value
+      : DEFAULT_APP_SETTINGS.boxDeletePolicy) as AppSettings[Key];
+  }
+
+  if (key === APP_SETTING_KEYS.boxConflictPolicy) {
+    return (isBoxConflictPolicy(value)
+      ? value
+      : DEFAULT_APP_SETTINGS.boxConflictPolicy) as AppSettings[Key];
+  }
+
+  if (key === APP_SETTING_KEYS.boxDropAction || key === APP_SETTING_KEYS.boxDragOutAction) {
+    return (isBoxDropAction(value)
+      ? value
+      : DEFAULT_APP_SETTINGS[key]) as AppSettings[Key];
   }
 
   if (key === APP_SETTING_KEYS.nameDisplayMode) {
@@ -314,10 +261,31 @@ function isThemeMode(value: unknown): value is AppSettings["settingsTheme"] {
 }
 
 /**
- * 文件名显示模式只接受当前版本提供的三个选项，避免历史字符串污染渲染逻辑
+ * 删除策略只接受当前设置页提供的三种值，避免误把旧字符串传入真实文件操作
+ */
+function isBoxDeletePolicy(value: unknown): value is BoxDeletePolicy {
+  return BOX_DELETE_POLICIES.some((policy) => policy === value);
+}
+
+/**
+ * 同名策略只接受当前设置页提供的三种值，避免替换类真实文件操作被脏值触发
+ */
+function isBoxConflictPolicy(value: unknown): value is BoxConflictPolicy {
+  return BOX_CONFLICT_POLICIES.some((policy) => policy === value);
+}
+
+/**
+ * 拖入策略只接受当前设置页提供的三种值，避免未知字符串触发真实文件操作
+ */
+function isBoxDropAction(value: unknown): value is BoxDropAction {
+  return BOX_DROP_ACTIONS.some((action) => action === value);
+}
+
+/**
+ * 文件名显示模式只接受设置页暴露的三种值，避免标签格式化读到未知策略。
  */
 function isDesktopNameDisplayMode(value: unknown): value is AppSettings["nameDisplayMode"] {
-  return DESKTOP_NAME_DISPLAY_MODES.some((displayMode) => displayMode === value);
+  return DESKTOP_NAME_DISPLAY_MODES.some((mode) => mode === value);
 }
 
 /**
