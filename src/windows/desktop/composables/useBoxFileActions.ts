@@ -104,8 +104,9 @@ export function useBoxFileActions(options: BoxFileActionsOptions): BoxFileAction
     editingPath.value = item.path;
     renameDraft.value = item.name;
     void nextTick(() => {
-      const input =
-        options.boxGridRef.value?.querySelector<HTMLInputElement>("[data-rename-input='true']");
+      const input = options.boxGridRef.value?.querySelector<
+        HTMLInputElement | HTMLTextAreaElement
+      >("[data-rename-input='true']");
       input?.focus();
       input?.select();
     });
