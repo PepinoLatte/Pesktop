@@ -1,3 +1,5 @@
+//! Windows OLE DropTarget 封装，补齐透明 WebView 文件拖入不稳定的问题。
+
 #[cfg(target_os = "windows")]
 mod windows_drop {
     use serde::Serialize;

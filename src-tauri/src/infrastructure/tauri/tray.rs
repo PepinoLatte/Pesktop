@@ -1,4 +1,4 @@
-//! 系统托盘入口负责应用级命令分发，不直接读写 Box 数据
+//! 系统托盘入口负责应用级命令分发，不直接读写 Box 数据。
 
 use tauri::menu::{CheckMenuItem, MenuBuilder, MenuEvent};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -11,16 +11,17 @@ const MENU_ID_CREATE_BOX: &str = "create-box";
 const MENU_ID_AUTOSTART: &str = "autostart";
 const MENU_ID_QUIT: &str = "quit";
 
-/// 托盘请求创建 Box 的前端事件；main WebView 作为隐藏控制器复用现有 Store 创建流程
+/// 托盘请求创建 Box 的前端事件；main WebView 作为隐藏控制器复用现有 Store 创建流程。
 pub const TRAY_CREATE_BOX_EVENT: &str = "dasktop://tray-create-box";
-/// 自启状态变化事件用于同步隐藏设置窗里的开关状态
+/// 自启状态变化事件用于同步隐藏设置窗里的开关状态。
 pub const AUTOSTART_CHANGED_EVENT: &str = "dasktop://autostart-changed";
-/// 托盘菜单中需要跨入口同步的可变控件状态
+
+/// 托盘菜单中需要跨入口同步的可变控件状态。
 pub struct AppTrayState {
     autostart_item: CheckMenuItem<Wry>,
 }
 
-/// 初始化系统托盘图标和右键菜单；菜单只分发动作，具体 Box 生命周期仍由前端统一处理
+/// 初始化系统托盘图标和右键菜单；菜单只分发动作，具体 Box 生命周期仍由前端统一处理。
 pub fn setup_app_tray(app: &App) -> tauri::Result<()> {
     let autostart_enabled = resolve_autostart_enabled(app.handle()).unwrap_or(false);
     let autostart_item = CheckMenuItem::with_id(
@@ -62,14 +63,14 @@ pub fn setup_app_tray(app: &App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// 读取插件中的系统自启状态，供设置页和托盘初始化共享
+/// 读取插件中的系统自启状态，供设置页和托盘初始化共享。
 pub fn resolve_autostart_enabled(app: &AppHandle) -> Result<bool, String> {
     app.autolaunch()
         .is_enabled()
         .map_err(|error| format!("无法读取开机自启状态：{error}"))
 }
 
-/// 写入系统自启状态并同步所有 UI 入口，避免设置页和托盘出现互相矛盾的勾选状态
+/// 写入系统自启状态并同步所有 UI 入口，避免设置页和托盘出现互相矛盾的勾选状态。
 pub fn set_autostart_enabled(app: &AppHandle, enabled: bool) -> Result<bool, String> {
     let autolaunch = app.autolaunch();
     if enabled {
@@ -108,13 +109,13 @@ fn handle_tray_menu_event(
     }
 }
 
-/// 托盘“关闭”是真正退出应用，需要让所有 WebViewWindow 先走正常销毁链路
+/// 托盘“关闭”是真正退出应用，需要让所有 WebViewWindow 先走正常销毁链路。
 ///
-/// Windows WebView2/Chromium 在进程退出时会注销 `Chrome_WidgetWin_0` 等内部窗口类
+/// Windows WebView2/Chromium 在进程退出时会注销 `Chrome_WidgetWin_0` 等内部窗口类。
 /// 如果直接调用 `AppHandle::exit`，隐藏设置窗、Box 窗口和预载菜单窗可能尚未收到
-/// `Destroyed` 事件，底层清理就会和窗口销毁交错，从而打印 class unregister 失败日志
+/// `Destroyed` 事件，底层清理就会和窗口销毁交错，从而打印 class unregister 失败日志。
 /// 这里逐个关闭现有 WebViewWindow，让 Tauri 在最后一个窗口销毁后自然触发退出；最终
-/// 桌面图标恢复仍由 `RunEvent::ExitRequested` 兜底执行
+/// 桌面图标恢复仍由 `RunEvent::ExitRequested` 兜底执行。
 pub(crate) fn request_graceful_exit(app_handle: &AppHandle) {
     let webview_windows = app_handle.webview_windows();
     if webview_windows.is_empty() {
