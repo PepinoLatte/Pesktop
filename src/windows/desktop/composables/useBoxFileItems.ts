@@ -1,5 +1,6 @@
 import { ref } from "vue";
 import type { ComputedRef, Ref } from "vue";
+import { loadBoxItemOrder, saveBoxItemOrder } from "@/shared/storage/database";
 import { listBoxFolderItems } from "@/entities/desktopItem/api";
 import type { DesktopItem } from "@/entities/desktopItem/types";
 import type { DesktopBox } from "@/entities/desktopBox/types";
@@ -24,6 +25,13 @@ interface BoxFileItemsOptions {
  */
 export interface BoxFileItemsState {
   boxItems: Ref<DesktopItem[]>;
+  moveBoxItemsInOrder: (
+    draggedPaths: string[],
+    targetPath: string | null,
+    placement: "after" | "before" | "end",
+  ) => Promise<void>;
+  removeBoxItemOrderPaths: (paths: string[]) => Promise<void>;
+  replaceBoxItemOrderPath: (previousPath: string, nextPath: string) => Promise<void>;
   refreshBoxFolderItems: (options?: { silent?: boolean }) => Promise<void>;
   startFolderRefreshPolling: () => void;
   stopFolderRefreshPolling: () => void;
@@ -34,6 +42,8 @@ export interface BoxFileItemsState {
  */
 export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState {
   const boxItems = ref<DesktopItem[]>([]);
+  let loadedOrderBoxId: string | null = null;
+  let orderedPaths: string[] = [];
   let refreshTimer: ReturnType<typeof window.setInterval> | null = null;
 
   /**
@@ -70,7 +80,9 @@ export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState
     }
 
     try {
-      boxItems.value = await listBoxFolderItems(options.box.value.folderPath);
+      await ensureBoxItemOrderLoaded(options.box.value.id);
+      const scannedItems = await listBoxFolderItems(options.box.value.folderPath);
+      boxItems.value = applyManualOrder(scannedItems);
     } catch (error) {
       if (!refreshOptions.silent) {
         options.setLastError(error instanceof Error ? error.message : String(error));
@@ -78,8 +90,136 @@ export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState
     }
   }
 
+  /**
+   * 每个 Box 只在窗口首次扫描或切换 Box 时读取一次顺序，避免轮询刷新频繁访问 SQLite。
+   */
+  async function ensureBoxItemOrderLoaded(boxId: string): Promise<void> {
+    if (loadedOrderBoxId === boxId) {
+      return;
+    }
+
+    orderedPaths = await loadBoxItemOrder(boxId);
+    loadedOrderBoxId = boxId;
+  }
+
+  /**
+   * 扫描结果以真实文件为准，手动顺序只负责重排仍存在的路径，新文件自然追加到末尾。
+   */
+  function applyManualOrder(items: DesktopItem[]): DesktopItem[] {
+    if (orderedPaths.length === 0) {
+      return items;
+    }
+
+    const itemByPath = new Map(items.map((item) => [item.path, item]));
+    const orderedItems = orderedPaths
+      .map((path) => itemByPath.get(path))
+      .filter((item): item is DesktopItem => Boolean(item));
+    const orderedPathSet = new Set(orderedItems.map((item) => item.path));
+    const unorderedItems = items.filter((item) => !orderedPathSet.has(item.path));
+
+    return [...orderedItems, ...unorderedItems];
+  }
+
+  /**
+   * 当前列表顺序是用户视觉上看到的真实顺序，保存前用它兜底未持久化过的 Box。
+   */
+  function resolveCurrentOrderedPaths(): string[] {
+    return boxItems.value.map((item) => item.path);
+  }
+
+  /**
+   * Box 内拖拽排序只改变当前 Box 的展示顺序，不移动、复制或重命名真实文件。
+   */
+  async function moveBoxItemsInOrder(
+    draggedPaths: string[],
+    targetPath: string | null,
+    placement: "after" | "before" | "end",
+  ): Promise<void> {
+    const currentBox = options.box.value;
+    if (!currentBox || draggedPaths.length === 0) {
+      return;
+    }
+
+    const currentPaths = resolveCurrentOrderedPaths();
+    const draggedPathSet = new Set(draggedPaths);
+    const activeDraggedPaths = currentPaths.filter((path) => draggedPathSet.has(path));
+    if (activeDraggedPaths.length === 0 || (targetPath && draggedPathSet.has(targetPath))) {
+      return;
+    }
+
+    const remainingPaths = currentPaths.filter((path) => !draggedPathSet.has(path));
+    const insertionIndex = resolveInsertionIndex(remainingPaths, targetPath, placement);
+    const nextPaths = [...remainingPaths];
+    nextPaths.splice(insertionIndex, 0, ...activeDraggedPaths);
+    if (arePathOrdersEqual(currentPaths, nextPaths)) {
+      return;
+    }
+
+    orderedPaths = nextPaths;
+    boxItems.value = applyManualOrder(boxItems.value);
+    await saveBoxItemOrder(currentBox.id, orderedPaths);
+  }
+
+  /**
+   * 文件重命名后真实路径变化，顺序表同步替换路径以保持原位置不跳到末尾。
+   */
+  async function replaceBoxItemOrderPath(previousPath: string, nextPath: string): Promise<void> {
+    const currentBox = options.box.value;
+    if (!currentBox || previousPath === nextPath) {
+      return;
+    }
+
+    const baseOrder = orderedPaths.length > 0 ? orderedPaths : resolveCurrentOrderedPaths();
+    orderedPaths = baseOrder.map((path) => (path === previousPath ? nextPath : path));
+    await saveBoxItemOrder(currentBox.id, orderedPaths);
+  }
+
+  /**
+   * 删除文件后清理顺序表中的旧路径，避免后续新增同名路径时继承已删除项目的位置。
+   */
+  async function removeBoxItemOrderPaths(paths: string[]): Promise<void> {
+    const currentBox = options.box.value;
+    if (!currentBox || orderedPaths.length === 0 || paths.length === 0) {
+      return;
+    }
+
+    const removedPathSet = new Set(paths);
+    orderedPaths = orderedPaths.filter((path) => !removedPathSet.has(path));
+    await saveBoxItemOrder(currentBox.id, orderedPaths);
+  }
+
+  /**
+   * 拖拽释放到图标前半区插到目标前，释放到后半区插到目标后，空白处则追加到末尾。
+   */
+  function resolveInsertionIndex(
+    paths: string[],
+    targetPath: string | null,
+    placement: "after" | "before" | "end",
+  ): number {
+    if (!targetPath || placement === "end") {
+      return paths.length;
+    }
+
+    const targetIndex = paths.indexOf(targetPath);
+    if (targetIndex === -1) {
+      return paths.length;
+    }
+
+    return placement === "after" ? targetIndex + 1 : targetIndex;
+  }
+
+  /**
+   * 顺序未变化时不写数据库，减少普通点击和短距离拖动带来的无意义持久化。
+   */
+  function arePathOrdersEqual(left: string[], right: string[]): boolean {
+    return left.length === right.length && left.every((path, index) => path === right[index]);
+  }
+
   return {
     boxItems,
+    moveBoxItemsInOrder,
+    removeBoxItemOrderPaths,
+    replaceBoxItemOrderPath,
     refreshBoxFolderItems,
     startFolderRefreshPolling,
     stopFolderRefreshPolling,

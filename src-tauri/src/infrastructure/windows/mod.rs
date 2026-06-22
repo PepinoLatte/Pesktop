@@ -4,6 +4,7 @@ pub(crate) mod desktop_path;
 pub(crate) mod folder_dialog;
 pub(crate) mod mouse;
 pub(crate) mod native_drop;
+pub(crate) mod shell_clipboard;
 pub(crate) mod shell_context;
 pub(crate) mod shell_file;
 pub(crate) mod shell_icon;

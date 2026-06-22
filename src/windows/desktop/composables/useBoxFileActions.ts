@@ -3,9 +3,12 @@ import type { Ref } from "vue";
 import {
   deleteDesktopItems,
   openDesktopItem,
+  pasteDesktopItemsFromClipboard,
   renameDesktopItem,
   showNativeItemContextMenu,
+  writeDesktopItemsToClipboard,
 } from "@/entities/desktopItem/api";
+import type { BoxConflictPolicy } from "@/entities/appSettings/types";
 import type { DesktopItem } from "@/entities/desktopItem/types";
 
 /**
@@ -14,8 +17,12 @@ import type { DesktopItem } from "@/entities/desktopItem/types";
 interface BoxFileActionsOptions {
   boxGridRef: Ref<HTMLElement | null>;
   closeContextMenu: () => void;
+  getBoxConflictPolicy: () => BoxConflictPolicy;
+  getBoxFolderPath: () => string;
   getDoubleClickOpenItems: () => boolean;
+  removeBoxItemOrderPaths: (paths: string[]) => Promise<void>;
   refreshBoxFolderItems: (options?: { silent?: boolean }) => Promise<void>;
+  replaceBoxItemOrderPath: (previousPath: string, nextPath: string) => Promise<void>;
   resolveSelectedItems: () => DesktopItem[];
   selectedPaths: Ref<Set<string>>;
   setLastError: (message: string) => void;
@@ -27,11 +34,14 @@ interface BoxFileActionsOptions {
 export interface BoxFileActionsState {
   cancelRename: () => void;
   commitRename: () => Promise<void>;
+  copySelectedItems: () => Promise<void>;
+  cutSelectedItems: () => Promise<void>;
   deleteSelectedItems: () => Promise<void>;
   editingPath: Ref<string | null>;
   handleItemContextMenu: (event: MouseEvent, item: DesktopItem) => void;
   handleItemDoubleClick: (item: DesktopItem) => Promise<void>;
   openItem: (item: DesktopItem) => Promise<void>;
+  pasteClipboardItems: () => Promise<void>;
   renameDraft: Ref<string>;
   startSelectedItemRename: () => void;
 }
@@ -113,7 +123,8 @@ export function useBoxFileActions(options: BoxFileActionsOptions): BoxFileAction
     }
 
     try {
-      await renameDesktopItem(targetPath, nextName);
+      const nextPath = await renameDesktopItem(targetPath, nextName);
+      await options.replaceBoxItemOrderPath(targetPath, nextPath);
       editingPath.value = null;
       await options.refreshBoxFolderItems();
     } catch (error) {
@@ -141,7 +152,60 @@ export function useBoxFileActions(options: BoxFileActionsOptions): BoxFileAction
     try {
       await deleteDesktopItems(paths);
       options.selectedPaths.value = new Set();
+      await options.removeBoxItemOrderPaths(paths);
       await options.refreshBoxFolderItems();
+    } catch (error) {
+      options.setLastError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
+   * Ctrl+C 写入 Windows 文件剪贴板，后续可粘贴到 Box、Explorer 或其他支持 CF_HDROP 的程序。
+   */
+  async function copySelectedItems(): Promise<void> {
+    await writeSelectedItemsToClipboard("copy");
+  }
+
+  /**
+   * Ctrl+X 使用 Shell 标准剪切意图，粘贴到其他 Box 或 Explorer 时按移动语义处理。
+   */
+  async function cutSelectedItems(): Promise<void> {
+    await writeSelectedItemsToClipboard("cut");
+  }
+
+  /**
+   * Ctrl+V 从 Windows 文件剪贴板读取路径，复制或移动进当前 Box 后刷新文件网格。
+   */
+  async function pasteClipboardItems(): Promise<void> {
+    const folderPath = options.getBoxFolderPath().trim();
+    if (!folderPath) {
+      return;
+    }
+
+    try {
+      const didPaste = await pasteDesktopItemsFromClipboard(
+        folderPath,
+        options.getBoxConflictPolicy(),
+      );
+      if (didPaste) {
+        await options.refreshBoxFolderItems();
+      }
+    } catch (error) {
+      options.setLastError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
+   * 复制和剪切共享选区读取逻辑，空选区时保持和 Explorer 一样安静无动作。
+   */
+  async function writeSelectedItemsToClipboard(operation: "copy" | "cut"): Promise<void> {
+    const paths = options.resolveSelectedItems().map((item) => item.path);
+    if (paths.length === 0) {
+      return;
+    }
+
+    try {
+      await writeDesktopItemsToClipboard(paths, operation);
     } catch (error) {
       options.setLastError(error instanceof Error ? error.message : String(error));
     }
@@ -150,11 +214,14 @@ export function useBoxFileActions(options: BoxFileActionsOptions): BoxFileAction
   return {
     cancelRename,
     commitRename,
+    copySelectedItems,
+    cutSelectedItems,
     deleteSelectedItems,
     editingPath,
     handleItemContextMenu,
     handleItemDoubleClick,
     openItem,
+    pasteClipboardItems,
     renameDraft,
     startSelectedItemRename,
   };

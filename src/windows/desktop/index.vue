@@ -176,6 +176,9 @@ readEditingTitle = () => isEditingTitle.value;
 
 const {
   boxItems,
+  moveBoxItemsInOrder,
+  removeBoxItemOrderPaths,
+  replaceBoxItemOrderPath,
   refreshBoxFolderItems,
   startFolderRefreshPolling,
   stopFolderRefreshPolling,
@@ -185,7 +188,10 @@ const {
 });
 
 let openItemHandler = async (_item: DesktopItem): Promise<void> => undefined;
+let copySelectedItemsHandler = async (): Promise<void> => undefined;
+let cutSelectedItemsHandler = async (): Promise<void> => undefined;
 let deleteSelectedItemsHandler = async (): Promise<void> => undefined;
+let pasteClipboardItemsHandler = async (): Promise<void> => undefined;
 let startSelectedItemRenameHandler = (): void => undefined;
 let cancelRenameHandler = (): void => undefined;
 let consumeSuppressedItemClickHandler = (): boolean => false;
@@ -207,34 +213,47 @@ const {
   cancelFileRename: () => cancelRenameHandler(),
   closeContextMenu,
   consumeSuppressedItemClick: () => consumeSuppressedItemClickHandler(),
+  copySelectedItems: () => copySelectedItemsHandler(),
+  cutSelectedItems: () => cutSelectedItemsHandler(),
   deleteSelectedItems: () => deleteSelectedItemsHandler(),
   getDoubleClickOpenItems: () => desktopStore.settings.doubleClickOpenItems,
   isEditingTitle: () => isEditingTitle.value,
   openItem: (item) => openItemHandler(item),
+  pasteClipboardItems: () => pasteClipboardItemsHandler(),
   startSelectedItemRename: () => startSelectedItemRenameHandler(),
 });
 
 const {
   cancelRename,
   commitRename,
+  copySelectedItems,
+  cutSelectedItems,
   deleteSelectedItems,
   editingPath,
   handleItemContextMenu,
   handleItemDoubleClick,
   openItem,
+  pasteClipboardItems,
   renameDraft,
   startSelectedItemRename,
 } = useBoxFileActions({
   boxGridRef,
   closeContextMenu,
+  getBoxConflictPolicy: () => desktopStore.settings.boxConflictPolicy,
+  getBoxFolderPath: () => box.value?.folderPath ?? "",
   getDoubleClickOpenItems: () => desktopStore.settings.doubleClickOpenItems,
+  removeBoxItemOrderPaths,
   refreshBoxFolderItems,
+  replaceBoxItemOrderPath,
   resolveSelectedItems,
   selectedPaths,
   setLastError,
 });
 openItemHandler = openItem;
+copySelectedItemsHandler = copySelectedItems;
+cutSelectedItemsHandler = cutSelectedItems;
 deleteSelectedItemsHandler = deleteSelectedItems;
+pasteClipboardItemsHandler = pasteClipboardItems;
 startSelectedItemRenameHandler = startSelectedItemRename;
 cancelRenameHandler = cancelRename;
 
@@ -261,6 +280,7 @@ const {
   selectedPaths,
   setDragHoveringBox,
   setLastError,
+  sortItemsInSourceBox: sortDraggedItemsInCurrentBox,
 });
 consumeSuppressedItemClickHandler = consumeSuppressedItemClick;
 
@@ -318,6 +338,36 @@ function setBoxGridRef(element: Element | ComponentPublicInstance | null): void 
  */
 function setLastError(message: string): void {
   desktopStore.lastError = message;
+}
+
+/**
+ * 来源 Box 内释放拖拽时只调整展示顺序，释放到其他 Box 或桌面仍由拖拽逻辑执行真实文件移动。
+ */
+async function sortDraggedItemsInCurrentBox(
+  paths: string[],
+  point: { inside: boolean; x: number; y: number },
+): Promise<void> {
+  if (!point.inside || !boxGridRef.value) {
+    return;
+  }
+
+  const targetElement = document.elementFromPoint(point.x, point.y);
+  const itemElement =
+    targetElement instanceof HTMLElement
+      ? targetElement.closest<HTMLElement>("[data-box-item-path]")
+      : null;
+  if (!itemElement || !boxGridRef.value.contains(itemElement)) {
+    await moveBoxItemsInOrder(paths, null, "end");
+    return;
+  }
+
+  const targetPath = itemElement.dataset.boxItemPath ?? null;
+  const itemRect = itemElement.getBoundingClientRect();
+  const placement =
+    point.y > itemRect.top + itemRect.height * 0.6 || point.x > itemRect.left + itemRect.width / 2
+      ? "after"
+      : "before";
+  await moveBoxItemsInOrder(paths, targetPath, placement);
 }
 </script>
 

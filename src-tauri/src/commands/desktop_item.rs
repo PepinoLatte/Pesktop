@@ -1,4 +1,5 @@
-use crate::domain::desktop_item::{DesktopItem, DesktopSnapshot};
+use crate::domain::box_policy::BoxConflictPolicy;
+use crate::domain::desktop_item::{DesktopItem, DesktopSnapshot, FileClipboardOperation};
 use crate::services::desktop_item;
 
 /// 获取当前桌面路径快照，删除 Box 默认策略会把文件移回该目录。
@@ -32,7 +33,7 @@ pub fn show_native_item_context_menu(
 
 /// 重命名 Box 文件项；真实路径变更后前端会重新扫描文件夹。
 #[tauri::command]
-pub fn rename_desktop_item(path: String, new_name: String) -> Result<(), String> {
+pub fn rename_desktop_item(path: String, new_name: String) -> Result<String, String> {
     desktop_item::rename_desktop_item(&path, &new_name)
 }
 
@@ -40,4 +41,28 @@ pub fn rename_desktop_item(path: String, new_name: String) -> Result<(), String>
 #[tauri::command]
 pub fn delete_desktop_items(paths: Vec<String>) -> Result<(), String> {
     desktop_item::delete_desktop_items(&paths)
+}
+
+/// 将 Box 文件选区写入 Windows 文件剪贴板，保留复制或剪切意图供后续粘贴使用。
+#[tauri::command]
+pub fn write_desktop_items_to_clipboard(
+    paths: Vec<String>,
+    operation: String,
+) -> Result<(), String> {
+    desktop_item::write_desktop_items_to_clipboard(
+        &paths,
+        FileClipboardOperation::from_str(&operation)?,
+    )
+}
+
+/// 从 Windows 文件剪贴板粘贴到当前 Box，未读取到文件列表时返回 false。
+#[tauri::command]
+pub fn paste_desktop_items_from_clipboard(
+    folder_path: String,
+    conflict_policy: String,
+) -> Result<bool, String> {
+    desktop_item::paste_desktop_items_from_clipboard(
+        &folder_path,
+        BoxConflictPolicy::from_str(&conflict_policy)?,
+    )
 }

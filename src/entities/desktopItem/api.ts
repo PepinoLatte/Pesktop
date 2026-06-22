@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { DesktopItem } from "@/entities/desktopItem/types";
+import type { BoxConflictPolicy } from "@/entities/appSettings/types";
 
 /**
  * 桌面快照只在文件夹型 Box 删除默认策略里提供桌面路径，不再承载桌面文件列表。
@@ -51,8 +52,8 @@ export function showNativeItemContextMenu(
 /**
  * 将 Box 文件项重命名为同目录下的新名称；前端传入的是用户确认后的完整文件名。
  */
-export function renameDesktopItem(path: string, newName: string): Promise<void> {
-  return invoke("rename_desktop_item", {
+export function renameDesktopItem(path: string, newName: string): Promise<string> {
+  return invoke<string>("rename_desktop_item", {
     path,
     newName,
   });
@@ -64,6 +65,32 @@ export function renameDesktopItem(path: string, newName: string): Promise<void> 
 export function deleteDesktopItems(paths: string[]): Promise<void> {
   return invoke("delete_desktop_items", {
     paths,
+  });
+}
+
+/**
+ * 将 Box 选中文件写入 Windows 文件剪贴板，复制和剪切意图由后端写入 Shell 标准格式。
+ */
+export function writeDesktopItemsToClipboard(
+  paths: string[],
+  operation: "copy" | "cut",
+): Promise<void> {
+  return invoke("write_desktop_items_to_clipboard", {
+    paths,
+    operation,
+  });
+}
+
+/**
+ * 把 Windows 文件剪贴板中的项目粘贴进当前 Box，返回是否读取到可处理的文件列表。
+ */
+export function pasteDesktopItemsFromClipboard(
+  folderPath: string,
+  conflictPolicy: BoxConflictPolicy,
+): Promise<boolean> {
+  return invoke<boolean>("paste_desktop_items_from_clipboard", {
+    folderPath,
+    conflictPolicy,
   });
 }
 

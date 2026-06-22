@@ -52,6 +52,7 @@ interface BoxFileDragOptions {
   selectedPaths: Ref<Set<string>>;
   setDragHoveringBox: (isHovering: boolean) => void;
   setLastError: (message: string) => void;
+  sortItemsInSourceBox: (paths: string[], point: BoxScreenPoint) => Promise<void>;
 }
 
 /**
@@ -231,15 +232,20 @@ export function useBoxFileDrag(options: BoxFileDragOptions): BoxFileDragState {
     }
 
     const dragState = fileDragState;
-    const isDroppedInsideSourceBox = await resolveScreenPointInCurrentWindow(screenX, screenY)
-      .then((point) => point.inside)
-      .catch(() => false);
+    const sourceDropPoint = await resolveScreenPointInCurrentWindow(screenX, screenY).catch(
+      () => undefined,
+    );
+    const isDroppedInsideSourceBox = Boolean(sourceDropPoint?.inside);
     await emitFileDragPhase("drop", screenX, screenY);
     clearFileDragPolling();
     draggingItemPath.value = null;
     draggingFilePaths.value = new Set();
     fileDragState = null;
-    if (!isDroppedInsideSourceBox) {
+    if (isDroppedInsideSourceBox && sourceDropPoint) {
+      await options.sortItemsInSourceBox(dragState.paths, sourceDropPoint).catch((error) => {
+        options.setLastError(error instanceof Error ? error.message : String(error));
+      });
+    } else {
       const isAcceptedByBox = await waitForFileDragAccepted(dragState.sessionId);
       if (!isAcceptedByBox) {
         await handleFileDragOutToDesktop(dragState);

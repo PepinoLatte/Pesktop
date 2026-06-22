@@ -9,4 +9,5 @@ export const DESKTOP_ICON_VIEW = {
   itemInlinePadding: 8,
   labelGap: 6,
   openClickDetail: 1,
+  renameClickDelayMs: 520,
 } as const;

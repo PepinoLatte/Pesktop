@@ -28,6 +28,7 @@ export const APP_SETTINGS_STORAGE = {
   databaseUrl: "sqlite:dasktop.db",
   tables: {
     appSettings: "app_settings",
+    boxItemOrders: "box_item_orders",
     boxes: "boxes",
   },
 } as const;

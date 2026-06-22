@@ -5,9 +5,13 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::domain::box_policy::{BoxConflictPolicy, BoxDropAction};
+use crate::domain::desktop_item::FileClipboardOperation;
 use crate::domain::desktop_item::{DesktopItem, DesktopItemKind, DesktopSnapshot};
 use crate::infrastructure::filesystem::{box_folder as box_folder_fs, transfer};
-use crate::infrastructure::windows::{desktop_path, shell_context, shell_file, shell_icon};
+use crate::infrastructure::windows::{
+    desktop_path, shell_clipboard, shell_context, shell_file, shell_icon,
+};
 
 /// 获取当前桌面路径快照，删除 Box 默认策略会把文件移回该目录。
 pub fn get_desktop_snapshot() -> Result<DesktopSnapshot, String> {
@@ -44,7 +48,7 @@ pub fn show_native_item_context_menu(
 }
 
 /// 重命名 Box 文件项；真实路径变更后前端会重新扫描文件夹。
-pub fn rename_desktop_item(path: &str, new_name: &str) -> Result<(), String> {
+pub fn rename_desktop_item(path: &str, new_name: &str) -> Result<String, String> {
     box_folder_fs::rename_item(path, new_name)
 }
 
@@ -56,6 +60,42 @@ pub fn delete_desktop_items(paths: &[String]) -> Result<(), String> {
     }
 
     shell_file::recycle_paths(&sources)
+}
+
+/// 将 Box 当前选区写入 Windows 文件剪贴板，支持后续跨 Box 或 Explorer 粘贴。
+pub fn write_desktop_items_to_clipboard(
+    paths: &[String],
+    operation: FileClipboardOperation,
+) -> Result<(), String> {
+    let sources = transfer::normalize_existing_paths(paths)?;
+    if sources.is_empty() {
+        return Ok(());
+    }
+
+    shell_clipboard::write_file_list(&sources, operation)
+}
+
+/// 从 Windows 文件剪贴板读取路径并粘贴到当前 Box，返回是否执行了文件传输。
+pub fn paste_desktop_items_from_clipboard(
+    folder_path: &str,
+    conflict_policy: BoxConflictPolicy,
+) -> Result<bool, String> {
+    let Some(payload) = shell_clipboard::read_file_list()? else {
+        return Ok(false);
+    };
+    let action = match payload.operation {
+        FileClipboardOperation::Copy => BoxDropAction::Copy,
+        FileClipboardOperation::Cut => BoxDropAction::Move,
+    };
+    let paths = payload
+        .paths
+        .iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+
+    box_folder_fs::handle_box_dropped_paths(folder_path, &paths, action, conflict_policy)?;
+
+    Ok(true)
 }
 
 fn scan_box_folder(folder_path: &str) -> io::Result<Vec<DesktopItem>> {

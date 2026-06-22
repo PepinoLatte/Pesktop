@@ -72,6 +72,23 @@ export async function initializeStorage(): Promise<void> {
       updated_at INTEGER NOT NULL
     )
   `);
+
+  await ensureBoxItemOrderStorage(database);
+}
+
+/**
+ * Box 文件顺序可能在快照启动的独立 Box 窗口中读写，因此表结构创建不能只依赖主窗口初始化。
+ */
+async function ensureBoxItemOrderStorage(database: Database): Promise<void> {
+  await database.execute(`
+    CREATE TABLE IF NOT EXISTS ${APP_SETTINGS_STORAGE.tables.boxItemOrders} (
+      box_id TEXT NOT NULL,
+      item_path TEXT NOT NULL,
+      sort_order INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (box_id, item_path)
+    )
+  `);
 }
 
 /**
@@ -160,11 +177,59 @@ export async function saveBox(box: DesktopBox): Promise<void> {
 }
 
 /**
+ * 读取单个 Box 的手动文件顺序；真实文件是否仍存在由文件扫描层结合当前目录结果裁剪。
+ */
+export async function loadBoxItemOrder(boxId: string): Promise<string[]> {
+  const database = await getDatabase();
+  await ensureBoxItemOrderStorage(database);
+  const rows = await database.select<Array<Record<string, unknown>>>(
+    `
+      SELECT item_path
+      FROM ${APP_SETTINGS_STORAGE.tables.boxItemOrders}
+      WHERE box_id = $1
+      ORDER BY sort_order ASC, updated_at ASC
+    `,
+    [boxId],
+  );
+
+  return rows.map((row) => String(row.item_path));
+}
+
+/**
+ * 保存当前 Box 的完整手动顺序；调用方已按最新扫描结果过滤路径，旧路径不做兼容保留。
+ */
+export async function saveBoxItemOrder(boxId: string, orderedPaths: string[]): Promise<void> {
+  const database = await getDatabase();
+  const updatedAt = Date.now();
+  await ensureBoxItemOrderStorage(database);
+
+  await database.execute(
+    `DELETE FROM ${APP_SETTINGS_STORAGE.tables.boxItemOrders} WHERE box_id = $1`,
+    [boxId],
+  );
+
+  for (const [index, itemPath] of orderedPaths.entries()) {
+    await database.execute(
+      `
+        INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxItemOrders} (box_id, item_path, sort_order, updated_at)
+        VALUES ($1, $2, $3, $4)
+      `,
+      [boxId, itemPath, index, updatedAt],
+    );
+  }
+}
+
+/**
  * 删除 Box 记录只影响 Dasktop 窗口状态；真实文件夹处理必须先由调用方完成并确认成功
  */
 export async function deleteBoxRecord(boxId: string): Promise<void> {
   const database = await getDatabase();
+  await ensureBoxItemOrderStorage(database);
 
+  await database.execute(
+    `DELETE FROM ${APP_SETTINGS_STORAGE.tables.boxItemOrders} WHERE box_id = $1`,
+    [boxId],
+  );
   await database.execute(`DELETE FROM ${APP_SETTINGS_STORAGE.tables.boxes} WHERE id = $1`, [boxId]);
 }
 

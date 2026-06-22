@@ -17,10 +17,13 @@ interface BoxFileSelectionOptions {
   cancelFileRename: () => void;
   closeContextMenu: () => void;
   consumeSuppressedItemClick: () => boolean;
+  copySelectedItems: () => Promise<void>;
+  cutSelectedItems: () => Promise<void>;
   deleteSelectedItems: () => Promise<void>;
   getDoubleClickOpenItems: () => boolean;
   isEditingTitle: () => boolean;
   openItem: (item: DesktopItem) => Promise<void>;
+  pasteClipboardItems: () => Promise<void>;
   startSelectedItemRename: () => void;
 }
 
@@ -50,6 +53,7 @@ export function useBoxFileSelection(
   const selectionStart = ref<GridPoint | null>(null);
   const selectionCurrent = ref<GridPoint | null>(null);
   const isSelecting = computed(() => Boolean(selectionStart.value && selectionCurrent.value));
+  let renameClickTimer: ReturnType<typeof window.setTimeout> | null = null;
   const selectionRectStyle = computed<CSSProperties>(() => {
     if (!selectionStart.value || !selectionCurrent.value) {
       return { display: "none" };
@@ -103,6 +107,12 @@ export function useBoxFileSelection(
 
     options.boxGridRef.value?.focus();
     options.closeContextMenu();
+    const wasOnlySelected = selectedPaths.value.size === 1 && selectedPaths.value.has(item.path);
+    clearScheduledRename();
+    if (event.detail > DESKTOP_ICON_VIEW.openClickDetail) {
+      return;
+    }
+
     if (event.ctrlKey || event.metaKey) {
       const nextSelection = new Set(selectedPaths.value);
       if (nextSelection.has(item.path)) {
@@ -117,6 +127,11 @@ export function useBoxFileSelection(
     selectedPaths.value = new Set([item.path]);
     if (!options.getDoubleClickOpenItems() && event.detail === DESKTOP_ICON_VIEW.openClickDetail) {
       void options.openItem(item);
+      return;
+    }
+
+    if (wasOnlySelected && options.getDoubleClickOpenItems()) {
+      scheduleSelectedItemRename(item.path);
     }
   }
 
@@ -127,6 +142,7 @@ export function useBoxFileSelection(
     if (event.button !== 0 || !options.boxGridRef.value) {
       return;
     }
+    clearScheduledRename();
     const target = event.target;
     if (target instanceof HTMLElement && target.closest("[data-box-item-path]")) {
       return;
@@ -172,6 +188,32 @@ export function useBoxFileSelection(
     window.removeEventListener("pointercancel", handleSelectionPointerUp, { capture: true });
     selectionStart.value = null;
     selectionCurrent.value = null;
+  }
+
+  /**
+   * 已选中文件再次单击后延迟进入重命名；双击会在第二次 click 时取消该计时器。
+   */
+  function scheduleSelectedItemRename(path: string): void {
+    renameClickTimer = window.setTimeout(() => {
+      renameClickTimer = null;
+      if (selectedPaths.value.size !== 1 || !selectedPaths.value.has(path)) {
+        return;
+      }
+
+      options.startSelectedItemRename();
+    }, DESKTOP_ICON_VIEW.renameClickDelayMs);
+  }
+
+  /**
+   * 用户继续双击、框选、按快捷键或切换选择时，待触发重命名都应立即取消。
+   */
+  function clearScheduledRename(): void {
+    if (!renameClickTimer) {
+      return;
+    }
+
+    window.clearTimeout(renameClickTimer);
+    renameClickTimer = null;
   }
 
   /**
@@ -230,10 +272,27 @@ export function useBoxFileSelection(
       return;
     }
 
+    clearScheduledRename();
     const selectedItems = resolveSelectedItems();
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+    const normalizedKey = event.key.toLowerCase();
+    if ((event.ctrlKey || event.metaKey) && normalizedKey === "a") {
       selectedPaths.value = new Set(options.boxItems.value.map((item) => item.path));
       event.preventDefault();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && normalizedKey === "c") {
+      event.preventDefault();
+      await options.copySelectedItems();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && normalizedKey === "x") {
+      event.preventDefault();
+      await options.cutSelectedItems();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && normalizedKey === "v") {
+      event.preventDefault();
+      await options.pasteClipboardItems();
       return;
     }
     if (event.key === "F2") {

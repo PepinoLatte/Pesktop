@@ -85,7 +85,7 @@ pub(crate) fn migrate_box_folder(folder_path: &str, root_path: &str) -> Result<S
 }
 
 /// 将同一目录下的文件项重命名，避免前端拼接路径时跨目录移动真实文件。
-pub(crate) fn rename_item(path: &str, new_name: &str) -> Result<(), String> {
+pub(crate) fn rename_item(path: &str, new_name: &str) -> Result<String, String> {
     let source = PathBuf::from(path);
     if !source.exists() {
         return Err("文件项不存在，无法重命名".to_string());
@@ -97,13 +97,15 @@ pub(crate) fn rename_item(path: &str, new_name: &str) -> Result<(), String> {
         .ok_or_else(|| "无法解析文件所在目录，已停止重命名".to_string())?;
     let destination = parent.join(sanitized_name);
     if destination == source {
-        return Ok(());
+        return Ok(destination.to_string_lossy().to_string());
     }
     if destination.exists() {
         return Err("同名文件已经存在，已停止重命名".to_string());
     }
 
-    fs::rename(&source, &destination).map_err(|error| format!("无法重命名文件项：{error}"))
+    fs::rename(&source, &destination).map_err(|error| format!("无法重命名文件项：{error}"))?;
+
+    Ok(destination.to_string_lossy().to_string())
 }
 
 /// 按当前拖入策略处理外部文件路径；调用方只传真实文件系统路径，不接收 Shell 虚拟对象。
