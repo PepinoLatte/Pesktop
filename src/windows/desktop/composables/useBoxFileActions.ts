@@ -20,6 +20,10 @@ interface BoxFileActionsOptions {
   getBoxConflictPolicy: () => BoxConflictPolicy;
   getBoxFolderPath: () => string;
   getDoubleClickOpenItems: () => boolean;
+  /**
+   * 原生文件右键菜单打开期间需要暂停自动收缩，避免 Shell 菜单抢焦点后 Box 误判为空闲。
+   */
+  setNativeItemContextMenuOpen: (isOpen: boolean) => void;
   removeBoxItemOrderPaths: (paths: string[]) => Promise<void>;
   removeBoxShellItems: (shellIds: string[]) => Promise<void>;
   refreshBoxFolderItems: (options?: { silent?: boolean }) => Promise<void>;
@@ -81,6 +85,7 @@ export function useBoxFileActions(options: BoxFileActionsOptions): BoxFileAction
    */
   function handleItemContextMenu(event: MouseEvent, item: DesktopItem): void {
     options.boxGridRef.value?.focus();
+    options.setNativeItemContextMenuOpen(true);
     options.closeContextMenu();
     if (!options.selectedPaths.value.has(item.path)) {
       options.selectedPaths.value = new Set([item.path]);
@@ -90,6 +95,9 @@ export function useBoxFileActions(options: BoxFileActionsOptions): BoxFileAction
       .then(() => options.refreshBoxFolderItems({ silent: true }))
       .catch((error) => {
         options.setLastError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        options.setNativeItemContextMenuOpen(false);
       });
   }
 

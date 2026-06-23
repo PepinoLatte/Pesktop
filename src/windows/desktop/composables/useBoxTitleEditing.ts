@@ -8,6 +8,10 @@ export function useBoxTitleEditing(
   box: ComputedRef<DesktopBox | undefined>,
   updateBox: (box: DesktopBox) => Promise<void>,
   closeContextMenu: () => void,
+  /**
+   * 标题编辑态会让自动收缩保持展开，退出编辑后必须刷新调度，避免 blur 提交后卡在展开态。
+   */
+  refreshCollapsedPreviewCloseSchedule: () => void,
 ) {
   const isEditingTitle = ref(false);
   const titleDraft = ref("");
@@ -41,7 +45,7 @@ export function useBoxTitleEditing(
     }
 
     const nextTitle = titleDraft.value.trim();
-    isEditingTitle.value = false;
+    finishTitleEditingInteraction();
 
     if (nextTitle === box.value.title) {
       return;
@@ -58,7 +62,15 @@ export function useBoxTitleEditing(
    */
   function cancelTitleEditing(): void {
     titleDraft.value = box.value?.title ?? "";
+    finishTitleEditingInteraction();
+  }
+
+  /**
+   * 结束标题编辑时统一释放编辑保持条件，并让收缩逻辑按最新鼠标和菜单状态重新决定是否收起。
+   */
+  function finishTitleEditingInteraction(): void {
     isEditingTitle.value = false;
+    refreshCollapsedPreviewCloseSchedule();
   }
 
   /**

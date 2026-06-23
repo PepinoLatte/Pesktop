@@ -737,6 +737,16 @@ export const useDesktopStore = defineStore("desktop", () => {
   }
 
   /**
+   * 鼠标离开后的收缩等待时间从设置读取，所有 Box 窗口共享同一套手感配置。
+   */
+  function getBoxCollapseDelayMs(): number {
+    return sanitizeNumberAppSetting(
+      APP_SETTING_KEYS.boxCollapseDelayMs,
+      settings.value.boxCollapseDelayMs,
+    );
+  }
+
+  /**
    * 跟随系统只影响渲染标识，不把解析后的明暗值写回数据库
    */
   function applyTheme(theme: ThemeMode, shouldAnimate = false): void {
@@ -813,6 +823,7 @@ export const useDesktopStore = defineStore("desktop", () => {
     deleteBox,
     desktopPath,
     getBoxCollapseAnimationMs,
+    getBoxCollapseDelayMs,
     initialize,
     initializeFromStartupSnapshot,
     initializeBoxMenu,

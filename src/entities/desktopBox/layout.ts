@@ -110,10 +110,6 @@ export const BOX_ITEM_DRAG_INTERACTION = {
  */
 export const BOX_WINDOW_INTERACTION_TIMING = {
   /**
-   * 鼠标离开自动收起 Box 后保留一小段缓冲，避免用户移动到边缘缩放或菜单时内容立即收回
-   */
-  collapsePreviewCloseDelayMs: 420,
-  /**
    * 菜单窗口失焦可能早于更多按钮 click，短保护期内把这次 click 视为关闭动作而不是重新打开
    */
   menuToggleCloseGuardMs: 180,

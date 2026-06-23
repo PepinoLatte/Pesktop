@@ -121,9 +121,51 @@ export const WINDOW_BEHAVIOR_SETTING_CONTROLS: Array<{
 ];
 
 /**
- * Box 外观数值项排除吸附距离，避免把窗口行为参数混入外观面板。
+ * Box 收缩时序项独立成组，避免动画和延迟参数混入尺寸、圆角等视觉密度配置。
  */
-export type BoxVisualSettingKey = Exclude<AppSettingNumberKey, "snapThreshold">;
+export type BoxCollapseTimingSettingKey = Extract<
+  AppSettingNumberKey,
+  "boxCollapseAnimationMs" | "boxCollapseDelayMs"
+>;
+
+/**
+ * Box 外观数值项排除吸附距离和收缩时序，避免把窗口行为参数混入视觉密度卡片。
+ */
+export type BoxVisualSettingKey = Exclude<
+  AppSettingNumberKey,
+  "snapThreshold" | BoxCollapseTimingSettingKey
+>;
+
+/**
+ * 外观面板当前承载 Box 视觉和收缩手感两类数值项，统一类型便于复用滑块保存事件。
+ */
+export type BoxAppearanceNumberSettingKey = BoxVisualSettingKey | BoxCollapseTimingSettingKey;
+
+/**
+ * Box 收缩时序调节项集中渲染在独立卡片，便于用户把动画速度和离开后的等待时间一起理解。
+ */
+export const BOX_COLLAPSE_TIMING_SETTING_CONTROLS: Array<{
+  description: string;
+  key: BoxCollapseTimingSettingKey;
+  label: string;
+  max: number;
+  min: number;
+  step: number;
+  unit: string;
+}> = [
+  {
+    key: "boxCollapseAnimationMs",
+    label: "收缩动画速度",
+    description: "调整 Box 自动收起和展开的动画时长",
+    ...APP_SETTING_NUMBER_LIMITS.boxCollapseAnimationMs,
+  },
+  {
+    key: "boxCollapseDelayMs",
+    label: "离开后延迟收缩",
+    description: "鼠标离开 Box 后等待多久再开始自动收起",
+    ...APP_SETTING_NUMBER_LIMITS.boxCollapseDelayMs,
+  },
+];
 
 /**
  * Box 外观调节项随外观面板渲染，保证主题、透明度和视觉密度配置入口一致。
@@ -142,12 +184,6 @@ export const BOX_VISUAL_SETTING_CONTROLS: Array<{
     label: "背景透明度",
     description: "控制 Box 背景与桌面壁纸的融合程度",
     ...APP_SETTING_NUMBER_LIMITS.boxBackgroundOpacity,
-  },
-  {
-    key: "boxCollapseAnimationMs",
-    label: "收缩动画速度",
-    description: "调整 Box 自动收起和展开的动画时长",
-    ...APP_SETTING_NUMBER_LIMITS.boxCollapseAnimationMs,
   },
   {
     key: "boxCornerRadius",

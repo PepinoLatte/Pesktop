@@ -91,6 +91,10 @@ export interface AppSettings {
    */
   boxCollapseAnimationMs: number;
   /**
+   * 鼠标离开 Box 后等待多久再收缩，给用户移动到菜单或边缘操作留出缓冲
+   */
+  boxCollapseDelayMs: number;
+  /**
    * Box 内系统图标的显示尺寸，真实图像仍由 Windows Shell 解析
    */
   boxIconSize: number;

@@ -47,7 +47,7 @@ function bindMenuRef(element: Element | ComponentPublicInstance | null): void {
 </script>
 
 <template>
-  <main class="h-screen w-screen overflow-hidden bg-transparent p-0">
+  <main class="box-context-menu-window h-screen w-screen overflow-hidden bg-transparent p-0">
     <nav
       v-if="box && isMenuRendered"
       :ref="bindMenuRef"
@@ -83,3 +83,15 @@ function bindMenuRef(element: Element | ComponentPublicInstance | null): void {
     </nav>
   </main>
 </template>
+
+<style scoped>
+/**
+ * Box 更多菜单是工具型弹窗，禁用文本框选可以避免快速点击菜单项时误选中文案。
+ * 这里与设置页保持一致，同时覆盖 WebView2 旧版内核的前缀属性。
+ */
+.box-context-menu-window,
+.box-context-menu-window * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+</style>

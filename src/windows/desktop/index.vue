@@ -99,12 +99,14 @@ const {
   openCollapsedPreviewForActiveInteraction,
   refreshCollapsedPreviewCloseSchedule,
   setDragHoveringBox,
+  setNativeItemContextMenuOpen,
 } = useBoxCollapsePreview({
   applyWindowFrame: (frame) => applyCollapseWindowFrame(frame),
   box,
   boxSurfaceRef,
   getBoxBackgroundOpacity: () => desktopStore.settings.boxBackgroundOpacity,
   getBoxCollapseAnimationMs: () => desktopStore.getBoxCollapseAnimationMs(),
+  getBoxCollapseDelayMs: () => desktopStore.getBoxCollapseDelayMs(),
   getBoxCornerRadius: () => desktopStore.settings.boxCornerRadius,
   isContextMenuOpen: () => readContextMenuOpen(),
   isEditingTitle: () => readEditingTitle(),
@@ -210,6 +212,7 @@ const {
   box,
   (nextBox) => desktopStore.updateBox(nextBox),
   () => closeContextMenu(),
+  () => refreshCollapsedPreviewCloseSchedule(),
 );
 readEditingTitle = () => isEditingTitle.value;
 
@@ -284,6 +287,7 @@ const {
   getBoxConflictPolicy: () => desktopStore.settings.boxConflictPolicy,
   getBoxFolderPath: () => box.value?.folderPath ?? "",
   getDoubleClickOpenItems: () => desktopStore.settings.doubleClickOpenItems,
+  setNativeItemContextMenuOpen,
   removeBoxItemOrderPaths,
   removeBoxShellItems,
   refreshBoxFolderItems,

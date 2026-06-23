@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import {
+  BOX_COLLAPSE_TIMING_SETTING_CONTROLS,
   BOX_VISUAL_SETTING_CONTROLS,
   THEME_SEGMENT_OPTIONS,
-  type BoxVisualSettingKey,
+  type BoxAppearanceNumberSettingKey,
 } from "@/entities/appSettings/groups";
 import { DEFAULT_APP_SETTINGS } from "@/entities/appSettings/defaults";
 import type { AppSettings, ThemeMode } from "@/entities/appSettings/types";
@@ -19,7 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   boxThemeChange: [theme: ThemeMode];
-  boxVisualSettingChange: [key: BoxVisualSettingKey, value: number];
+  boxVisualSettingChange: [key: BoxAppearanceNumberSettingKey, value: number];
   settingsThemeChange: [theme: ThemeMode];
 }>();
 </script>
@@ -44,6 +45,29 @@ const emit = defineEmits<{
           :model-value="props.settings.boxTheme"
           :options="THEME_SEGMENT_OPTIONS"
           @change="emit('boxThemeChange', $event)"
+        />
+      </SettingRow>
+    </SettingGroup>
+
+    <SettingGroup class="mt-4">
+      <SettingRow
+        v-for="(control, index) in BOX_COLLAPSE_TIMING_SETTING_CONTROLS"
+        :key="control.key"
+        :description="control.description"
+        :divided="index < BOX_COLLAPSE_TIMING_SETTING_CONTROLS.length - 1"
+        grid-class="grid-cols-[1fr_300px]"
+        :title="control.label"
+      >
+        <SettingSlider
+          :default-value="DEFAULT_APP_SETTINGS[control.key]"
+          :label="control.label"
+          :max="control.max"
+          :min="control.min"
+          :model-value="props.settings[control.key]"
+          :step="control.step"
+          :unit="control.unit"
+          @change="emit('boxVisualSettingChange', control.key, $event)"
+          @reset="emit('boxVisualSettingChange', control.key, DEFAULT_APP_SETTINGS[control.key])"
         />
       </SettingRow>
     </SettingGroup>

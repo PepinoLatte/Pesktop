@@ -8,7 +8,6 @@ import {
   BOX_IDLE_OPACITY_ANIMATION,
   BOX_TITLE_OPACITY,
   BOX_TITLE_VISIBILITY,
-  BOX_WINDOW_INTERACTION_TIMING,
 } from "@/entities/desktopBox/layout";
 
 /**
@@ -37,6 +36,7 @@ export function useBoxCollapsePreview(options: {
   boxSurfaceRef: Ref<HTMLElement | null>;
   getBoxBackgroundOpacity: () => number;
   getBoxCollapseAnimationMs: () => number;
+  getBoxCollapseDelayMs: () => number;
   getBoxCornerRadius: () => number;
   isContextMenuOpen: () => boolean;
   isEditingTitle: () => boolean;
@@ -50,6 +50,7 @@ export function useBoxCollapsePreview(options: {
   const isCollapsedPreviewOpen = ref(false);
   const isBoxHovered = ref(false);
   const isDragHoveringBox = ref(false);
+  const isNativeItemContextMenuOpen = ref(false);
   const isTitleHovered = ref(false);
   const isCollapseAnimating = ref(false);
   const boxSurfaceVisualHeight = ref<number | null>(null);
@@ -69,6 +70,7 @@ export function useBoxCollapsePreview(options: {
   const boxIdleOpacity = computed(() =>
     isBoxHovered.value ||
     isDragHoveringBox.value ||
+    isNativeItemContextMenuOpen.value ||
     options.isContextMenuOpen() ||
     options.isEditingTitle() ||
     options.isManualDraggingBox() ||
@@ -449,6 +451,24 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
+   * Windows Shell 右键菜单运行在原生消息循环中，打开期间 WebView 可能失焦或收到 mouseleave。
+   * 将它纳入保持展开条件，避免系统菜单还在屏幕上时旧计时器提前收起 Box。
+   */
+  function setNativeItemContextMenuOpen(isOpen: boolean): void {
+    if (isNativeItemContextMenuOpen.value === isOpen) {
+      return;
+    }
+
+    isNativeItemContextMenuOpen.value = isOpen;
+    if (isOpen) {
+      openCollapsedPreviewForActiveInteraction();
+      return;
+    }
+
+    refreshCollapsedPreviewCloseSchedule();
+  }
+
+  /**
    * 判断是否存在需要保持 Box 展开的交互，避免菜单、缩放、拖动过程中被 mouseleave 抢先收起
    */
   function shouldKeepCollapsedPreviewOpen(): boolean {
@@ -456,6 +476,7 @@ export function useBoxCollapsePreview(options: {
       isBoxHovered.value ||
       isDragHoveringBox.value ||
       isTitleHovered.value ||
+      isNativeItemContextMenuOpen.value ||
       options.isContextMenuOpen() ||
       options.isEditingTitle() ||
       options.isManualDraggingBox() ||
@@ -506,7 +527,7 @@ export function useBoxCollapsePreview(options: {
       if (!shouldKeepCollapsedPreviewOpen()) {
         closeCollapsedPreview();
       }
-    }, BOX_WINDOW_INTERACTION_TIMING.collapsePreviewCloseDelayMs);
+    }, options.getBoxCollapseDelayMs());
   }
 
   /**
@@ -573,6 +594,7 @@ export function useBoxCollapsePreview(options: {
     openCollapsedPreviewForActiveInteraction,
     refreshCollapsedPreviewCloseSchedule,
     setDragHoveringBox,
+    setNativeItemContextMenuOpen,
     syncPointerHoverFromScreenPoint,
   };
 }
