@@ -1,4 +1,4 @@
-; Dasktop 安装器文案强调桌面 Box 的整理边界：应用只维护布局、映射和偏好，不移动或删除真实桌面文件
+; Dasktop 卸载器文案必须提醒删除配置时的文件夹风险，避免用户忽略 Box 文件夹内的自有文件
 LangString addOrReinstall ${LANG_SIMPCHINESE} "添加或重新安装组件"
 LangString alreadyInstalled ${LANG_SIMPCHINESE} "已安装"
 LangString alreadyInstalledLong ${LANG_SIMPCHINESE} "已安装 ${PRODUCTNAME} ${VERSION}。请选择要执行的维护操作，然后点击下一步继续"
@@ -25,4 +25,4 @@ LangString webview2DownloadSuccess ${LANG_SIMPCHINESE} "WebView2 安装程序下
 LangString webview2Downloading ${LANG_SIMPCHINESE} "正在下载 WebView2 安装程序..."
 LangString webview2InstallError ${LANG_SIMPCHINESE} "安装 WebView2 失败，退出代码：$1"
 LangString webview2InstallSuccess ${LANG_SIMPCHINESE} "WebView2 安装完成"
-LangString deleteAppData ${LANG_SIMPCHINESE} "删除 Dasktop 应用数据（Box 布局、映射和偏好；不会删除真实桌面文件）"
+LangString deleteAppData ${LANG_SIMPCHINESE} "删除 Dasktop 配置和应用数据（含软件创建的 Box 文件夹；其中内容可能被删除，请提前转移需要保留的文件）"
