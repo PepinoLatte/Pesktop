@@ -31,6 +31,9 @@ pub fn run() {
 
             Ok(())
         })
+        .on_window_event(|window, event| {
+            infrastructure::tauri::tray::handle_window_close_requested(window, event);
+        })
         .invoke_handler(tauri::generate_handler![
             commands::box_folder::choose_collection_root_folder,
             commands::box_folder::create_box_folder,

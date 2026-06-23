@@ -133,19 +133,15 @@ select:focus-visible {
 }
 
 /**
- * Box 内滚动条更细，避免在小窗口里占用过多文件展示空间
+ * Box 内保留滚轮滚动但隐藏视觉滚动条，避免滚动条出现时挤压网格列宽导致换行。
  */
 .dasktop-box-scrollarea {
   scrollbar-gutter: auto;
+  scrollbar-width: none;
 }
 
 .dasktop-box-scrollarea::-webkit-scrollbar {
-  height: 8px;
-  width: 8px;
-}
-
-.dasktop-box-scrollarea::-webkit-scrollbar-thumb {
-  border-width: 2px;
+  display: none;
 }
 
 /**

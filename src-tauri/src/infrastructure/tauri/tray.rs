@@ -1,8 +1,10 @@
 //! 系统托盘入口负责应用级命令分发，不直接读写 Box 数据。
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tauri::menu::{CheckMenuItem, MenuBuilder, MenuEvent};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{App, AppHandle, Emitter, Manager, Wry};
+use tauri::{App, AppHandle, Emitter, Manager, Window, WindowEvent, Wry};
 use tauri_plugin_autostart::ManagerExt;
 
 const TRAY_ID: &str = "dasktop-tray";
@@ -19,6 +21,8 @@ pub const AUTOSTART_CHANGED_EVENT: &str = "dasktop://autostart-changed";
 /// 托盘菜单中需要跨入口同步的可变控件状态。
 pub struct AppTrayState {
     autostart_item: CheckMenuItem<Wry>,
+    /// 托盘退出会真正销毁所有窗口，此标记用于区分系统关闭设置窗和应用退出。
+    is_graceful_exit_requested: AtomicBool,
 }
 
 /// 初始化系统托盘图标和右键菜单；菜单只分发动作，具体 Box 生命周期仍由前端统一处理。
@@ -59,7 +63,10 @@ pub fn setup_app_tray(app: &App) -> tauri::Result<()> {
     }
 
     tray_builder.build(app)?;
-    app.manage(AppTrayState { autostart_item });
+    app.manage(AppTrayState {
+        autostart_item,
+        is_graceful_exit_requested: AtomicBool::new(false),
+    });
     Ok(())
 }
 
@@ -109,14 +116,20 @@ fn handle_tray_menu_event(
     }
 }
 
-/// 托盘“关闭”是真正退出应用，需要让所有 WebViewWindow 先走正常销毁链路。
+/// 托盘“关闭”是真正退出应用，需要让所有 WebViewWindow 先走销毁链路。
 ///
 /// Windows WebView2/Chromium 在进程退出时会注销 `Chrome_WidgetWin_0` 等内部窗口类。
 /// 如果直接调用 `AppHandle::exit`，隐藏设置窗、Box 窗口和预载菜单窗可能尚未收到
 /// `Destroyed` 事件，底层清理就会和窗口销毁交错，从而打印 class unregister 失败日志。
-/// 这里逐个关闭现有 WebViewWindow，让 Tauri 在最后一个窗口销毁后自然触发退出；系统
-/// 桌面图标由 `RunEvent::ExitRequested` 按接管记录恢复到 Dasktop 启动前状态。
+/// 这里逐个销毁现有 WebViewWindow，并用退出标记跳过设置窗的隐藏拦截；系统桌面图标
+/// 由 `RunEvent::ExitRequested` 按接管记录恢复到 Dasktop 启动前状态。
 pub(crate) fn request_graceful_exit(app_handle: &AppHandle) {
+    if let Some(tray_state) = app_handle.try_state::<AppTrayState>() {
+        tray_state
+            .is_graceful_exit_requested
+            .store(true, Ordering::SeqCst);
+    }
+
     let webview_windows = app_handle.webview_windows();
     if webview_windows.is_empty() {
         app_handle.exit(0);
@@ -124,9 +137,30 @@ pub(crate) fn request_graceful_exit(app_handle: &AppHandle) {
     }
 
     for (label, webview_window) in webview_windows {
-        if let Err(error) = webview_window.close() {
-            eprintln!("failed to close webview window {label} before exit: {error}");
+        if let Err(error) = webview_window.destroy() {
+            eprintln!("failed to destroy webview window {label} before exit: {error}");
         }
+    }
+}
+
+/// 任务栏或系统菜单关闭设置窗时只隐藏主窗口，保留隐藏控制器和 Store 事件入口供托盘再次唤起。
+pub(crate) fn handle_window_close_requested(window: &Window<Wry>, event: &WindowEvent) {
+    let WindowEvent::CloseRequested { api, .. } = event else {
+        return;
+    };
+    if window.label() != "main" {
+        return;
+    }
+    let Some(tray_state) = window.app_handle().try_state::<AppTrayState>() else {
+        return;
+    };
+    if tray_state.is_graceful_exit_requested.load(Ordering::SeqCst) {
+        return;
+    }
+
+    api.prevent_close();
+    if let Err(error) = window.hide() {
+        eprintln!("failed to hide settings window after close request: {error}");
     }
 }
 
