@@ -141,7 +141,7 @@ fn is_left_click_release(event: &TrayIconEvent) -> bool {
     )
 }
 
-fn show_settings_window(app_handle: &AppHandle) {
+pub(crate) fn show_settings_window(app_handle: &AppHandle) {
     if let Some(settings_window) = app_handle.get_webview_window("main") {
         if let Err(error) = settings_window.unminimize() {
             eprintln!("failed to unminimize settings window: {error}");

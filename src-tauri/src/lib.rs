@@ -3,16 +3,30 @@ pub mod domain;
 mod infrastructure;
 mod services;
 
+use tauri::Manager;
+
 /// 启动 Dasktop 的 Tauri 运行时，只注册当前版本真实使用的命令和插件
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let Some(single_instance_guard) =
+        infrastructure::windows::single_instance::acquire_or_notify_existing()
+            .expect("failed to initialize dasktop single instance guard")
+    else {
+        return;
+    };
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
         .plugin(tauri_plugin_sql::Builder::default().build())
-        .setup(|app| {
+        .setup(move |app| {
+            app.manage(single_instance_guard);
+            infrastructure::windows::single_instance::start_show_settings_listener(
+                app.handle().clone(),
+            )
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
             infrastructure::tauri::tray::setup_app_tray(app)?;
 
             Ok(())

@@ -70,11 +70,10 @@ export const BOX_WINDOW_PLACEMENT = {
 } as const;
 
 /**
- * Box 菜单尺寸与真实内容保持一致，独立透明窗口不允许内部滚动或裁剪操作项
+ * Box 菜单只固定宽度和边缘间距；高度由菜单 DOM 内容测量后写入原生窗口。
  */
 export const BOX_CONTEXT_MENU_LAYOUT = {
   width: 256,
-  height: 352,
   /**
    * 打开动画从隐藏窗口预备态切到可见态，时长需要短到点击后立即有反馈
    */

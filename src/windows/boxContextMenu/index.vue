@@ -52,7 +52,7 @@ function bindMenuRef(element: Element | ComponentPublicInstance | null): void {
       v-if="box && isMenuRendered"
       :ref="bindMenuRef"
       aria-label="Box 更多菜单"
-      class="dasktop-box-menu grid h-full w-full gap-1 overflow-hidden rounded-[10px] border border-[#d9dce3] bg-[#fbfbfd] p-1.5 text-slate-800 shadow-[0_18px_45px_rgba(15,23,42,0.24)] dark:border-[#30333c] dark:bg-[#202228] dark:text-slate-100"
+      class="dasktop-box-menu grid h-full w-full gap-1 overflow-x-hidden overflow-y-auto rounded-[10px] border border-[#d9dce3] bg-[#fbfbfd] p-1.5 text-slate-800 shadow-[0_18px_45px_rgba(15,23,42,0.24)] dark:border-[#30333c] dark:bg-[#202228] dark:text-slate-100"
       @click.stop
     >
       <MenuTopActions

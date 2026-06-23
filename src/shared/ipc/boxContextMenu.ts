@@ -65,6 +65,10 @@ export interface BoxContextMenuStatePayload {
  * 预备完成回执带上请求序号，避免快速点击时旧回执误解锁新的打开流程
  */
 export interface BoxContextMenuPreparedPayload {
+  /**
+   * 菜单 DOM 完整渲染后的理想逻辑高度，调用方据此动态调整原生窗口高度。
+   */
+  height: number;
   requestId: string;
 }
 
@@ -82,8 +86,11 @@ export async function requestBoxContextMenuOpen(
 /**
  * 菜单窗口完成首帧隐藏态后通知调用方可以展示原生窗口
  */
-export async function notifyBoxContextMenuPrepared(requestId: string): Promise<void> {
-  await emit(BOX_CONTEXT_MENU_PREPARED_EVENT, { requestId });
+export async function notifyBoxContextMenuPrepared(
+  requestId: string,
+  height: number,
+): Promise<void> {
+  await emit(BOX_CONTEXT_MENU_PREPARED_EVENT, { height, requestId });
 }
 
 /**

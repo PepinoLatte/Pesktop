@@ -131,7 +131,7 @@ export function useBoxContextMenuWindow(
     if (menuElement) {
       applyMenuVisibleState(0, "translateY(-6px) scale(0.98)");
     }
-    await notifyBoxContextMenuPrepared(requestId);
+    await notifyBoxContextMenuPrepared(requestId, resolveMenuContentHeight(menuElement));
   }
 
   /**
@@ -263,6 +263,28 @@ export function useBoxContextMenuWindow(
 
     menuElement.style.opacity = String(opacity);
     menuElement.style.transform = transform;
+  }
+
+  /**
+   * 菜单窗口高度由父窗口按显示器工作区裁剪；这里返回完整内容高度，避免新增菜单项后被固定常量裁掉。
+   */
+  function resolveMenuContentHeight(menuElement: HTMLElement | null): number {
+    if (!menuElement) {
+      return Math.max(
+        1,
+        document.documentElement.scrollHeight,
+        document.body.scrollHeight,
+      );
+    }
+
+    const computedStyle = window.getComputedStyle(menuElement);
+    const verticalBorderWidth =
+      Number.parseFloat(computedStyle.borderTopWidth) +
+      Number.parseFloat(computedStyle.borderBottomWidth);
+
+    return Math.ceil(
+      Math.max(menuElement.scrollHeight + verticalBorderWidth + 2, menuElement.offsetHeight),
+    );
   }
 
   /**

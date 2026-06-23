@@ -3,6 +3,7 @@ import {
   LogicalPosition,
   LogicalSize,
   PhysicalPosition,
+  PhysicalSize,
   currentMonitor,
   getCurrentWindow,
   primaryMonitor,
@@ -11,6 +12,7 @@ import type { DesktopBox } from "@/entities/desktopBox/types";
 import { BOX_CONTEXT_MENU_LAYOUT, BOX_WINDOW_SIZE } from "@/entities/desktopBox/layout";
 import {
   clearBoxContextMenuReady,
+  type BoxContextMenuPreparedPayload,
   isBoxContextMenuReady,
   listenBoxContextMenuPrepared,
   listenBoxContextMenuReady,
@@ -47,6 +49,15 @@ export interface BoxContextMenuTriggerPosition {
 }
 
 /**
+ * 菜单窗口打开前按当前显示器工作区计算物理坐标和高度，保证小分辨率下不会超出屏幕。
+ */
+interface BoxContextMenuResolvedPlacement {
+  height: number;
+  position: BoxContextMenuTriggerPosition;
+  width: number;
+}
+
+/**
  * 菜单按钮采用切换语义，调用方可据此恢复折叠 Box 的临时展开状态
  */
 export type BoxContextMenuToggleResult = "closed" | "opened";
@@ -64,6 +75,11 @@ export function boxWindowLabel(boxId: string): string {
 const BOX_CONTEXT_MENU_WINDOW_LABEL = "box_menu";
 
 let preloadBoxContextMenuWindowPromise: Promise<WebviewWindow> | null = null;
+
+/**
+ * 预载窗口隐藏创建时只需要一个合法初始高度；真实展示高度由菜单内容测量结果决定。
+ */
+const BOX_CONTEXT_MENU_INITIAL_HEIGHT = 1;
 
 /**
  * ready 只兜底等待首轮预载；超时后仍允许 show，避免异常 ready 事件导致点击永久无响应
@@ -199,15 +215,19 @@ export async function openBoxContextMenuWindow(
   triggerPosition: BoxContextMenuTriggerPosition,
 ): Promise<void> {
   const requestId = crypto.randomUUID();
-  const [menuWindow, menuPosition] = await Promise.all([
-    preloadBoxContextMenuWindow(),
-    resolveBoxContextMenuPosition(triggerPosition),
-  ]);
+  const menuWindow = await preloadBoxContextMenuWindow();
 
   await waitForBoxContextMenuReady();
-  await requestPreparedBoxContextMenuOpen(boxId, requestId);
+  const preparedPayload = await requestPreparedBoxContextMenuOpen(boxId, requestId);
+  const menuPlacement = await resolveBoxContextMenuPlacement(
+    triggerPosition,
+    preparedPayload.height,
+  );
   await Promise.all([
-    menuWindow.setPosition(new PhysicalPosition(menuPosition.x, menuPosition.y)),
+    menuWindow.setSize(new PhysicalSize(menuPlacement.width, menuPlacement.height)),
+    menuWindow.setPosition(
+      new PhysicalPosition(menuPlacement.position.x, menuPlacement.position.y),
+    ),
     menuWindow.setAlwaysOnTop(true),
   ]);
   await menuWindow.show();
@@ -256,7 +276,7 @@ async function createBoxContextMenuWindow(): Promise<WebviewWindow> {
       decorations: false,
       dragDropEnabled: false,
       focus: false,
-      height: BOX_CONTEXT_MENU_LAYOUT.height,
+      height: BOX_CONTEXT_MENU_INITIAL_HEIGHT,
       resizable: false,
       shadow: false,
       skipTaskbar: true,
@@ -334,14 +354,14 @@ async function waitForBoxContextMenuReady(): Promise<void> {
 async function requestPreparedBoxContextMenuOpen(
   boxId: string,
   requestId: string,
-): Promise<void> {
+): Promise<BoxContextMenuPreparedPayload> {
   let unlistenPrepared: (() => void) | null = null;
   let preparedFallbackTimer: ReturnType<typeof window.setTimeout> | null = null;
-  let settlePrepared: () => void = () => undefined;
-  const waitPrepared = new Promise<void>((resolve) => {
+  let settlePrepared: (payload?: BoxContextMenuPreparedPayload) => void = () => undefined;
+  const waitPrepared = new Promise<BoxContextMenuPreparedPayload>((resolve) => {
     let isSettled = false;
 
-    settlePrepared = (): void => {
+    settlePrepared = (payload?: BoxContextMenuPreparedPayload): void => {
       if (isSettled) {
         return;
       }
@@ -353,7 +373,7 @@ async function requestPreparedBoxContextMenuOpen(
       }
       unlistenPrepared?.();
       unlistenPrepared = null;
-      resolve();
+      resolve(payload ?? { height: BOX_CONTEXT_MENU_INITIAL_HEIGHT, requestId });
     };
   });
 
@@ -364,17 +384,18 @@ async function requestPreparedBoxContextMenuOpen(
   try {
     unlistenPrepared = await listenBoxContextMenuPrepared(({ payload }) => {
       if (payload.requestId === requestId) {
-        settlePrepared();
+        settlePrepared(payload);
       }
     });
     preparedFallbackTimer = window.setTimeout(() => {
       settlePrepared();
     }, BOX_CONTEXT_MENU_LAYOUT.preparedWaitMs);
     await requestHiddenOpen();
-    await waitPrepared;
+    return await waitPrepared;
   } catch {
     await requestHiddenOpen().catch(() => undefined);
     settlePrepared();
+    return await waitPrepared;
   }
 }
 
@@ -386,33 +407,49 @@ async function requestCloseBoxContextMenuWindow(boxId: string | undefined): Prom
 }
 
 /**
- * 菜单默认从按钮右下方弹出，若靠近屏幕边缘则翻转到上方并夹在当前显示器范围内
+ * 菜单默认从按钮右下方弹出，若靠近屏幕边缘则翻转到上方，并在当前显示器工作区内压缩高度。
  */
-async function resolveBoxContextMenuPosition(
+async function resolveBoxContextMenuPlacement(
   triggerPosition: BoxContextMenuTriggerPosition,
-): Promise<BoxContextMenuTriggerPosition> {
+  preferredLogicalHeight: number,
+): Promise<BoxContextMenuResolvedPlacement> {
   const scaleFactor = await getCurrentWindow().scaleFactor();
   const monitor = (await currentMonitor()) ?? (await primaryMonitor());
   const menuWidth = BOX_CONTEXT_MENU_LAYOUT.width * scaleFactor;
-  const menuHeight = BOX_CONTEXT_MENU_LAYOUT.height * scaleFactor;
   const triggerGap = BOX_CONTEXT_MENU_LAYOUT.triggerGap * scaleFactor;
   const viewportPadding = BOX_CONTEXT_MENU_LAYOUT.viewportPadding * scaleFactor;
-  const monitorX = monitor?.position.x ?? 0;
-  const monitorY = monitor?.position.y ?? 0;
-  const monitorWidth = monitor?.size.width ?? menuWidth + triggerPosition.x + viewportPadding;
-  const monitorHeight = monitor?.size.height ?? menuHeight + triggerPosition.y + viewportPadding;
-  const minX = monitorX + viewportPadding;
-  const minY = monitorY + viewportPadding;
-  const maxX = monitorX + monitorWidth - menuWidth - viewportPadding;
-  const maxY = monitorY + monitorHeight - menuHeight - viewportPadding;
+  const workAreaX = monitor?.workArea.position.x ?? monitor?.position.x ?? 0;
+  const workAreaY = monitor?.workArea.position.y ?? monitor?.position.y ?? 0;
+  const workAreaWidth =
+    monitor?.workArea.size.width ?? monitor?.size.width ?? menuWidth + triggerPosition.x;
+  const workAreaHeight =
+    monitor?.workArea.size.height ??
+    monitor?.size.height ??
+    Math.max(1, preferredLogicalHeight) * scaleFactor + triggerPosition.y;
+  const minX = workAreaX + viewportPadding;
+  const minY = workAreaY + viewportPadding;
+  const maxX = workAreaX + workAreaWidth - menuWidth - viewportPadding;
+  const maxAvailableMenuHeight = Math.max(
+    scaleFactor,
+    workAreaHeight - viewportPadding * 2,
+  );
+  const menuHeight = Math.min(
+    Math.max(1, preferredLogicalHeight) * scaleFactor,
+    maxAvailableMenuHeight,
+  );
+  const maxY = workAreaY + workAreaHeight - menuHeight - viewportPadding;
   const preferredX = triggerPosition.x - menuWidth + triggerGap * 2;
   const preferredBelowY = triggerPosition.y + triggerGap;
   const preferredAboveY = triggerPosition.y - menuHeight - triggerGap;
   const preferredY = preferredBelowY <= maxY ? preferredBelowY : preferredAboveY;
 
   return {
-    x: toNativeWindowCoordinate(clampMenuPosition(preferredX, minX, maxX)),
-    y: toNativeWindowCoordinate(clampMenuPosition(preferredY, minY, maxY)),
+    height: toNativeWindowCoordinate(menuHeight),
+    position: {
+      x: toNativeWindowCoordinate(clampMenuPosition(preferredX, minX, maxX)),
+      y: toNativeWindowCoordinate(clampMenuPosition(preferredY, minY, maxY)),
+    },
+    width: toNativeWindowCoordinate(menuWidth),
   };
 }
 
