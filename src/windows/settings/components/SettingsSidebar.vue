@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import logoUrl from "@/assets/logo.png";
-import packageInfo from "../../../../package.json";
+import { APP_META } from "@/shared/config/appMeta";
 import type { SettingsNavItem, SettingsSection } from "../model/navigation";
 
 /**
@@ -22,11 +22,11 @@ const emit = defineEmits<{
 const settingsLogoUrl = logoUrl;
 
 /**
- * 版本和作者来自包元数据，发布时只需要维护 package.json 这一处来源
+ * 版本和作者来自统一应用元信息，发布时只需要维护包版本来源。
  */
 const appInfo = {
-  version: packageInfo.version,
-  author: packageInfo.author,
+  version: APP_META.version,
+  author: APP_META.author,
 } as const;
 
 const NAV_ITEM_MOTION_OFFSET_PX = 44;
@@ -56,7 +56,7 @@ const activeIndicatorStyle = computed(() => ({
         class="size-10 shrink-0 rounded-[10px] object-contain"
       />
       <div class="min-w-0">
-        <div class="truncate text-[17px] font-semibold tracking-[0] text-[#17181c] dark:text-[#f4f4f5]">Dasktop</div>
+        <div class="truncate text-[17px] font-semibold tracking-[0] text-[#17181c] dark:text-[#f4f4f5]">{{ APP_META.displayName }}</div>
         <div class="mt-0.5 text-[12px] text-[#6f7480] dark:text-[#9ca0aa]">像 Box 一样管理桌面</div>
       </div>
     </div>

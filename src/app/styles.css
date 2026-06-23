@@ -149,10 +149,11 @@ select:focus-visible {
 }
 
 /**
- * Box 更多菜单的 transform-origin 由 motion 动画复用，入口和退出时保持来自按钮的空间关系
+ * Box 更多菜单只允许透明度过渡；单例窗口会动态调整尺寸，任何 transform 都容易被误看成缩放动画。
  */
 .dasktop-box-menu {
-  transform-origin: top right;
+  transform: none !important;
+  transform-origin: center;
 }
 
 @media (prefers-reduced-motion: reduce) {

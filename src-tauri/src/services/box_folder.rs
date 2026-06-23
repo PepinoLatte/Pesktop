@@ -44,7 +44,7 @@ pub fn handle_box_dropped_paths(
     action: BoxDropAction,
     _owner: ShellOperationOwner,
     conflict_policy: BoxConflictPolicy,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     box_folder_fs::handle_box_dropped_paths(folder_path, paths, action, conflict_policy)
 }
 

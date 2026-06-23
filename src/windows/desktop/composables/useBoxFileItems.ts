@@ -1,7 +1,14 @@
 import { ref } from "vue";
 import type { ComputedRef, Ref } from "vue";
-import { loadBoxItemOrder, saveBoxItemOrder } from "@/shared/storage/database";
-import { listBoxFolderItems } from "@/entities/desktopItem/api";
+import {
+  appendBoxVirtualItemIds,
+  loadBoxItemOrder,
+  loadBoxVirtualItemIds,
+  removeBoxVirtualItemIds,
+  saveBoxItemOrder,
+  saveBoxVirtualItemIds,
+} from "@/shared/storage/database";
+import { listBoxFolderItems, listShellDesktopItems } from "@/entities/desktopItem/api";
 import type { DesktopItem } from "@/entities/desktopItem/types";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 
@@ -30,7 +37,9 @@ export interface BoxFileItemsState {
     targetPath: string | null,
     placement: "after" | "before" | "end",
   ) => Promise<void>;
+  appendBoxShellItems: (shellIds: string[]) => Promise<void>;
   removeBoxItemOrderPaths: (paths: string[]) => Promise<void>;
+  removeBoxShellItems: (shellIds: string[]) => Promise<void>;
   replaceBoxItemOrderPath: (previousPath: string, nextPath: string) => Promise<void>;
   refreshBoxFolderItems: (options?: { silent?: boolean }) => Promise<void>;
   startFolderRefreshPolling: () => void;
@@ -44,6 +53,7 @@ export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState
   const boxItems = ref<DesktopItem[]>([]);
   let loadedOrderBoxId: string | null = null;
   let orderedPaths: string[] = [];
+  let virtualShellIds: string[] = [];
   let refreshTimer: ReturnType<typeof window.setInterval> | null = null;
 
   /**
@@ -81,8 +91,11 @@ export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState
 
     try {
       await ensureBoxItemOrderLoaded(options.box.value.id);
-      const scannedItems = await listBoxFolderItems(options.box.value.folderPath);
-      boxItems.value = applyManualOrder(scannedItems);
+      const [scannedItems, shellItems] = await Promise.all([
+        listBoxFolderItems(options.box.value.folderPath),
+        listShellDesktopItems(virtualShellIds),
+      ]);
+      boxItems.value = applyManualOrder([...scannedItems, ...shellItems]);
     } catch (error) {
       if (!refreshOptions.silent) {
         options.setLastError(error instanceof Error ? error.message : String(error));
@@ -98,7 +111,12 @@ export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState
       return;
     }
 
-    orderedPaths = await loadBoxItemOrder(boxId);
+    const [loadedOrderedPaths, loadedVirtualShellIds] = await Promise.all([
+      loadBoxItemOrder(boxId),
+      loadBoxVirtualItemIds(boxId),
+    ]);
+    orderedPaths = loadedOrderedPaths;
+    virtualShellIds = loadedVirtualShellIds;
     loadedOrderBoxId = boxId;
   }
 
@@ -158,6 +176,20 @@ export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState
     orderedPaths = nextPaths;
     boxItems.value = applyManualOrder(boxItems.value);
     await saveBoxItemOrder(currentBox.id, orderedPaths);
+    await saveBoxVirtualItemIds(currentBox.id, resolveOrderedShellIdsFromPaths(orderedPaths));
+  }
+
+  /**
+   * 系统桌面图标拖入 Box 时只追加引用，展示模型由后端按当前 Windows 环境重新解析。
+   */
+  async function appendBoxShellItems(shellIds: string[]): Promise<void> {
+    const currentBox = options.box.value;
+    if (!currentBox || shellIds.length === 0) {
+      return;
+    }
+
+    await appendBoxVirtualItemIds(currentBox.id, shellIds);
+    virtualShellIds = await loadBoxVirtualItemIds(currentBox.id);
   }
 
   /**
@@ -189,6 +221,20 @@ export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState
   }
 
   /**
+   * 删除 Shell 项只清理 Box 引用和排序键，不能走真实文件删除链路。
+   */
+  async function removeBoxShellItems(shellIds: string[]): Promise<void> {
+    const currentBox = options.box.value;
+    if (!currentBox || shellIds.length === 0) {
+      return;
+    }
+
+    await removeBoxVirtualItemIds(currentBox.id, shellIds);
+    virtualShellIds = await loadBoxVirtualItemIds(currentBox.id);
+    await removeBoxItemOrderPaths(shellIds.map((shellId) => `shell::${shellId}`));
+  }
+
+  /**
    * 拖拽释放到图标前半区插到目标前，释放到后半区插到目标后，空白处则追加到末尾。
    */
   function resolveInsertionIndex(
@@ -215,10 +261,21 @@ export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState
     return left.length === right.length && left.every((path, index) => path === right[index]);
   }
 
+  /**
+   * 虚拟项表只保存 shellId，排序表保存统一 path，因此同步时需要从 path 反解回 ID。
+   */
+  function resolveOrderedShellIdsFromPaths(paths: string[]): string[] {
+    return paths
+      .map((path) => path.match(/^shell::(.+)$/)?.[1])
+      .filter((shellId): shellId is string => Boolean(shellId));
+  }
+
   return {
+    appendBoxShellItems,
     boxItems,
     moveBoxItemsInOrder,
     removeBoxItemOrderPaths,
+    removeBoxShellItems,
     replaceBoxItemOrderPath,
     refreshBoxFolderItems,
     startFolderRefreshPolling,

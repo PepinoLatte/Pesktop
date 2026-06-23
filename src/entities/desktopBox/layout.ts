@@ -77,8 +77,8 @@ export const BOX_CONTEXT_MENU_LAYOUT = {
   /**
    * 打开动画从隐藏窗口预备态切到可见态，时长需要短到点击后立即有反馈
    */
-  openAnimationMs: 170,
-  closeAnimationMs: 120,
+  openAnimationMs: 140,
+  closeAnimationMs: 90,
   /**
    * 预备态只等待 Vue 写入首帧透明样式，超时后仍展示窗口，避免菜单点击被异常事件阻塞
    */

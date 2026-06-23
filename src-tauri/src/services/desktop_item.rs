@@ -7,10 +7,12 @@ use std::path::PathBuf;
 
 use crate::domain::box_policy::{BoxConflictPolicy, BoxDropAction};
 use crate::domain::desktop_item::FileClipboardOperation;
-use crate::domain::desktop_item::{DesktopItem, DesktopItemKind, DesktopSnapshot};
+use crate::domain::desktop_item::{
+    DesktopItem, DesktopItemKind, DesktopItemSource, DesktopSnapshot,
+};
 use crate::infrastructure::filesystem::{box_folder as box_folder_fs, transfer};
 use crate::infrastructure::windows::{
-    desktop_path, shell_clipboard, shell_context, shell_file, shell_icon,
+    desktop_path, shell_clipboard, shell_context, shell_file, shell_icon, shell_virtual_item,
 };
 
 /// 获取当前桌面路径快照，删除 Box 默认策略会把文件移回该目录。
@@ -27,8 +29,19 @@ pub fn list_box_folder_items(folder_path: &str) -> Result<Vec<DesktopItem>, Stri
     scan_box_folder(folder_path).map_err(|error| error.to_string())
 }
 
+/// 根据 Box 持久化的 Shell ID 重建系统桌面图标展示项，未知项会被过滤掉。
+pub fn list_shell_desktop_items(shell_ids: &[String]) -> Result<Vec<DesktopItem>, String> {
+    Ok(shell_virtual_item::list_shell_virtual_desktop_items(
+        shell_ids,
+    ))
+}
+
 /// 使用系统默认程序打开 Box 文件项，保持与 Explorer 双击一致。
 pub fn open_desktop_item(path: &str) -> Result<(), String> {
+    if let Some(shell_id) = shell_virtual_item::strip_shell_item_path(path) {
+        return shell_virtual_item::open_shell_virtual_item(shell_id);
+    }
+
     shell_file::open_item_with_system_default(path)
 }
 
@@ -39,6 +52,12 @@ pub fn show_native_item_context_menu(
     screen_x: i32,
     screen_y: i32,
 ) -> Result<(), String> {
+    if let Some(shell_id) = shell_virtual_item::strip_shell_item_path(path) {
+        return shell_virtual_item::show_shell_virtual_item_context_menu(
+            window, shell_id, screen_x, screen_y,
+        );
+    }
+
     let item_path = Path::new(path);
     if !item_path.exists() {
         return Err("文件项不存在，可能已经被移动或删除".to_string());
@@ -131,6 +150,8 @@ fn create_desktop_item(path: &Path) -> io::Result<DesktopItem> {
         kind: resolve_item_kind(path, is_dir),
         name: resolve_item_name(path),
         path: path.to_string_lossy().to_string(),
+        shell_id: None,
+        source: DesktopItemSource::FileSystem,
     })
 }
 

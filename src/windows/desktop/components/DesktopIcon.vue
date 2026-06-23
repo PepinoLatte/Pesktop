@@ -20,6 +20,7 @@ const props = defineProps<{
   selected?: boolean;
   showLabel?: boolean;
   showShortcutArrow?: boolean;
+  sortInsertionPlacement?: "after" | "before" | null;
 }>();
 
 const emit = defineEmits<{
@@ -65,6 +66,12 @@ const iconStateClasses = computed(() => [
   props.dragging ? "opacity-60" : "",
   props.dragInteractionDisabled ? "pointer-events-none" : "",
 ]);
+/**
+ * 排序插入线贴在图标外缘展示目标位置，使用绝对定位避免改变网格测量和真实落点。
+ */
+const sortInsertionIndicatorClasses = computed(() =>
+  props.sortInsertionPlacement === "before" ? "-left-1" : "-right-1",
+);
 const labelStyle = computed(
   () => {
     const baseStyle = {
@@ -155,6 +162,12 @@ function updateRenameDraft(event: Event): void {
     @dblclick.prevent.stop="emit('itemDoubleClick', item)"
     @pointerdown="emit('itemPointerDown', $event, item)"
   >
+    <span
+      v-if="sortInsertionPlacement"
+      aria-hidden="true"
+      class="pointer-events-none absolute bottom-1 top-1 z-50 w-[3px] rounded-full bg-[#2f6bff] shadow-[0_0_0_2px_rgba(47,107,255,0.2),0_4px_10px_rgba(47,107,255,0.34)]"
+      :class="sortInsertionIndicatorClasses"
+    />
     <DesktopIconGlyph
       :icon-size="iconSize"
       :item="item"

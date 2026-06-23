@@ -12,6 +12,16 @@ pub fn show_native_context_menu_for_path(
     show_platform_native_context_menu_for_path(window, path, screen_x, screen_y)
 }
 
+/// 在 Shell 虚拟项上弹出 Windows 原生右键菜单，调用方传入 Shell 可解析的 `::{GUID}` 或路径。
+pub fn show_native_context_menu_for_parsing_name(
+    window: &tauri::WebviewWindow,
+    parsing_name: &str,
+    screen_x: i32,
+    screen_y: i32,
+) -> Result<(), String> {
+    show_platform_native_context_menu_for_parsing_name(window, parsing_name, screen_x, screen_y)
+}
+
 /// 通过 `IContextMenu` 获取 Explorer 同源菜单，选中项用 Shell 返回的命令 ID 执行。
 #[cfg(target_os = "windows")]
 fn show_platform_native_context_menu_for_path(
@@ -20,20 +30,51 @@ fn show_platform_native_context_menu_for_path(
     screen_x: i32,
     screen_y: i32,
 ) -> Result<(), String> {
+    let hwnd = window
+        .hwnd()
+        .map_err(|error| format!("无法获取窗口句柄：{error}"))?;
+    let wide_path = to_wide_path(path);
+
+    show_context_menu_for_wide_parsing_name(hwnd, &wide_path, screen_x, screen_y)
+}
+
+/// Shell 虚拟项同样通过解析名转 PIDL，再复用底层菜单创建逻辑。
+#[cfg(target_os = "windows")]
+fn show_platform_native_context_menu_for_parsing_name(
+    window: &tauri::WebviewWindow,
+    parsing_name: &str,
+    screen_x: i32,
+    screen_y: i32,
+) -> Result<(), String> {
+    let hwnd = window
+        .hwnd()
+        .map_err(|error| format!("无法获取窗口句柄：{error}"))?;
+    let wide_parsing_name = parsing_name
+        .encode_utf16()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+
+    show_context_menu_for_wide_parsing_name(hwnd, &wide_parsing_name, screen_x, screen_y)
+}
+
+/// 真实路径和 Shell 虚拟项都先解析为 PIDL，保证右键菜单来源与 Explorer 一致。
+#[cfg(target_os = "windows")]
+fn show_context_menu_for_wide_parsing_name(
+    hwnd: windows::Win32::Foundation::HWND,
+    wide_parsing_name: &[u16],
+    screen_x: i32,
+    screen_y: i32,
+) -> Result<(), String> {
     use windows::core::PCWSTR;
     use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_APARTMENTTHREADED};
     use windows::Win32::UI::Shell::Common::ITEMIDLIST;
     use windows::Win32::UI::Shell::SHParseDisplayName;
 
-    let hwnd = window
-        .hwnd()
-        .map_err(|error| format!("无法获取窗口句柄：{error}"))?;
-    let wide_path = to_wide_path(path);
     let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
 
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None)
+        SHParseDisplayName(PCWSTR(wide_parsing_name.as_ptr()), None, &mut pidl, 0, None)
             .map_err(|error| format!("系统无法解析该文件项：{error}"))?;
 
         let result = show_context_menu_from_pidl(hwnd, pidl, screen_x, screen_y);
@@ -47,6 +88,17 @@ fn show_platform_native_context_menu_for_path(
 fn show_platform_native_context_menu_for_path(
     _window: &tauri::WebviewWindow,
     _path: &Path,
+    _screen_x: i32,
+    _screen_y: i32,
+) -> Result<(), String> {
+    Err("当前平台暂不支持 Windows 原生右键菜单".to_string())
+}
+
+/// 非 Windows 平台没有 Explorer Shell 菜单，保持显式错误避免前端误以为已生效。
+#[cfg(not(target_os = "windows"))]
+fn show_platform_native_context_menu_for_parsing_name(
+    _window: &tauri::WebviewWindow,
+    _parsing_name: &str,
     _screen_x: i32,
     _screen_y: i32,
 ) -> Result<(), String> {

@@ -74,6 +74,7 @@ export async function initializeStorage(): Promise<void> {
   `);
 
   await ensureBoxItemOrderStorage(database);
+  await ensureBoxVirtualItemStorage(database);
 }
 
 /**
@@ -87,6 +88,21 @@ async function ensureBoxItemOrderStorage(database: Database): Promise<void> {
       sort_order INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (box_id, item_path)
+    )
+  `);
+}
+
+/**
+ * Shell 虚拟项没有真实文件路径，单独保存引用，避免删除或剪贴板逻辑误触真实文件操作。
+ */
+async function ensureBoxVirtualItemStorage(database: Database): Promise<void> {
+  await database.execute(`
+    CREATE TABLE IF NOT EXISTS ${APP_SETTINGS_STORAGE.tables.boxVirtualItems} (
+      box_id TEXT NOT NULL,
+      shell_id TEXT NOT NULL,
+      sort_order INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (box_id, shell_id)
     )
   `);
 }
@@ -196,6 +212,25 @@ export async function loadBoxItemOrder(boxId: string): Promise<string[]> {
 }
 
 /**
+ * 读取 Box 内保存的 Shell 虚拟项 ID，后续由后端按当前系统环境重建展示模型。
+ */
+export async function loadBoxVirtualItemIds(boxId: string): Promise<string[]> {
+  const database = await getDatabase();
+  await ensureBoxVirtualItemStorage(database);
+  const rows = await database.select<Array<Record<string, unknown>>>(
+    `
+      SELECT shell_id
+      FROM ${APP_SETTINGS_STORAGE.tables.boxVirtualItems}
+      WHERE box_id = $1
+      ORDER BY sort_order ASC, updated_at ASC
+    `,
+    [boxId],
+  );
+
+  return rows.map((row) => String(row.shell_id));
+}
+
+/**
  * 保存当前 Box 的完整手动顺序；调用方已按最新扫描结果过滤路径，旧路径不做兼容保留。
  */
 export async function saveBoxItemOrder(boxId: string, orderedPaths: string[]): Promise<void> {
@@ -220,17 +255,96 @@ export async function saveBoxItemOrder(boxId: string, orderedPaths: string[]): P
 }
 
 /**
+ * 保存 Box 内 Shell 虚拟项完整列表；调用方负责按最新 UI 顺序去重后传入。
+ */
+export async function saveBoxVirtualItemIds(boxId: string, shellIds: string[]): Promise<void> {
+  const database = await getDatabase();
+  const updatedAt = Date.now();
+  const uniqueShellIds = dedupePreservingOrder(shellIds);
+  await ensureBoxVirtualItemStorage(database);
+
+  await database.execute(
+    `DELETE FROM ${APP_SETTINGS_STORAGE.tables.boxVirtualItems} WHERE box_id = $1`,
+    [boxId],
+  );
+
+  for (const [index, shellId] of uniqueShellIds.entries()) {
+    await database.execute(
+      `
+        INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxVirtualItems} (box_id, shell_id, sort_order, updated_at)
+        VALUES ($1, $2, $3, $4)
+      `,
+      [boxId, shellId, index, updatedAt],
+    );
+  }
+}
+
+/**
+ * 拖入系统桌面图标时只追加尚不存在的 Shell 引用，避免重复拖入产生多个相同入口。
+ */
+export async function appendBoxVirtualItemIds(boxId: string, shellIds: string[]): Promise<void> {
+  if (shellIds.length === 0) {
+    return;
+  }
+
+  const currentShellIds = await loadBoxVirtualItemIds(boxId);
+  await saveBoxVirtualItemIds(boxId, [...currentShellIds, ...shellIds]);
+}
+
+/**
+ * 删除 Box 内系统桌面图标只移除引用，不能调用回收站或真实路径删除。
+ */
+export async function removeBoxVirtualItemIds(
+  boxId: string,
+  shellIds: string[],
+): Promise<void> {
+  if (shellIds.length === 0) {
+    return;
+  }
+
+  const removedShellIdSet = new Set(shellIds);
+  const nextShellIds = (await loadBoxVirtualItemIds(boxId)).filter(
+    (shellId) => !removedShellIdSet.has(shellId),
+  );
+  await saveBoxVirtualItemIds(boxId, nextShellIds);
+}
+
+/**
  * 删除 Box 记录只影响 Dasktop 窗口状态；真实文件夹处理必须先由调用方完成并确认成功
  */
 export async function deleteBoxRecord(boxId: string): Promise<void> {
   const database = await getDatabase();
   await ensureBoxItemOrderStorage(database);
+  await ensureBoxVirtualItemStorage(database);
 
   await database.execute(
     `DELETE FROM ${APP_SETTINGS_STORAGE.tables.boxItemOrders} WHERE box_id = $1`,
     [boxId],
   );
+  await database.execute(
+    `DELETE FROM ${APP_SETTINGS_STORAGE.tables.boxVirtualItems} WHERE box_id = $1`,
+    [boxId],
+  );
   await database.execute(`DELETE FROM ${APP_SETTINGS_STORAGE.tables.boxes} WHERE id = $1`, [boxId]);
+}
+
+/**
+ * 按出现顺序去重，保证拖入和排序结果稳定，不受 Set 序列化细节影响。
+ */
+function dedupePreservingOrder(values: string[]): string[] {
+  const seenValues = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    if (seenValues.has(value)) {
+      continue;
+    }
+
+    seenValues.add(value);
+    result.push(value);
+  }
+
+  return result;
 }
 
 /**

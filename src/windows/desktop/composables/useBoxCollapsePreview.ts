@@ -125,10 +125,12 @@ export function useBoxCollapsePreview(options: {
     },
   );
   /**
-   * 收缩窗口高度动画期间隐藏内部滚动条，避免 WebView 中间高度小于内容高度时闪出滚动条
+   * 收缩窗口高度动画期间隐藏内部滚动条；常态只允许纵向滚动，避免框选层或插入线制造横向滚动条。
    */
   const boxGridOverflowClass = computed(() =>
-    isCollapseAnimating.value || isBoxCollapsedToTitle.value ? "overflow-hidden" : "overflow-auto",
+    isCollapseAnimating.value || isBoxCollapsedToTitle.value
+      ? "overflow-hidden"
+      : "overflow-x-hidden overflow-y-auto",
   );
   let isApplyingCollapseWindowSize = false;
   /**

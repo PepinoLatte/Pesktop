@@ -26,6 +26,15 @@ export function listBoxFolderItems(folderPath: string): Promise<DesktopItem[]> {
 }
 
 /**
+ * 按 Shell 虚拟项 ID 读取展示模型，Box 用它把持久化引用合并进文件网格。
+ */
+export function listShellDesktopItems(shellIds: string[]): Promise<DesktopItem[]> {
+  return invoke<DesktopItem[]>("list_shell_desktop_items", {
+    shellIds,
+  });
+}
+
+/**
  * 使用系统默认程序打开文件项，保持文件、文件夹和快捷方式与 Explorer 一致。
  */
 export function openDesktopItem(path: string): Promise<void> {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { APP_META } from "@/shared/config/appMeta";
 import SettingGroup from "../components/SettingGroup.vue";
 import SettingRow from "../components/SettingRow.vue";
 import SettingSection from "../components/SettingSection.vue";
@@ -11,15 +12,6 @@ defineProps<{
   panelWidth: string;
 }>();
 
-/**
- * 应用元信息集中维护在关于页，避免展示文案散落在模板中难以同步。
- */
-const APP_META = {
-  author: "Aug_Sakura",
-  name: "Dasktop",
-  poweredBy: "Codex",
-  version: "0.1.0",
-} as const;
 </script>
 
 <template>
@@ -31,7 +23,7 @@ const APP_META = {
     <SettingGroup>
       <SettingRow title="应用名称">
         <div class="min-w-0 py-3 text-right">
-          <strong class="block text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">{{ APP_META.name }}</strong>
+          <strong class="block text-[13px] font-semibold text-[#202229] dark:text-[#f4f4f5]">{{ APP_META.displayName }}</strong>
           <p class="mt-1 text-[12px] leading-5 text-[#707684] dark:text-[#9ca0aa]">
             名字里藏着作者的 Da，也落在每天打开的 Desktop 上
           </p>

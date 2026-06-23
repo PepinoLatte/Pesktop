@@ -35,6 +35,11 @@ pub fn open_item_with_system_default(path: &str) -> Result<(), String> {
     open_path_with_system_default(item_path)
 }
 
+/// 使用 Windows Shell 解析名打开虚拟项，供“此电脑、回收站”等没有真实路径的对象复用。
+pub fn open_parsing_name_with_system_default(parsing_name: &str) -> Result<(), String> {
+    open_shell_parsing_name_with_system_default(parsing_name)
+}
+
 /// 删除单个路径时进入回收站，保留 Windows 侧恢复能力。
 pub fn recycle_path(path: &Path) -> Result<(), String> {
     recycle_paths(&[path.to_path_buf()])
@@ -156,9 +161,48 @@ fn open_path_with_system_default(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// ShellExecute 可直接接收 `::{GUID}` 和 Known Folder 路径，保持与 Explorer 双击语义一致。
+#[cfg(target_os = "windows")]
+fn open_shell_parsing_name_with_system_default(parsing_name: &str) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let parsing_name_wide = parsing_name
+        .encode_utf16()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let operation_wide = "open\0".encode_utf16().collect::<Vec<_>>();
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(operation_wide.as_ptr()),
+            PCWSTR(parsing_name_wide.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+
+    if result.0 as isize <= 32 {
+        return Err(format!(
+            "系统无法打开该系统桌面项目，错误码 {}",
+            result.0 as isize
+        ));
+    }
+
+    Ok(())
+}
+
 #[cfg(not(target_os = "windows"))]
 fn open_path_with_system_default(_path: &Path) -> Result<(), String> {
     Err("当前平台暂不支持打开 Box 文件夹".to_string())
+}
+
+/// 非 Windows 平台没有 Shell 虚拟桌面项，保持显式错误避免前端误判已支持。
+#[cfg(not(target_os = "windows"))]
+fn open_shell_parsing_name_with_system_default(_parsing_name: &str) -> Result<(), String> {
+    Err("当前平台暂不支持打开系统桌面项目".to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

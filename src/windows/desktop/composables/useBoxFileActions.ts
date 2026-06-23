@@ -21,6 +21,7 @@ interface BoxFileActionsOptions {
   getBoxFolderPath: () => string;
   getDoubleClickOpenItems: () => boolean;
   removeBoxItemOrderPaths: (paths: string[]) => Promise<void>;
+  removeBoxShellItems: (shellIds: string[]) => Promise<void>;
   refreshBoxFolderItems: (options?: { silent?: boolean }) => Promise<void>;
   replaceBoxItemOrderPath: (previousPath: string, nextPath: string) => Promise<void>;
   resolveSelectedItems: () => DesktopItem[];
@@ -96,7 +97,7 @@ export function useBoxFileActions(options: BoxFileActionsOptions): BoxFileAction
    * F2 只编辑第一个选中项，符合 Explorer 多选时的基础重命名入口。
    */
   function startSelectedItemRename(): void {
-    const item = options.resolveSelectedItems()[0];
+    const item = options.resolveSelectedItems().find((selectedItem) => selectedItem.source !== "shell");
     if (!item) {
       return;
     }
@@ -142,18 +143,29 @@ export function useBoxFileActions(options: BoxFileActionsOptions): BoxFileAction
   }
 
   /**
-   * Delete 将选中文件送入回收站，成功后刷新文件夹并清空选区。
+   * Delete 对真实文件走回收站，对 Shell 虚拟项只移除 Box 引用，避免误删系统对象。
    */
   async function deleteSelectedItems(): Promise<void> {
-    const paths = options.resolveSelectedItems().map((item) => item.path);
-    if (paths.length === 0) {
+    const selectedItems = options.resolveSelectedItems();
+    const filePaths = selectedItems
+      .filter((item) => item.source !== "shell")
+      .map((item) => item.path);
+    const shellIds = selectedItems
+      .map((item) => item.shellId)
+      .filter((shellId): shellId is string => Boolean(shellId));
+    if (filePaths.length === 0 && shellIds.length === 0) {
       return;
     }
 
     try {
-      await deleteDesktopItems(paths);
+      if (filePaths.length > 0) {
+        await deleteDesktopItems(filePaths);
+        await options.removeBoxItemOrderPaths(filePaths);
+      }
+      if (shellIds.length > 0) {
+        await options.removeBoxShellItems(shellIds);
+      }
       options.selectedPaths.value = new Set();
-      await options.removeBoxItemOrderPaths(paths);
       await options.refreshBoxFolderItems();
     } catch (error) {
       options.setLastError(error instanceof Error ? error.message : String(error));
@@ -200,7 +212,10 @@ export function useBoxFileActions(options: BoxFileActionsOptions): BoxFileAction
    * 复制和剪切共享选区读取逻辑，空选区时保持和 Explorer 一样安静无动作。
    */
   async function writeSelectedItemsToClipboard(operation: "copy" | "cut"): Promise<void> {
-    const paths = options.resolveSelectedItems().map((item) => item.path);
+    const paths = options
+      .resolveSelectedItems()
+      .filter((item) => item.source !== "shell")
+      .map((item) => item.path);
     if (paths.length === 0) {
       return;
     }

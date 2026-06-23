@@ -66,8 +66,8 @@ export function handleBoxDroppedPaths(
   paths: string[],
   action: BoxDropAction,
   conflictPolicy: BoxConflictPolicy,
-): Promise<void> {
-  return invoke("handle_box_dropped_paths", {
+): Promise<string[]> {
+  return invoke<string[]>("handle_box_dropped_paths", {
     folderPath,
     paths,
     action,

@@ -11,9 +11,23 @@ pub fn resolve_item_icon_data_url(path: &Path) -> Option<String> {
         .flatten()
 }
 
+/// 读取 Shell 虚拟项解析名对应的系统图像，供无真实路径的桌面系统图标展示使用。
+#[cfg(target_os = "windows")]
+pub fn resolve_parsing_name_icon_data_url(parsing_name: &str) -> Option<String> {
+    windows_icon::resolve_shell_image_data_url_for_parsing_name(parsing_name)
+        .ok()
+        .flatten()
+}
+
 /// 非 Windows 平台暂不伪造图标，避免跨平台扫描结果和系统真实图标语义不一致。
 #[cfg(not(target_os = "windows"))]
 pub fn resolve_item_icon_data_url(_path: &Path) -> Option<String> {
+    None
+}
+
+/// 非 Windows 平台没有 Shell 虚拟项图标解析能力，保持空值让前端兜底。
+#[cfg(not(target_os = "windows"))]
+pub fn resolve_parsing_name_icon_data_url(_parsing_name: &str) -> Option<String> {
     None
 }
 
@@ -32,10 +46,11 @@ mod windows_icon {
         BITMAPINFOHEADER, DIB_RGB_COLORS, HBITMAP,
     };
     use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
-    use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+    use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::Common::ITEMIDLIST;
     use windows::Win32::UI::Shell::{
-        IShellItemImageFactory, SHCreateItemFromParsingName, SHGetFileInfoW, SHFILEINFOW,
-        SHGFI_ICON, SHGFI_LARGEICON, SIIGBF_BIGGERSIZEOK,
+        IShellItemImageFactory, SHCreateItemFromParsingName, SHGetFileInfoW, SHParseDisplayName,
+        SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_PIDL, SIIGBF_BIGGERSIZEOK,
     };
     use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
 
@@ -43,17 +58,24 @@ mod windows_icon {
 
     /// 按 Windows Shell 默认逻辑提取缩略图或图标，并编码成浏览器可直接渲染的 PNG data URL。
     pub fn resolve_shell_image_data_url(path: &Path) -> io::Result<Option<String>> {
-        if let Ok(Some(thumbnail)) = resolve_shell_thumbnail_data_url(path) {
+        resolve_shell_image_data_url_for_parsing_name(&path.to_string_lossy())
+    }
+
+    /// Shell 虚拟项与真实路径共用图像工厂，保证系统图标、缩略图和透明边缘一致。
+    pub fn resolve_shell_image_data_url_for_parsing_name(
+        parsing_name: &str,
+    ) -> io::Result<Option<String>> {
+        if let Ok(Some(thumbnail)) = resolve_shell_thumbnail_data_url(parsing_name) {
             return Ok(Some(thumbnail));
         }
 
-        resolve_shell_icon_data_url(path)
+        resolve_shell_icon_data_url(parsing_name)
     }
 
     /// Explorer 同源的 Shell 图像工厂会优先返回文件缩略图，普通文件则返回系统图标。
-    fn resolve_shell_thumbnail_data_url(path: &Path) -> io::Result<Option<String>> {
+    fn resolve_shell_thumbnail_data_url(parsing_name: &str) -> io::Result<Option<String>> {
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-        let wide_path = to_wide_path(path);
+        let wide_path = to_wide_parsing_name(parsing_name);
         let image_factory: IShellItemImageFactory = unsafe {
             SHCreateItemFromParsingName(PCWSTR(wide_path.as_ptr()), None)
                 .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?
@@ -82,8 +104,12 @@ mod windows_icon {
     }
 
     /// Shell 图像工厂不可用时退回路径对应的大图标，保证每个文件项都有可识别展示。
-    fn resolve_shell_icon_data_url(path: &Path) -> io::Result<Option<String>> {
-        let wide_path = to_wide_path(path);
+    fn resolve_shell_icon_data_url(parsing_name: &str) -> io::Result<Option<String>> {
+        if parsing_name.starts_with("::") {
+            return resolve_shell_icon_data_url_from_pidl(parsing_name);
+        }
+
+        let wide_path = to_wide_parsing_name(parsing_name);
         let mut file_info = SHFILEINFOW::default();
         let flags = SHGFI_ICON | SHGFI_LARGEICON;
 
@@ -109,12 +135,48 @@ mod windows_icon {
         pixels.map(|png| Some(format!("data:image/png;base64,{}", STANDARD.encode(png))))
     }
 
-    /// Windows API 接收 UTF-16 零结尾路径，保留原始路径可让 `.lnk` 走系统快捷方式解析。
-    fn to_wide_path(path: &Path) -> Vec<u16> {
-        path.to_string_lossy()
-            .encode_utf16()
-            .chain(Some(0))
-            .collect()
+    /// `::{GUID}` 这类虚拟项需先转 PIDL 再取图标，否则部分系统不会给出 HICON。
+    fn resolve_shell_icon_data_url_from_pidl(parsing_name: &str) -> io::Result<Option<String>> {
+        let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+        let wide_path = to_wide_parsing_name(parsing_name);
+        let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
+        unsafe {
+            SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None)
+                .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?;
+        }
+
+        let result = unsafe { resolve_pidl_icon_data_url(pidl) };
+        unsafe {
+            CoTaskMemFree(Some(pidl as *const _));
+        }
+
+        result
+    }
+
+    /// 通过 PIDL 调用 `SHGetFileInfoW`，覆盖无文件路径的 Shell 命名空间对象。
+    unsafe fn resolve_pidl_icon_data_url(pidl: *mut ITEMIDLIST) -> io::Result<Option<String>> {
+        let mut file_info = SHFILEINFOW::default();
+        let result = SHGetFileInfoW(
+            PCWSTR(pidl as *const u16),
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut file_info),
+            size_of::<SHFILEINFOW>() as u32,
+            SHGFI_PIDL | SHGFI_ICON | SHGFI_LARGEICON,
+        );
+
+        if result == 0 || file_info.hIcon.is_invalid() {
+            return Ok(None);
+        }
+
+        let pixels = icon_to_png_rgba(file_info.hIcon);
+        let _ = DestroyIcon(file_info.hIcon);
+
+        pixels.map(|png| Some(format!("data:image/png;base64,{}", STANDARD.encode(png))))
+    }
+
+    /// Windows API 接收 UTF-16 零结尾解析名，真实路径和 `::{GUID}` 都走同一转换。
+    fn to_wide_parsing_name(parsing_name: &str) -> Vec<u16> {
+        parsing_name.encode_utf16().chain(Some(0)).collect()
     }
 
     /// 将 HICON 转换为 PNG 字节；这里显式释放 GDI 对象，避免频繁刷新文件夹时泄漏句柄。

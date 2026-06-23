@@ -18,6 +18,10 @@ import { useBoxWindowLifecycle } from "@/windows/desktop/composables/useBoxWindo
 import { useDesktopStore } from "@/entities/desktopBox/store";
 import { BOX_WINDOW_INTERACTION_TIMING } from "@/entities/desktopBox/layout";
 import type { DesktopItem } from "@/entities/desktopItem/types";
+import type {
+  BoxScreenPoint,
+  BoxSortInsertionPreview,
+} from "@/windows/desktop/model/fileDrag";
 
 const props = defineProps<{
   boxId: string;
@@ -141,6 +145,7 @@ const boxGridStyle = computed(
       rowGap: `${desktopStore.settings.boxIconGapY}px`,
     }) as CSSProperties,
 );
+const boxSortInsertionPreview = ref<BoxSortInsertionPreview | null>(null);
 
 const {
   closeContextMenu,
@@ -176,8 +181,10 @@ readEditingTitle = () => isEditingTitle.value;
 
 const {
   boxItems,
+  appendBoxShellItems,
   moveBoxItemsInOrder,
   removeBoxItemOrderPaths,
+  removeBoxShellItems,
   replaceBoxItemOrderPath,
   refreshBoxFolderItems,
   startFolderRefreshPolling,
@@ -243,6 +250,7 @@ const {
   getBoxFolderPath: () => box.value?.folderPath ?? "",
   getDoubleClickOpenItems: () => desktopStore.settings.doubleClickOpenItems,
   removeBoxItemOrderPaths,
+  removeBoxShellItems,
   refreshBoxFolderItems,
   replaceBoxItemOrderPath,
   resolveSelectedItems,
@@ -273,13 +281,21 @@ const {
   getDesktopPath: () => desktopStore.desktopPath,
   getSettings: () => desktopStore.settings,
   isFileRenaming: () => Boolean(editingPath.value),
+  appendBoxShellItems,
+  removeBoxShellItems,
   refreshBoxFolderItems,
   refreshCollapsedPreviewCloseSchedule,
   refreshDesktopSnapshot: () => desktopStore.refreshSnapshot(false),
+  resolveSortInsertionPreview: resolveBoxSortInsertionPreview,
   resolveSelectedItems,
   selectedPaths,
   setDragHoveringBox,
+  setSortInsertionPreview: (preview) => {
+    boxSortInsertionPreview.value = preview;
+  },
   setLastError,
+  placeIncomingItemsInCurrentBox: placeIncomingItemsAtSortPreview,
+  showSortInsertionPreview: showDraggedItemsSortPreview,
   sortItemsInSourceBox: sortDraggedItemsInCurrentBox,
 });
 consumeSuppressedItemClickHandler = consumeSuppressedItemClick;
@@ -341,33 +357,148 @@ function setLastError(message: string): void {
 }
 
 /**
+ * 排序插入候选项记录真实 DOM 位置，拖拽中图标禁用 pointer-events 时仍可按几何位置计算落点。
+ */
+interface BoxSortInsertionCandidate {
+  path: string;
+  rect: DOMRect;
+}
+
+/**
+ * 拖拽过程中的排序预览和最终排序共用同一套落点计算，保证视觉提示与落库顺序一致。
+ */
+function showDraggedItemsSortPreview(paths: string[], point: BoxScreenPoint): void {
+  boxSortInsertionPreview.value = resolveBoxSortInsertionPreview(paths, point);
+}
+
+/**
  * 来源 Box 内释放拖拽时只调整展示顺序，释放到其他 Box 或桌面仍由拖拽逻辑执行真实文件移动。
  */
 async function sortDraggedItemsInCurrentBox(
   paths: string[],
-  point: { inside: boolean; x: number; y: number },
+  point: BoxScreenPoint,
 ): Promise<void> {
+  const insertionPreview = resolveBoxSortInsertionPreview(paths, point);
+  if (!insertionPreview) {
+    return;
+  }
+
+  await moveBoxItemsInOrder(
+    paths,
+    insertionPreview.targetPath,
+    insertionPreview.placement,
+  );
+}
+
+/**
+ * 外部拖入和跨 Box 拖入都先完成真实文件/虚拟项写入，再按释放前锁定的插入预览保存展示顺序。
+ */
+async function placeIncomingItemsAtSortPreview(
+  paths: string[],
+  preview: BoxSortInsertionPreview | null,
+): Promise<void> {
+  if (!preview || paths.length === 0) {
+    return;
+  }
+
+  await moveBoxItemsInOrder(paths, preview.targetPath, preview.placement);
+}
+
+/**
+ * 网格排序落点按未拖动项的几何位置推断，避免拖动项本身或图标间隙导致提示跳动。
+ */
+function resolveBoxSortInsertionPreview(
+  paths: string[],
+  point: BoxScreenPoint,
+): BoxSortInsertionPreview | null {
   if (!point.inside || !boxGridRef.value) {
-    return;
+    return null;
   }
 
-  const targetElement = document.elementFromPoint(point.x, point.y);
-  const itemElement =
-    targetElement instanceof HTMLElement
-      ? targetElement.closest<HTMLElement>("[data-box-item-path]")
-      : null;
-  if (!itemElement || !boxGridRef.value.contains(itemElement)) {
-    await moveBoxItemsInOrder(paths, null, "end");
-    return;
+  const draggedPathSet = new Set(paths);
+  const candidates = Array.from(
+    boxGridRef.value.querySelectorAll<HTMLElement>("[data-box-item-path]"),
+  )
+    .map((element) => ({
+      path: element.dataset.boxItemPath ?? "",
+      rect: element.getBoundingClientRect(),
+    }))
+    .filter(
+      (candidate): candidate is BoxSortInsertionCandidate =>
+        Boolean(candidate.path) && !draggedPathSet.has(candidate.path),
+    );
+  if (candidates.length === 0) {
+    return null;
   }
 
-  const targetPath = itemElement.dataset.boxItemPath ?? null;
-  const itemRect = itemElement.getBoundingClientRect();
-  const placement =
-    point.y > itemRect.top + itemRect.height * 0.6 || point.x > itemRect.left + itemRect.width / 2
-      ? "after"
-      : "before";
-  await moveBoxItemsInOrder(paths, targetPath, placement);
+  return resolveInsertionPreviewInRow(
+    resolveInsertionCandidateRow(candidates, point.y),
+    point.x,
+  );
+}
+
+/**
+ * 按 CSS Grid 的视觉行挑选候选项，指针处在行间距中时归到更接近的上一行或下一行。
+ */
+function resolveInsertionCandidateRow(
+  candidates: BoxSortInsertionCandidate[],
+  pointerY: number,
+): BoxSortInsertionCandidate[] {
+  const sortedCandidates = [...candidates].sort(
+    (left, right) => left.rect.top - right.rect.top || left.rect.left - right.rect.left,
+  );
+  const rows: BoxSortInsertionCandidate[][] = [];
+  const firstCandidateHeight = sortedCandidates[0]?.rect.height ?? 0;
+  const rowMergeThreshold = Math.max(4, firstCandidateHeight * 0.25);
+
+  for (const candidate of sortedCandidates) {
+    const currentRow = rows[rows.length - 1];
+    if (currentRow && Math.abs(currentRow[0].rect.top - candidate.rect.top) <= rowMergeThreshold) {
+      currentRow.push(candidate);
+      continue;
+    }
+
+    rows.push([candidate]);
+  }
+
+  const rowGapTolerance = Math.max(8, desktopStore.settings.boxIconGapY / 2);
+  const targetRow =
+    rows.find((row) => pointerY <= resolveRowBottom(row) + rowGapTolerance) ??
+    rows[rows.length - 1];
+
+  return [...targetRow].sort((left, right) => left.rect.left - right.rect.left);
+}
+
+/**
+ * 同一行内以每个图标横向中线作为前后分界，确保插入线不会依赖颜色或 hover 才可辨认。
+ */
+function resolveInsertionPreviewInRow(
+  row: BoxSortInsertionCandidate[],
+  pointerX: number,
+): BoxSortInsertionPreview {
+  let lastCandidate = row[0];
+  for (const candidate of row) {
+    if (pointerX <= candidate.rect.left + candidate.rect.width / 2) {
+      return {
+        placement: "before",
+        targetPath: candidate.path,
+      };
+    }
+
+    lastCandidate = candidate;
+  }
+
+  return {
+    placement: "after",
+    targetPath: lastCandidate.path,
+  };
+}
+
+/**
+ * 行底部取该行最高图标的真实边界，兼容重命名输入框或标签展开导致的单项高度变化。
+ */
+function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
+  return Math.max(...row.map((candidate) => candidate.rect.bottom));
 }
 </script>
 
@@ -422,6 +553,7 @@ async function sortDraggedItemsInCurrentBox(
         :rename-draft="renameDraft"
         :selection-rect-style="selectionRectStyle"
         :set-grid-ref="setBoxGridRef"
+        :sort-insertion-preview="boxSortInsertionPreview"
         :settings="desktopStore.settings"
         @cancel-rename="cancelRename"
         @commit-rename="commitRename"

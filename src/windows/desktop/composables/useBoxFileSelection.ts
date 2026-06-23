@@ -4,6 +4,7 @@ import type { DesktopItem } from "@/entities/desktopItem/types";
 import { DESKTOP_ICON_VIEW } from "@/windows/desktop/config/desktopIcon";
 import {
   type GridPoint,
+  type GridRect,
   normalizeRect,
   rectsIntersect,
 } from "@/windows/desktop/model/selection";
@@ -59,17 +60,16 @@ export function useBoxFileSelection(
       return { display: "none" };
     }
 
-    const left = Math.min(selectionStart.value.x, selectionCurrent.value.x);
-    const top = Math.min(selectionStart.value.y, selectionCurrent.value.y);
-    const width = Math.abs(selectionCurrent.value.x - selectionStart.value.x);
-    const height = Math.abs(selectionCurrent.value.y - selectionStart.value.y);
+    const rect = clampSelectionRectToViewport(
+      normalizeRect(selectionStart.value, selectionCurrent.value),
+    );
 
     return {
-      display: width > 0 && height > 0 ? "block" : "none",
-      height: `${height}px`,
-      left: `${left}px`,
-      top: `${top}px`,
-      width: `${width}px`,
+      display: rect.width > 0 && rect.height > 0 ? "block" : "none",
+      height: `${rect.height}px`,
+      left: `${rect.left}px`,
+      top: `${rect.top}px`,
+      width: `${rect.width}px`,
     };
   });
 
@@ -232,6 +232,34 @@ export function useBoxFileSelection(
   }
 
   /**
+   * 框选视觉层位于滚动内容内部，必须裁到当前可见视口，避免拖到边缘时扩大 scrollWidth 或 scrollHeight。
+   */
+  function clampSelectionRectToViewport(rect: GridRect): GridRect {
+    const gridElement = options.boxGridRef.value;
+    if (!gridElement) {
+      return rect;
+    }
+
+    const viewportLeft = gridElement.scrollLeft;
+    const viewportTop = gridElement.scrollTop;
+    const viewportRight = viewportLeft + gridElement.clientWidth;
+    const viewportBottom = viewportTop + gridElement.clientHeight;
+    const rectRight = rect.left + rect.width;
+    const rectBottom = rect.top + rect.height;
+    const left = Math.max(rect.left, viewportLeft);
+    const top = Math.max(rect.top, viewportTop);
+    const right = Math.min(rectRight, viewportRight);
+    const bottom = Math.min(rectBottom, viewportBottom);
+
+    return {
+      height: Math.max(0, bottom - top),
+      left,
+      top,
+      width: Math.max(0, right - left),
+    };
+  }
+
+  /**
    * 使用 DOM 矩形做交集判断，避免根据网格列数推断位置时受字体和缩放影响。
    */
   function applySelectionRectangle(): void {
@@ -268,6 +296,10 @@ export function useBoxFileSelection(
    * 文件区键盘快捷键覆盖高频整理操作，标题编辑中会跳过避免误删或误改文件。
    */
   async function handleFileViewKeydown(event: KeyboardEvent): Promise<void> {
+    if (isEditableKeyboardTarget(event)) {
+      return;
+    }
+
     if (options.isEditingTitle()) {
       return;
     }
@@ -332,16 +364,29 @@ export function useBoxFileSelection(
    * 输入框和可编辑区域保留系统键盘行为，避免文件重命名或标题编辑时触发全局快捷键。
    */
   function shouldIgnoreGlobalFileShortcut(): boolean {
-    const activeElement = document.activeElement;
-    if (!activeElement) {
+    return isEditableElement(document.activeElement);
+  }
+
+  /**
+   * 网格自身的 keydown 也会收到输入框冒泡事件，必须在入口放行 Ctrl+A/C/V/X 等原生编辑快捷键。
+   */
+  function isEditableKeyboardTarget(event: KeyboardEvent): boolean {
+    return isEditableElement(event.target instanceof Element ? event.target : null);
+  }
+
+  /**
+   * 可编辑元素统一保留浏览器默认文本编辑语义，避免文件区和输入框争抢同一组快捷键。
+   */
+  function isEditableElement(element: Element | null): boolean {
+    if (!element) {
       return false;
     }
 
-    if (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement) {
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
       return true;
     }
 
-    return activeElement instanceof HTMLElement && activeElement.isContentEditable;
+    return element instanceof HTMLElement && element.isContentEditable;
   }
 
   /**

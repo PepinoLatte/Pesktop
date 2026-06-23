@@ -33,11 +33,20 @@ pub struct DesktopSnapshot {
 pub enum DesktopItemKind {
     File,
     Folder,
+    Shell,
     Shortcut,
     Unknown,
 }
 
-/// Box 文件项是真实文件夹的直接子项快照，`path` 是后续文件操作的唯一稳定主键。
+/// Box 文件项来源决定后续命令把 `path` 当作真实文件路径还是 Shell 虚拟项稳定键。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DesktopItemSource {
+    FileSystem,
+    Shell,
+}
+
+/// Box 文件项是真实文件或 Shell 虚拟项的展示快照，`path` 是前端列表和排序的稳定主键。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopItem {
@@ -47,4 +56,6 @@ pub struct DesktopItem {
     pub kind: DesktopItemKind,
     pub name: String,
     pub path: String,
+    pub shell_id: Option<String>,
+    pub source: DesktopItemSource,
 }

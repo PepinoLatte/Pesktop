@@ -69,7 +69,7 @@ onUnmounted(() => {
           @toggle-maximize="settingsWindow.toggleSettingsMaximize"
         />
 
-        <div class="dasktop-scrollarea min-h-0 flex-1 overflow-auto">
+        <div class="dasktop-scrollarea min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           <div
             v-if="settingsStartup.startupError.value"
             class="mx-8 mt-6 rounded-[12px] border border-[#f0c7c7] bg-[#fff6f6] px-4 py-3 text-[13px] text-[#9f1d1d] dark:border-[#5b2a2d] dark:bg-[#281619] dark:text-[#ffb4b4]"
@@ -77,57 +77,63 @@ onUnmounted(() => {
             Box 启动失败：{{ settingsStartup.startupError.value }}
           </div>
 
-          <BoxesPanel
-            v-if="activeSection === 'boxes'"
-            :boxes="desktopStore.boxes"
-            :collection-root-path="desktopStore.settings.collectionRootPath"
-            :migratable-box-count="settingsActions.migratableBoxCount.value"
-            :migration-busy="settingsActions.isMigratingCollectionRoot.value"
-            :panel-width="SETTINGS_PANEL_WIDTH.default"
-            @collection-root-choose="settingsActions.chooseCollectionRootFromSettings"
-            @collection-root-migrate="settingsActions.migrateCollectionRootFromSettings"
-            @collection-root-open="settingsActions.openCollectionRootFromSettings"
-            @create-box="settingsBoxes.createAndOpenBox"
-            @delete-box="settingsBoxes.deleteBoxFromSettings"
-            @open-box="settingsBoxes.openBoxWindow"
-            @open-folder="settingsBoxes.openBoxFolderFromSettings"
-            @refresh="desktopStore.refreshSnapshot"
-            @toggle-box-locked="settingsBoxes.toggleBoxLockedFromSettings"
-          />
-          <FilePanel
-            v-else-if="activeSection === 'file'"
-            :panel-width="SETTINGS_PANEL_WIDTH.default"
-            :settings="desktopStore.settings"
-            @box-boolean-setting-change="desktopStore.updateBooleanSetting"
-            @box-conflict-policy-change="desktopStore.updateBoxConflictPolicy"
-            @box-delete-policy-change="desktopStore.updateBoxDeletePolicy"
-            @box-drag-out-action-change="desktopStore.updateBoxDragOutAction"
-            @box-drop-action-change="desktopStore.updateBoxDropAction"
-            @name-display-mode-change="desktopStore.updateNameDisplayMode"
-          />
-          <WindowPanel
-            v-else-if="activeSection === 'window'"
-            :autostart-enabled="settingsActions.autostartEnabled.value"
-            :panel-width="SETTINGS_PANEL_WIDTH.default"
-            :settings="desktopStore.settings"
-            @autostart-enabled-change="settingsActions.updateAutostartEnabled"
-            @box-boolean-setting-change="desktopStore.updateBooleanSetting"
-            @snap-threshold-change="desktopStore.updateSnapThreshold"
-            @snap-to-edges-change="desktopStore.updateSnapToEdges"
-          />
-          <AppearancePanel
-            v-else-if="activeSection === 'appearance'"
-            :panel-width="SETTINGS_PANEL_WIDTH.default"
-            :settings="desktopStore.settings"
-            @box-theme-change="desktopStore.updateBoxTheme"
-            @box-visual-setting-change="desktopStore.updateNumberSetting"
-            @settings-theme-change="desktopStore.updateSettingsTheme"
-          />
-          <AboutPanel
-            v-else-if="activeSection === 'about'"
-            :desktop-path="desktopStore.desktopPath"
-            :panel-width="SETTINGS_PANEL_WIDTH.default"
-          />
+          <div class="settings-panel-stack min-h-full">
+            <Transition name="settings-panel">
+              <div :key="activeSection" class="settings-panel-transition min-h-full">
+                <BoxesPanel
+                  v-if="activeSection === 'boxes'"
+                  :boxes="desktopStore.boxes"
+                  :collection-root-path="desktopStore.settings.collectionRootPath"
+                  :migratable-box-count="settingsActions.migratableBoxCount.value"
+                  :migration-busy="settingsActions.isMigratingCollectionRoot.value"
+                  :panel-width="SETTINGS_PANEL_WIDTH.default"
+                  @collection-root-choose="settingsActions.chooseCollectionRootFromSettings"
+                  @collection-root-migrate="settingsActions.migrateCollectionRootFromSettings"
+                  @collection-root-open="settingsActions.openCollectionRootFromSettings"
+                  @create-box="settingsBoxes.createAndOpenBox"
+                  @delete-box="settingsBoxes.deleteBoxFromSettings"
+                  @open-box="settingsBoxes.openBoxWindow"
+                  @open-folder="settingsBoxes.openBoxFolderFromSettings"
+                  @refresh="desktopStore.refreshSnapshot"
+                  @toggle-box-locked="settingsBoxes.toggleBoxLockedFromSettings"
+                />
+                <FilePanel
+                  v-else-if="activeSection === 'file'"
+                  :panel-width="SETTINGS_PANEL_WIDTH.default"
+                  :settings="desktopStore.settings"
+                  @box-boolean-setting-change="desktopStore.updateBooleanSetting"
+                  @box-conflict-policy-change="desktopStore.updateBoxConflictPolicy"
+                  @box-delete-policy-change="desktopStore.updateBoxDeletePolicy"
+                  @box-drag-out-action-change="desktopStore.updateBoxDragOutAction"
+                  @box-drop-action-change="desktopStore.updateBoxDropAction"
+                  @name-display-mode-change="desktopStore.updateNameDisplayMode"
+                />
+                <WindowPanel
+                  v-else-if="activeSection === 'window'"
+                  :autostart-enabled="settingsActions.autostartEnabled.value"
+                  :panel-width="SETTINGS_PANEL_WIDTH.default"
+                  :settings="desktopStore.settings"
+                  @autostart-enabled-change="settingsActions.updateAutostartEnabled"
+                  @box-boolean-setting-change="desktopStore.updateBooleanSetting"
+                  @snap-threshold-change="desktopStore.updateSnapThreshold"
+                  @snap-to-edges-change="desktopStore.updateSnapToEdges"
+                />
+                <AppearancePanel
+                  v-else-if="activeSection === 'appearance'"
+                  :panel-width="SETTINGS_PANEL_WIDTH.default"
+                  :settings="desktopStore.settings"
+                  @box-theme-change="desktopStore.updateBoxTheme"
+                  @box-visual-setting-change="desktopStore.updateNumberSetting"
+                  @settings-theme-change="desktopStore.updateSettingsTheme"
+                />
+                <AboutPanel
+                  v-else-if="activeSection === 'about'"
+                  :desktop-path="desktopStore.desktopPath"
+                  :panel-width="SETTINGS_PANEL_WIDTH.default"
+                />
+              </div>
+            </Transition>
+          </div>
         </div>
       </section>
     </section>
@@ -142,5 +148,60 @@ onUnmounted(() => {
 .settings-window * {
   user-select: none;
   -webkit-user-select: none;
+}
+
+/**
+ * 内容区切换和左侧菜单选中背景共用 200ms 曲线，避免左右两侧节奏不同导致割裂感。
+ */
+.settings-panel-stack {
+  position: relative;
+  overflow-x: clip;
+}
+
+.settings-panel-transition {
+  min-width: 0;
+}
+
+/**
+ * 离场面板脱离文档流，避免新旧内容交叉淡入时把滚动区域临时撑高。
+ */
+.settings-panel-enter-active,
+.settings-panel-leave-active {
+  transition:
+    opacity 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings-panel-leave-active {
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.settings-panel-enter-from {
+  opacity: 0;
+  transform: translateX(4px);
+}
+
+.settings-panel-leave-to {
+  opacity: 0;
+  transform: translateX(-4px);
+}
+
+/**
+ * 尊重系统减少动态效果设置，保留即时切换，避免辅助功能用户看到额外位移。
+ */
+@media (prefers-reduced-motion: reduce) {
+  .settings-panel-enter-active,
+  .settings-panel-leave-active {
+    transition-duration: 1ms;
+  }
+
+  .settings-panel-enter-from,
+  .settings-panel-leave-to {
+    transform: none;
+  }
 }
 </style>

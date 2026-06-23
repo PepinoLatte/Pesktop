@@ -29,6 +29,7 @@ export const APP_SETTINGS_STORAGE = {
   tables: {
     appSettings: "app_settings",
     boxItemOrders: "box_item_orders",
+    boxVirtualItems: "box_virtual_items",
     boxes: "boxes",
   },
 } as const;

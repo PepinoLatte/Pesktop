@@ -20,3 +20,16 @@ export interface BoxScreenPoint {
   x: number;
   y: number;
 }
+
+/**
+ * Box 内排序落点只描述展示顺序，不参与真实文件移动，拖拽预览和最终落库必须共用同一语义。
+ */
+export type BoxSortInsertionPlacement = "after" | "before" | "end";
+
+/**
+ * 排序插入提示使用目标路径和相对位置表达，末尾插入允许没有目标路径。
+ */
+export interface BoxSortInsertionPreview {
+  placement: BoxSortInsertionPlacement;
+  targetPath: string | null;
+}

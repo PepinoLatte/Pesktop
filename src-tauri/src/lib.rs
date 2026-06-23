@@ -42,6 +42,7 @@ pub fn run() {
             commands::desktop_item::delete_desktop_items,
             commands::desktop_item::get_desktop_snapshot,
             commands::desktop_item::list_box_folder_items,
+            commands::desktop_item::list_shell_desktop_items,
             commands::desktop_item::open_desktop_item,
             commands::desktop_item::paste_desktop_items_from_clipboard,
             commands::desktop_item::rename_desktop_item,

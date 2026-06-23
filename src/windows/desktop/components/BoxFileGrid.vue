@@ -2,6 +2,10 @@
 import type { ComponentPublicInstance, CSSProperties } from "vue";
 import type { AppSettings } from "@/entities/appSettings/types";
 import type { DesktopItem } from "@/entities/desktopItem/types";
+import type {
+  BoxSortInsertionPlacement,
+  BoxSortInsertionPreview,
+} from "@/windows/desktop/model/fileDrag";
 import DesktopIcon from "@/windows/desktop/components/DesktopIcon.vue";
 
 /**
@@ -20,6 +24,7 @@ defineProps<{
   renameDraft: string;
   selectionRectStyle: CSSProperties;
   setGridRef: (element: Element | ComponentPublicInstance | null) => void;
+  sortInsertionPreview: BoxSortInsertionPreview | null;
   settings: AppSettings;
 }>();
 
@@ -34,6 +39,20 @@ defineEmits<{
   "item-pointer-down": [event: PointerEvent, item: DesktopItem];
   "rename-draft-change": [value: string];
 }>();
+
+/**
+ * 单个图标只关心插入线是否贴在自身左右侧，末尾语义由外层排序逻辑转换成最后一个目标图标。
+ */
+function resolveItemSortInsertionPlacement(
+  item: DesktopItem,
+  preview: BoxSortInsertionPreview | null,
+): Exclude<BoxSortInsertionPlacement, "end"> | null {
+  if (!preview || preview.targetPath !== item.path || preview.placement === "end") {
+    return null;
+  }
+
+  return preview.placement;
+}
 </script>
 
 <template>
@@ -67,6 +86,7 @@ defineEmits<{
       :selected="isItemSelected(item)"
       :show-label="settings.showItemLabels"
       :show-shortcut-arrow="settings.showShortcutArrow"
+      :sort-insertion-placement="resolveItemSortInsertionPlacement(item, sortInsertionPreview)"
       @commit-rename="$emit('commit-rename')"
       @cancel-rename="$emit('cancel-rename')"
       @item-click="$emit('item-click', $event, item)"

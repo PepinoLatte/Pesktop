@@ -110,7 +110,7 @@ export function useBoxContextMenuWindow(
   }
 
   /**
-   * 隐藏窗口里先渲染菜单并写入动画首帧，避免原生窗口 show 时闪出旧内容。
+   * 隐藏窗口里先渲染菜单并写入透明首帧，避免原生窗口 show 时闪出旧内容。
    */
   async function prepareMenuOpen(boxId: string, requestId: string): Promise<void> {
     activeOpenRequestId = requestId;
@@ -126,16 +126,15 @@ export function useBoxContextMenuWindow(
     }
 
     const menuElement = menuRef.value;
-    menuAnimation?.stop();
-    menuAnimation = null;
+    stopMenuAnimation();
     if (menuElement) {
-      applyMenuVisibleState(0, "translateY(-6px) scale(0.98)");
+      applyMenuOpacity(0);
     }
     await notifyBoxContextMenuPrepared(requestId, resolveMenuContentHeight(menuElement));
   }
 
   /**
-   * 菜单打开只播放 motion 进入动画，窗口创建和首帧准备已在 hidden 阶段完成。
+   * 菜单打开只做淡入动画，避免快速开关时位移和缩放被打断造成卡顿感。
    */
   async function openAnimated(boxId: string, requestId: string): Promise<void> {
     if (activeOpenRequestId !== requestId) {
@@ -155,22 +154,21 @@ export function useBoxContextMenuWindow(
 
     await notifyBoxContextMenuState({ boxId, isOpen: true });
     const menuElement = menuRef.value;
+    stopMenuAnimation();
     if (!menuElement || shouldReduceMotion()) {
-      applyMenuVisibleState(1, "translateY(0) scale(1)");
+      applyMenuOpacity(1);
       return;
     }
 
-    menuAnimation?.stop();
-    applyMenuVisibleState(0, "translateY(-6px) scale(0.98)");
+    menuElement.style.willChange = "opacity";
     menuAnimation = animate(
       menuElement,
       {
         opacity: 1,
-        transform: "translateY(0) scale(1)",
       },
       {
         duration: BOX_CONTEXT_MENU_LAYOUT.openAnimationMs / 1000,
-        ease: [0.2, 0.8, 0.2, 1],
+        ease: [0.22, 1, 0.36, 1],
       },
     );
 
@@ -181,12 +179,14 @@ export function useBoxContextMenuWindow(
     } finally {
       if (activeAnimationVersion === menuAnimationVersion) {
         menuAnimation = null;
+        applyMenuOpacity(1);
+        menuElement.style.willChange = "";
       }
     }
   }
 
   /**
-   * 菜单关闭先播放 motion 退出动画，再隐藏预载窗口，后续打开可以复用同一个 WebView。
+   * 菜单关闭只做短淡出，再隐藏预载窗口；没有位移可减少快速点击时的视觉冲突。
    */
   async function closeAnimated(requestedBoxId?: string): Promise<void> {
     const closingBoxId = activeBoxId.value;
@@ -211,17 +211,17 @@ export function useBoxContextMenuWindow(
     }
 
     const menuElement = menuRef.value;
-    menuAnimation?.stop();
+    stopMenuAnimation();
     if (!menuElement || shouldReduceMotion()) {
       await finishCloseAnimation(activeAnimationVersion);
       return;
     }
 
+    menuElement.style.willChange = "opacity";
     menuAnimation = animate(
       menuElement,
       {
         opacity: 0,
-        transform: "translateY(-4px) scale(0.98)",
       },
       {
         duration: BOX_CONTEXT_MENU_LAYOUT.closeAnimationMs / 1000,
@@ -232,7 +232,7 @@ export function useBoxContextMenuWindow(
     try {
       await menuAnimation.finished;
     } catch {
-      // 退出动画被新的打开动作打断时不再隐藏窗口，避免快速切换时闪烁。
+      // 退出动画被新的打开动作打断时不再隐藏窗口，版本号会拦住旧收尾。
     } finally {
       await finishCloseAnimation(activeAnimationVersion);
     }
@@ -246,23 +246,55 @@ export function useBoxContextMenuWindow(
       return;
     }
 
+    applyMenuOpacity(0);
+    if (menuRef.value) {
+      menuRef.value.style.willChange = "";
+    }
     menuAnimation = null;
+    activeOpenRequestId = "";
     activeBoxId.value = null;
     isMenuRendered.value = false;
     await currentWindow.hide();
   }
 
   /**
-   * 减少动态效果时直接写入终态，既保留可见性语义，也遵守系统辅助功能设置。
+   * 快速连续开关菜单时先停掉上一段动画，并清理历史 transform 动画，避免热更新或旧版本动画残留缩放。
    */
-  function applyMenuVisibleState(opacity: number, transform: string): void {
+  function stopMenuAnimation(): void {
+    menuAnimation?.stop();
+    menuAnimation = null;
+    const menuElement = menuRef.value;
+    if (!menuElement) {
+      return;
+    }
+
+    for (const animation of menuElement.getAnimations()) {
+      animation.cancel();
+    }
+    clearMenuTransform(menuElement);
+  }
+
+  /**
+   * 菜单当前只允许透明度变化；每次写终态都同步清空 transform，避免窗口 resize 被误看成菜单缩放。
+   */
+  function applyMenuOpacity(opacity: number): void {
     const menuElement = menuRef.value;
     if (!menuElement) {
       return;
     }
 
     menuElement.style.opacity = String(opacity);
-    menuElement.style.transform = transform;
+    clearMenuTransform(menuElement);
+  }
+
+  /**
+   * 历史版本曾经使用 scale/translate 动画，显式清理可防止 Web Animations 残留到复用窗口。
+   */
+  function clearMenuTransform(menuElement: HTMLElement): void {
+    menuElement.style.transform = "none";
+    menuElement.style.removeProperty("rotate");
+    menuElement.style.removeProperty("scale");
+    menuElement.style.removeProperty("translate");
   }
 
   /**

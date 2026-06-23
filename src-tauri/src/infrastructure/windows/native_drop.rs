@@ -2,6 +2,7 @@
 
 #[cfg(target_os = "windows")]
 mod windows_drop {
+    use crate::infrastructure::windows::shell_virtual_item;
     use serde::Serialize;
     use std::cell::{RefCell, UnsafeCell};
     use std::collections::HashMap;
@@ -13,14 +14,23 @@ mod windows_drop {
     use windows::core::{implement, Ref};
     use windows::Win32::Foundation::{HWND, LPARAM, POINT, POINTL};
     use windows::Win32::Graphics::Gdi::ScreenToClient;
-    use windows::Win32::System::Com::{IDataObject, DVASPECT_CONTENT, FORMATETC, TYMED_HGLOBAL};
+    use windows::Win32::System::Com::{
+        CoTaskMemFree, IDataObject, DVASPECT_CONTENT, FORMATETC, TYMED_HGLOBAL,
+    };
+    use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
+    use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
     use windows::Win32::System::Ole::{
         IDropTarget, IDropTarget_Impl, OleInitialize, RegisterDragDrop, ReleaseStgMedium,
         RevokeDragDrop, CF_HDROP, DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE,
         DROPEFFECT_NONE,
     };
     use windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS;
-    use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
+    use windows::Win32::UI::Shell::Common::ITEMIDLIST;
+    use windows::Win32::UI::Shell::{
+        DragQueryFileW, ILCombine, ILFree, IShellItemArray, SHCreateShellItemArrayFromDataObject,
+        SHGetNameFromIDList, CFSTR_SHELLIDLIST, HDROP, SIGDN_DESKTOPABSOLUTEPARSING,
+        SIGDN_FILESYSPATH,
+    };
     use windows::Win32::UI::WindowsAndMessaging::EnumChildWindows;
 
     const DRAG_ENTER_EVENT: &str = "tauri://drag-enter";
@@ -41,6 +51,15 @@ mod windows_drop {
         #[serde(skip_serializing_if = "Option::is_none")]
         paths: Option<Vec<String>>,
         position: NativeDropPosition,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        shell_items: Option<Vec<NativeShellDropItem>>,
+    }
+
+    /// Shell 虚拟拖放项只暴露 Dasktop 支持的稳定 ID，避免前端保存系统 PIDL 细节。
+    #[derive(Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct NativeShellDropItem {
+        shell_id: String,
     }
 
     /// Tauri 前端会把 position 包成 PhysicalPosition，因此这里保留 x/y 数值结构。
@@ -150,13 +169,15 @@ mod windows_drop {
     }
 
     impl NativeDropEmitter {
-        fn emit_enter(&self, paths: Vec<String>, position: POINT) {
+        fn emit_enter(&self, payload: NativeDropItems, position: POINT) {
+            let paths = resolve_payload_paths(&payload);
             let _ = self.app.emit_to(
                 EventTarget::labeled(&self.window_label),
                 DRAG_ENTER_EVENT,
                 NativeDragPayload {
-                    paths: Some(paths),
+                    paths: optional_non_empty(paths),
                     position: NativeDropPosition::from_point(position),
+                    shell_items: optional_non_empty_shell_items(payload.shell_items),
                 },
             );
         }
@@ -168,17 +189,20 @@ mod windows_drop {
                 NativeDragPayload {
                     paths: None,
                     position: NativeDropPosition::from_point(position),
+                    shell_items: None,
                 },
             );
         }
 
-        fn emit_drop(&self, paths: Vec<String>, position: POINT) {
+        fn emit_drop(&self, payload: NativeDropItems, position: POINT) {
+            let paths = resolve_payload_paths(&payload);
             let _ = self.app.emit_to(
                 EventTarget::labeled(&self.window_label),
                 DRAG_DROP_EVENT,
                 NativeDragPayload {
-                    paths: Some(paths),
+                    paths: optional_non_empty(paths),
                     position: NativeDropPosition::from_point(position),
+                    shell_items: optional_non_empty_shell_items(payload.shell_items),
                 },
             );
         }
@@ -189,6 +213,19 @@ mod windows_drop {
                 DRAG_LEAVE_EVENT,
                 (),
             );
+        }
+    }
+
+    /// 原生拖放解析结果同时承载真实文件路径和受支持的 Shell 虚拟桌面项。
+    #[derive(Default)]
+    struct NativeDropItems {
+        paths: Vec<String>,
+        shell_items: Vec<NativeShellDropItem>,
+    }
+
+    impl NativeDropItems {
+        fn is_empty(&self) -> bool {
+            self.paths.is_empty() && self.shell_items.is_empty()
         }
     }
 
@@ -237,8 +274,8 @@ mod windows_drop {
                 }
                 return Ok(());
             };
-            let paths = resolve_hdrop_paths(data_obj);
-            if paths.is_none() && !supports_hdrop_data(data_obj) {
+            let drop_items = resolve_native_drop_items(data_obj);
+            if drop_items.is_none() && !supports_supported_drop_data(data_obj) {
                 unsafe {
                     *self.enter_is_valid.get() = false;
                     *self.cursor_effect.get() = DROPEFFECT_NONE;
@@ -248,7 +285,8 @@ mod windows_drop {
             }
 
             let position = client_point_from_screen(self.hwnd, pt);
-            self.emitter.emit_enter(paths.unwrap_or_default(), position);
+            self.emitter
+                .emit_enter(drop_items.unwrap_or_default(), position);
             let cursor_effect = unsafe { resolve_accepted_drop_effect(*pdwEffect) };
             unsafe {
                 *self.enter_is_valid.get() = true;
@@ -297,13 +335,15 @@ mod windows_drop {
         ) -> windows::core::Result<()> {
             if unsafe { *self.enter_is_valid.get() } {
                 if let Some(data_obj) = pDataObj.as_ref() {
-                    if let Some(paths) = resolve_hdrop_paths(data_obj) {
+                    if let Some(drop_items) = resolve_native_drop_items(data_obj) {
                         self.emitter
-                            .emit_drop(paths, client_point_from_screen(self.hwnd, pt));
+                            .emit_drop(drop_items, client_point_from_screen(self.hwnd, pt));
                     }
                 } else {
-                    self.emitter
-                        .emit_drop(Vec::new(), client_point_from_screen(self.hwnd, pt));
+                    self.emitter.emit_drop(
+                        NativeDropItems::default(),
+                        client_point_from_screen(self.hwnd, pt),
+                    );
                 }
             }
 
@@ -345,6 +385,52 @@ mod windows_drop {
         unsafe { data_obj.QueryGetData(&format).is_ok() }
     }
 
+    /// DropTarget 只接收真实路径或已知 Shell 虚拟项，避免不支持的数据源显示可投放光标。
+    fn supports_supported_drop_data(data_obj: &IDataObject) -> bool {
+        supports_hdrop_data(data_obj)
+            || supports_shell_idlist_data(data_obj)
+            || resolve_shell_drop_items(data_obj).is_some()
+    }
+
+    /// DragEnter 阶段部分 Explorer 数据源只承诺格式可用，真正内容到 Drop 阶段才稳定返回。
+    fn supports_shell_idlist_data(data_obj: &IDataObject) -> bool {
+        let Some(clipboard_format) = shell_idlist_clipboard_format() else {
+            return false;
+        };
+        let format = FORMATETC {
+            cfFormat: clipboard_format,
+            ptd: ptr::null_mut(),
+            dwAspect: DVASPECT_CONTENT.0,
+            lindex: -1,
+            tymed: TYMED_HGLOBAL.0 as u32,
+        };
+
+        unsafe { data_obj.QueryGetData(&format).is_ok() }
+    }
+
+    fn resolve_native_drop_items(data_obj: &IDataObject) -> Option<NativeDropItems> {
+        let mut shell_items = resolve_shell_drop_items(data_obj).unwrap_or_default();
+        for shell_item in resolve_shell_idlist_drop_items(data_obj).unwrap_or_default() {
+            push_unique_shell_drop_item(&mut shell_items, &shell_item.shell_id);
+        }
+        let paths = resolve_hdrop_paths(data_obj)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|path| {
+                if let Some(shell_id) = shell_virtual_item::resolve_shell_id_from_parsing_name(path)
+                {
+                    push_unique_shell_drop_item(&mut shell_items, shell_id);
+                    return false;
+                }
+
+                true
+            })
+            .collect();
+        let drop_items = NativeDropItems { paths, shell_items };
+
+        (!drop_items.is_empty()).then_some(drop_items)
+    }
+
     fn resolve_hdrop_paths(data_obj: &IDataObject) -> Option<Vec<String>> {
         let format = FORMATETC {
             cfFormat: CF_HDROP.0,
@@ -384,6 +470,182 @@ mod windows_drop {
         } else {
             Some(paths)
         }
+    }
+
+    /// Windows 自带桌面图标通常没有 CF_HDROP，需从 Shell Item Array 中读取解析名再匹配白名单。
+    fn resolve_shell_drop_items(data_obj: &IDataObject) -> Option<Vec<NativeShellDropItem>> {
+        let item_array: IShellItemArray =
+            unsafe { SHCreateShellItemArrayFromDataObject(data_obj).ok()? };
+        let item_count = unsafe { item_array.GetCount().ok()? };
+        let mut shell_items = Vec::new();
+
+        for index in 0..item_count {
+            let Ok(shell_item) = (unsafe { item_array.GetItemAt(index) }) else {
+                continue;
+            };
+            let parsing_names = [
+                unsafe { shell_item_display_name(&shell_item, SIGDN_DESKTOPABSOLUTEPARSING) },
+                unsafe { shell_item_display_name(&shell_item, SIGDN_FILESYSPATH) },
+            ];
+            let Some(shell_id) = parsing_names.iter().flatten().find_map(|parsing_name| {
+                shell_virtual_item::resolve_shell_id_from_parsing_name(parsing_name)
+            }) else {
+                continue;
+            };
+
+            push_unique_shell_drop_item(&mut shell_items, shell_id);
+        }
+
+        (!shell_items.is_empty()).then_some(shell_items)
+    }
+
+    /// Explorer 桌面系统图标常使用 `Shell IDList Array`，需要手动解析 CIDA 中的父 PIDL 和子 PIDL。
+    fn resolve_shell_idlist_drop_items(data_obj: &IDataObject) -> Option<Vec<NativeShellDropItem>> {
+        let clipboard_format = shell_idlist_clipboard_format()?;
+
+        let format = FORMATETC {
+            cfFormat: clipboard_format,
+            ptd: ptr::null_mut(),
+            dwAspect: DVASPECT_CONTENT.0,
+            lindex: -1,
+            tymed: TYMED_HGLOBAL.0 as u32,
+        };
+        let mut medium = unsafe { data_obj.GetData(&format).ok()? };
+        let hglobal = unsafe { medium.u.hGlobal };
+        let locked = unsafe { GlobalLock(hglobal) };
+        if locked.is_null() {
+            unsafe {
+                ReleaseStgMedium(&mut medium);
+            }
+            return None;
+        }
+
+        let size = unsafe { GlobalSize(hglobal) };
+        let shell_items = unsafe { resolve_shell_idlist_items_from_memory(locked.cast(), size) };
+        let _ = unsafe { GlobalUnlock(hglobal) };
+        unsafe {
+            ReleaseStgMedium(&mut medium);
+        }
+
+        shell_items
+    }
+
+    /// `CFSTR_SHELLIDLIST` 是注册剪贴板格式，集中转换成 `FORMATETC` 需要的 16 位编号。
+    fn shell_idlist_clipboard_format() -> Option<u16> {
+        let clipboard_format = unsafe { RegisterClipboardFormatW(CFSTR_SHELLIDLIST) };
+        if clipboard_format == 0 || clipboard_format > u16::MAX as u32 {
+            return None;
+        }
+
+        Some(clipboard_format as u16)
+    }
+
+    /// CIDA 内存布局为 cidl + (cidl + 1) 个 u32 偏移，第 0 个 PIDL 是父目录，后续是子项。
+    unsafe fn resolve_shell_idlist_items_from_memory(
+        base: *const u8,
+        size: usize,
+    ) -> Option<Vec<NativeShellDropItem>> {
+        let minimum_header_size = std::mem::size_of::<u32>() * 2;
+        if size < minimum_header_size {
+            return None;
+        }
+
+        let item_count = std::ptr::read_unaligned(base.cast::<u32>()) as usize;
+        let offset_count = item_count.checked_add(1)?;
+        let header_size = std::mem::size_of::<u32>().checked_add(offset_count.checked_mul(4)?)?;
+        if item_count == 0 || header_size > size {
+            return None;
+        }
+
+        let mut offsets = Vec::with_capacity(offset_count);
+        for index in 0..offset_count {
+            let offset_pointer = base.add(std::mem::size_of::<u32>() + index * 4);
+            let offset = std::ptr::read_unaligned(offset_pointer.cast::<u32>()) as usize;
+            if offset >= size {
+                return None;
+            }
+            offsets.push(offset);
+        }
+
+        let parent_pidl = base.add(offsets[0]).cast::<ITEMIDLIST>();
+        let mut shell_items = Vec::new();
+        for child_offset in offsets.iter().skip(1) {
+            let child_pidl = base.add(*child_offset).cast::<ITEMIDLIST>();
+            let absolute_pidl = ILCombine(Some(parent_pidl), Some(child_pidl));
+            if absolute_pidl.is_null() {
+                continue;
+            }
+
+            if let Some(parsing_name) = pidl_display_name(absolute_pidl) {
+                if let Some(shell_id) =
+                    shell_virtual_item::resolve_shell_id_from_parsing_name(&parsing_name)
+                {
+                    push_unique_shell_drop_item(&mut shell_items, shell_id);
+                }
+            }
+            ILFree(Some(absolute_pidl));
+        }
+
+        (!shell_items.is_empty()).then_some(shell_items)
+    }
+
+    /// PIDL 名称由 Shell 分配，需要释放 PWSTR，避免拖放系统图标时泄漏内存。
+    unsafe fn pidl_display_name(pidl: *const ITEMIDLIST) -> Option<String> {
+        let display_name = SHGetNameFromIDList(pidl, SIGDN_DESKTOPABSOLUTEPARSING).ok()?;
+        let value = display_name.to_string().ok();
+        CoTaskMemFree(Some(display_name.0 as *const _));
+
+        value
+    }
+
+    /// 一个拖放数据对象可能同时提供 Shell Item 和 HDROP，按 shell_id 去重避免前端重复保存。
+    fn push_unique_shell_drop_item(shell_items: &mut Vec<NativeShellDropItem>, shell_id: &str) {
+        if shell_items
+            .iter()
+            .any(|item: &NativeShellDropItem| item.shell_id == shell_id)
+        {
+            return;
+        }
+
+        shell_items.push(NativeShellDropItem {
+            shell_id: shell_id.to_string(),
+        });
+    }
+
+    /// Shell 分配的 PWSTR 由调用方释放，避免持续拖放系统图标时泄漏 COM 内存。
+    unsafe fn shell_item_display_name(
+        shell_item: &windows::Win32::UI::Shell::IShellItem,
+        sigdn: windows::Win32::UI::Shell::SIGDN,
+    ) -> Option<String> {
+        let display_name = shell_item.GetDisplayName(sigdn).ok()?;
+        let value = display_name.to_string().ok();
+        CoTaskMemFree(Some(display_name.0 as *const _));
+
+        value
+    }
+
+    fn optional_non_empty(values: Vec<String>) -> Option<Vec<String>> {
+        (!values.is_empty()).then_some(values)
+    }
+
+    /// Tauri 前端 `onDragDropEvent` 会规整 payload 并丢弃未知字段，因此 Shell 项也必须写入标准 paths。
+    fn resolve_payload_paths(payload: &NativeDropItems) -> Vec<String> {
+        let mut paths = payload.paths.clone();
+        for shell_item in &payload.shell_items {
+            paths.push(format!(
+                "{}{}",
+                shell_virtual_item::SHELL_ITEM_PATH_PREFIX,
+                shell_item.shell_id
+            ));
+        }
+
+        paths
+    }
+
+    fn optional_non_empty_shell_items(
+        values: Vec<NativeShellDropItem>,
+    ) -> Option<Vec<NativeShellDropItem>> {
+        (!values.is_empty()).then_some(values)
     }
 
     fn enumerate_child_windows(parent: HWND, child_windows: &mut Vec<HWND>) {

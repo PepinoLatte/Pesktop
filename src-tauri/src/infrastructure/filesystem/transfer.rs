@@ -49,12 +49,13 @@ pub(crate) fn normalize_existing_paths(paths: &[String]) -> Result<Vec<PathBuf>,
 }
 
 /// 普通拖拽传输统一绕开 Shell 文件操作，避免冲突框和权限提升框被 Box 窗口遮挡。
+/// 返回实际完成的目标路径，供前端按释放位置写入手动排序；冲突跳过的项目不会出现在结果中。
 pub(crate) fn transfer_paths_without_shell_prompts(
     paths: &[PathBuf],
     destination: &Path,
     action: BoxDropAction,
     conflict_policy: BoxConflictPolicy,
-) -> Result<(), String> {
+) -> Result<Vec<PathBuf>, String> {
     let plans = create_transfer_plans(paths, destination, action, conflict_policy)?;
     execute_transfer_plans(&plans)
 }
@@ -191,7 +192,7 @@ fn resolve_conflict_destination(
     }
 }
 
-fn execute_transfer_plans(plans: &[FileTransferPlan]) -> Result<(), String> {
+fn execute_transfer_plans(plans: &[FileTransferPlan]) -> Result<Vec<PathBuf>, String> {
     let mut completed_transfers = Vec::new();
 
     for plan in plans {
@@ -219,7 +220,12 @@ fn execute_transfer_plans(plans: &[FileTransferPlan]) -> Result<(), String> {
         });
     }
 
-    cleanup_replace_backups(&completed_transfers)
+    cleanup_replace_backups(&completed_transfers)?;
+
+    Ok(completed_transfers
+        .iter()
+        .map(|transfer| transfer.destination.clone())
+        .collect())
 }
 
 fn execute_single_transfer(plan: &FileTransferPlan) -> Result<(), String> {

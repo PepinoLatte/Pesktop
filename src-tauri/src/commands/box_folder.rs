@@ -65,7 +65,7 @@ pub fn handle_box_dropped_paths(
     paths: Vec<String>,
     action: String,
     conflict_policy: String,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     #[cfg(target_os = "windows")]
     let owner = window
         .hwnd()

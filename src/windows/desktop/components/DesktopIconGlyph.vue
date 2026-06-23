@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { CSSProperties } from "vue";
-import { File, FileText, Folder, Link } from "@lucide/vue";
+import { File, FileText, Folder, Link, Monitor } from "@lucide/vue";
 import type { DesktopItem } from "@/entities/desktopItem/types";
 import { DESKTOP_ICON_VIEW } from "../config/desktopIcon";
 
@@ -99,6 +99,7 @@ function scaleShortcutBadgeValue(value: number): number {
       :style="iconImageStyle"
     />
     <Folder v-else-if="item.kind === 'folder'" :size="resolvedFallbackIconSize" />
+    <Monitor v-else-if="item.kind === 'shell'" :size="resolvedFallbackIconSize" />
     <Link v-else-if="item.kind === 'shortcut'" :size="resolvedFallbackIconSize" />
     <FileText v-else-if="item.extension" :size="resolvedFallbackIconSize" />
     <File v-else :size="resolvedFallbackIconSize" />

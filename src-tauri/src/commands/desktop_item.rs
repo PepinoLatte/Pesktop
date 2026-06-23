@@ -14,6 +14,12 @@ pub fn list_box_folder_items(folder_path: String) -> Result<Vec<DesktopItem>, St
     desktop_item::list_box_folder_items(&folder_path)
 }
 
+/// 根据 Box 保存的 Shell 虚拟项 ID 生成展示模型，供系统桌面图标进入文件网格。
+#[tauri::command]
+pub fn list_shell_desktop_items(shell_ids: Vec<String>) -> Result<Vec<DesktopItem>, String> {
+    desktop_item::list_shell_desktop_items(&shell_ids)
+}
+
 /// 使用系统默认程序打开 Box 文件项，保持与 Explorer 双击一致。
 #[tauri::command]
 pub fn open_desktop_item(path: String) -> Result<(), String> {

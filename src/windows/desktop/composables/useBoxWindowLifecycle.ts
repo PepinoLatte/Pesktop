@@ -39,6 +39,8 @@ interface BoxWindowLifecycleOptions {
   handleGlobalFileViewKeydown: (event: KeyboardEvent) => void;
   handleNativeDragDropEvent: (payload: {
     paths?: string[];
+    position?: NativeDropPosition;
+    shellItems?: NativeShellDropItem[];
     type: "enter" | "over" | "drop" | "leave";
   }) => Promise<void>;
   handleWindowMoved: (x: number, y: number) => Promise<void>;
@@ -55,6 +57,21 @@ interface BoxWindowLifecycleOptions {
   stopSelectionRectangle: () => void;
   syncNativeWindowResizable: () => void;
   syncWindowBoundsFromStore: () => Promise<void>;
+}
+
+/**
+ * 原生 DropTarget 会把受支持的 Windows Shell 虚拟项转成稳定 ID，生命周期层只负责透传。
+ */
+interface NativeShellDropItem {
+  shellId: string;
+}
+
+/**
+ * Tauri 原生拖放位置是当前窗口内的物理坐标，拖拽层会结合 DPI 转成 CSS 坐标。
+ */
+interface NativeDropPosition {
+  x: number;
+  y: number;
 }
 
 /**
@@ -177,10 +194,14 @@ export function useBoxWindowLifecycle(options: BoxWindowLifecycleOptions): void 
    */
   function normalizeDragDropPayload(payload: DragDropEvent): {
     paths?: string[];
+    position?: NativeDropPosition;
+    shellItems?: NativeShellDropItem[];
     type: "enter" | "over" | "drop" | "leave";
   } {
     return payload as {
       paths?: string[];
+      position?: NativeDropPosition;
+      shellItems?: NativeShellDropItem[];
       type: "enter" | "over" | "drop" | "leave";
     };
   }

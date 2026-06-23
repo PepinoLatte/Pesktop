@@ -114,7 +114,7 @@ pub(crate) fn handle_box_dropped_paths(
     paths: &[String],
     action: BoxDropAction,
     conflict_policy: BoxConflictPolicy,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let folder = PathBuf::from(folder_path);
     if !folder.is_dir() {
         return Err("Box 文件夹不存在，无法处理拖入文件".to_string());
@@ -125,7 +125,14 @@ pub(crate) fn handle_box_dropped_paths(
         return Err("未读取到可处理的拖入文件".to_string());
     }
 
-    transfer::transfer_paths_without_shell_prompts(&sources, &folder, action, conflict_policy)
+    transfer::transfer_paths_without_shell_prompts(&sources, &folder, action, conflict_policy).map(
+        |destinations| {
+            destinations
+                .iter()
+                .map(|destination| destination.to_string_lossy().to_string())
+                .collect()
+        },
+    )
 }
 
 /// 按当前拖出策略处理 Box 内文件到桌面目录；桌面目录缺失时先创建以保持 Shell 语义稳定。
@@ -153,6 +160,7 @@ pub(crate) fn handle_box_dragged_paths_to_desktop(
     }
 
     transfer::transfer_paths_without_shell_prompts(&sources, &desktop, action, conflict_policy)
+        .map(|_| ())
 }
 
 fn ensure_collection_root(root_path: &str) -> Result<PathBuf, String> {
@@ -190,7 +198,8 @@ fn move_folder_contents_to_desktop(
             &desktop,
             BoxDropAction::Move,
             conflict_policy,
-        )?;
+        )
+        .map(|_| ())?;
     }
 
     match fs::remove_dir(folder) {
