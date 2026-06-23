@@ -35,6 +35,25 @@ export function listShellDesktopItems(shellIds: string[]): Promise<DesktopItem[]
 }
 
 /**
+ * 读取 Windows 原生桌面上指定系统图标是否显示，供自动隐藏前记录用户原始状态。
+ */
+export function getShellDesktopIconVisible(shellId: string): Promise<boolean> {
+  return invoke<boolean>("get_shell_desktop_icon_visible", {
+    shellId,
+  });
+}
+
+/**
+ * 设置 Windows 原生桌面上的系统图标显示状态，Box 内虚拟项引用不受影响。
+ */
+export function setShellDesktopIconVisible(shellId: string, visible: boolean): Promise<void> {
+  return invoke("set_shell_desktop_icon_visible", {
+    shellId,
+    visible,
+  });
+}
+
+/**
  * 使用系统默认程序打开文件项，保持文件、文件夹和快捷方式与 Explorer 一致。
  */
 export function openDesktopItem(path: string): Promise<void> {

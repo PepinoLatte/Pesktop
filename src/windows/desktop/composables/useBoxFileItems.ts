@@ -11,6 +11,7 @@ import {
 import { listBoxFolderItems, listShellDesktopItems } from "@/entities/desktopItem/api";
 import type { DesktopItem } from "@/entities/desktopItem/types";
 import type { DesktopBox } from "@/entities/desktopBox/types";
+import { syncShellDesktopIconVisibility } from "@/entities/desktopItem/shellDesktopIconVisibilitySync";
 
 /**
  * 文件视图轮询配置只影响当前 Box WebView，外部 Explorer 改动会在下一轮扫描中同步。
@@ -24,6 +25,7 @@ const BOX_FILE_VIEW = {
  */
 interface BoxFileItemsOptions {
   box: ComputedRef<DesktopBox | undefined>;
+  getAutoHideNativeShellIcons: () => boolean;
   setLastError: (message: string) => void;
 }
 
@@ -190,6 +192,7 @@ export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState
 
     await appendBoxVirtualItemIds(currentBox.id, shellIds);
     virtualShellIds = await loadBoxVirtualItemIds(currentBox.id);
+    await syncShellIconVisibilityAfterReferenceChange();
   }
 
   /**
@@ -232,6 +235,20 @@ export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState
     await removeBoxVirtualItemIds(currentBox.id, shellIds);
     virtualShellIds = await loadBoxVirtualItemIds(currentBox.id);
     await removeBoxItemOrderPaths(shellIds.map((shellId) => `shell::${shellId}`));
+    await syncShellIconVisibilityAfterReferenceChange();
+  }
+
+  /**
+   * 系统图标显示同步失败不回滚 Box 引用，避免注册表权限或 Explorer 刷新异常破坏收纳结果。
+   */
+  async function syncShellIconVisibilityAfterReferenceChange(): Promise<void> {
+    try {
+      await syncShellDesktopIconVisibility({
+        autoHideEnabled: options.getAutoHideNativeShellIcons(),
+      });
+    } catch (error) {
+      options.setLastError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   /**

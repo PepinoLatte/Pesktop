@@ -31,6 +31,7 @@ export const APP_SETTINGS_STORAGE = {
     boxItemOrders: "box_item_orders",
     boxVirtualItems: "box_virtual_items",
     boxes: "boxes",
+    shellIconVisibilityRecords: "shell_icon_visibility_records",
   },
 } as const;
 
@@ -56,6 +57,7 @@ export const APP_SETTING_KEYS = {
   doubleClickOpenItems: "doubleClickOpenItems",
   nameDisplayMode: "nameDisplayMode",
   settingsTheme: "settingsTheme",
+  autoHideNativeShellIcons: "autoHideNativeShellIcons",
   showItemLabels: "showItemLabels",
   showShortcutArrow: "showShortcutArrow",
   snapThreshold: "snapThreshold",
@@ -75,6 +77,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   boxConflictPolicy: "rename",
   showItemLabels: true,
   showShortcutArrow: true,
+  autoHideNativeShellIcons: true,
   doubleClickOpenItems: true,
   nameDisplayMode: "hideShortcutExtension",
   snapToEdges: true,

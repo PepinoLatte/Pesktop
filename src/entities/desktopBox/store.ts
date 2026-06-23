@@ -1,6 +1,7 @@
 import { ref } from "vue";
 import { defineStore } from "pinia";
 import { getDesktopSnapshot } from "@/entities/desktopItem/api";
+import { syncShellDesktopIconVisibility } from "@/entities/desktopItem/shellDesktopIconVisibilitySync";
 import {
   chooseCollectionRootFolder,
   createBoxFolder,
@@ -116,6 +117,7 @@ export const useDesktopStore = defineStore("desktop", () => {
       applyCurrentWindowTheme();
       boxes.value = savedBoxes.map((box) => sanitizeBoxSize(box));
       await Promise.all(boxes.value.map((box) => saveBox(box)));
+      await syncShellDesktopIconVisibilityForCurrentSettings();
       isInitialized.value = true;
     } catch (error) {
       lastError.value = error instanceof Error ? error.message : String(error);
@@ -334,6 +336,7 @@ export const useDesktopStore = defineStore("desktop", () => {
     );
     boxes.value = boxes.value.filter((box) => box.id !== boxId);
     await deleteBoxRecord(boxId);
+    await syncShellDesktopIconVisibilityForCurrentSettings();
     await broadcastStateChanged("boxes");
   }
 
@@ -552,7 +555,24 @@ export const useDesktopStore = defineStore("desktop", () => {
       [key]: Boolean(value),
     };
     await saveSetting(APP_SETTING_KEYS[key], settings.value[key]);
+    if (key === APP_SETTING_KEYS.autoHideNativeShellIcons) {
+      await syncShellDesktopIconVisibilityForCurrentSettings();
+    }
     await broadcastStateChanged("settings");
+  }
+
+  /**
+   * 系统桌面图标同步失败只写入错误提示，避免启动或设置切换时中断 Box 状态加载。
+   */
+  async function syncShellDesktopIconVisibilityForCurrentSettings(): Promise<void> {
+    try {
+      await syncShellDesktopIconVisibility({
+        autoHideEnabled: settings.value.autoHideNativeShellIcons,
+        forceRestoreManagedIcons: !settings.value.autoHideNativeShellIcons,
+      });
+    } catch (error) {
+      lastError.value = error instanceof Error ? error.message : String(error);
+    }
   }
 
   /**

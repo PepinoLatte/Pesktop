@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 import type { ComponentPublicInstance, CSSProperties } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import BoxFileGrid from "@/windows/desktop/components/BoxFileGrid.vue";
@@ -146,6 +146,40 @@ const boxGridStyle = computed(
     }) as CSSProperties,
 );
 const boxSortInsertionPreview = ref<BoxSortInsertionPreview | null>(null);
+let sortInsertionPreviewExpireTimer: ReturnType<typeof window.setTimeout> | null = null;
+const SORT_INSERTION_PREVIEW_STALE_MS = 200;
+
+/**
+ * 排序插入线是拖拽 over 的瞬时命中结果；null 只表示不续期，真正消失统一交给心跳过期。
+ */
+function setBoxSortInsertionPreview(preview: BoxSortInsertionPreview | null): void {
+  if (!preview) {
+    return;
+  }
+
+  clearSortInsertionPreviewExpireTimer();
+  boxSortInsertionPreview.value = preview;
+  sortInsertionPreviewExpireTimer = window.setTimeout(() => {
+    sortInsertionPreviewExpireTimer = null;
+    boxSortInsertionPreview.value = null;
+  }, SORT_INSERTION_PREVIEW_STALE_MS);
+}
+
+/**
+ * 组件销毁时取消延迟任务，防止旧窗口的异步计时器写回新状态。
+ */
+function clearSortInsertionPreviewExpireTimer(): void {
+  if (!sortInsertionPreviewExpireTimer) {
+    return;
+  }
+
+  window.clearTimeout(sortInsertionPreviewExpireTimer);
+  sortInsertionPreviewExpireTimer = null;
+}
+
+onUnmounted(() => {
+  clearSortInsertionPreviewExpireTimer();
+});
 
 const {
   closeContextMenu,
@@ -191,6 +225,7 @@ const {
   stopFolderRefreshPolling,
 } = useBoxFileItems({
   box,
+  getAutoHideNativeShellIcons: () => desktopStore.settings.autoHideNativeShellIcons,
   setLastError,
 });
 
@@ -290,9 +325,7 @@ const {
   resolveSelectedItems,
   selectedPaths,
   setDragHoveringBox,
-  setSortInsertionPreview: (preview) => {
-    boxSortInsertionPreview.value = preview;
-  },
+  setSortInsertionPreview: setBoxSortInsertionPreview,
   setLastError,
   placeIncomingItemsInCurrentBox: placeIncomingItemsAtSortPreview,
   showSortInsertionPreview: showDraggedItemsSortPreview,
@@ -368,7 +401,7 @@ interface BoxSortInsertionCandidate {
  * 拖拽过程中的排序预览和最终排序共用同一套落点计算，保证视觉提示与落库顺序一致。
  */
 function showDraggedItemsSortPreview(paths: string[], point: BoxScreenPoint): void {
-  boxSortInsertionPreview.value = resolveBoxSortInsertionPreview(paths, point);
+  setBoxSortInsertionPreview(resolveBoxSortInsertionPreview(paths, point));
 }
 
 /**

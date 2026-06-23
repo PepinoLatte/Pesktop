@@ -12,7 +12,8 @@ use crate::domain::desktop_item::{
 };
 use crate::infrastructure::filesystem::{box_folder as box_folder_fs, transfer};
 use crate::infrastructure::windows::{
-    desktop_path, shell_clipboard, shell_context, shell_file, shell_icon, shell_virtual_item,
+    desktop_path, shell_clipboard, shell_context, shell_desktop_icon_visibility, shell_file,
+    shell_icon, shell_virtual_item,
 };
 
 /// 获取当前桌面路径快照，删除 Box 默认策略会把文件移回该目录。
@@ -34,6 +35,16 @@ pub fn list_shell_desktop_items(shell_ids: &[String]) -> Result<Vec<DesktopItem>
     Ok(shell_virtual_item::list_shell_virtual_desktop_items(
         shell_ids,
     ))
+}
+
+/// 读取 Windows 原生桌面上某个系统图标是否显示，供 Dasktop 接管前记录用户原始状态。
+pub fn get_shell_desktop_icon_visible(shell_id: &str) -> Result<bool, String> {
+    shell_desktop_icon_visibility::get_shell_desktop_icon_visible(shell_id)
+}
+
+/// 设置 Windows 原生桌面上某个系统图标显示状态，Box 内引用仍由前端数据库独立维护。
+pub fn set_shell_desktop_icon_visible(shell_id: &str, visible: bool) -> Result<(), String> {
+    shell_desktop_icon_visibility::set_shell_desktop_icon_visible(shell_id, visible)
 }
 
 /// 使用系统默认程序打开 Box 文件项，保持与 Explorer 双击一致。

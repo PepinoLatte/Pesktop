@@ -94,6 +94,11 @@ export const FILE_BEHAVIOR_SETTING_CONTROLS: Array<{
     description: "只影响 `.lnk` 的视觉角标，不改变快捷方式文件",
   },
   {
+    key: APP_SETTING_KEYS.autoHideNativeShellIcons,
+    label: "收纳系统图标后隐藏原生图标",
+    description: "此电脑、回收站等系统图标进入 Box 后，将从 Windows 桌面隐藏",
+  },
+  {
     key: APP_SETTING_KEYS.doubleClickOpenItems,
     label: "双击打开",
     description: "关闭后单击即可打开文件，拖拽仍需要先移动超过阈值",

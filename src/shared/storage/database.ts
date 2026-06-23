@@ -29,6 +29,15 @@ const numericSettingKeys = Object.keys(APP_SETTING_NUMBER_LIMITS) as AppSettingN
 const DESKTOP_BOX_TITLE_POSITIONS = ["top", "bottom"] as const;
 
 /**
+ * Dasktop 自动接管过的系统桌面图标记录，用于恢复时区分用户原本隐藏和应用主动隐藏。
+ */
+export interface ShellIconVisibilityRecord {
+  managedHidden: boolean;
+  previousVisible: boolean;
+  shellId: string;
+}
+
+/**
  * SQLite 连接复用可以避免窗口同步和拖动保存时反复打开数据库
  */
 async function getDatabase(): Promise<Database> {
@@ -75,6 +84,7 @@ export async function initializeStorage(): Promise<void> {
 
   await ensureBoxItemOrderStorage(database);
   await ensureBoxVirtualItemStorage(database);
+  await ensureShellIconVisibilityRecordStorage(database);
 }
 
 /**
@@ -103,6 +113,20 @@ async function ensureBoxVirtualItemStorage(database: Database): Promise<void> {
       sort_order INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (box_id, shell_id)
+    )
+  `);
+}
+
+/**
+ * 系统桌面图标隐藏状态必须单独记录接管前状态，避免移出 Box 时误显示用户原本隐藏的图标。
+ */
+async function ensureShellIconVisibilityRecordStorage(database: Database): Promise<void> {
+  await database.execute(`
+    CREATE TABLE IF NOT EXISTS ${APP_SETTINGS_STORAGE.tables.shellIconVisibilityRecords} (
+      shell_id TEXT PRIMARY KEY,
+      previous_visible INTEGER NOT NULL,
+      managed_hidden INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
     )
   `);
 }
@@ -231,6 +255,21 @@ export async function loadBoxVirtualItemIds(boxId: string): Promise<string[]> {
 }
 
 /**
+ * 读取所有 Box 内保存的 Shell 虚拟项 ID，用于按全局引用计数决定是否恢复原生桌面图标。
+ */
+export async function loadAllBoxVirtualItemIds(): Promise<string[]> {
+  const database = await getDatabase();
+  await ensureBoxVirtualItemStorage(database);
+  const rows = await database.select<Array<Record<string, unknown>>>(`
+    SELECT shell_id
+    FROM ${APP_SETTINGS_STORAGE.tables.boxVirtualItems}
+    ORDER BY updated_at ASC, sort_order ASC
+  `);
+
+  return rows.map((row) => String(row.shell_id));
+}
+
+/**
  * 保存当前 Box 的完整手动顺序；调用方已按最新扫描结果过滤路径，旧路径不做兼容保留。
  */
 export async function saveBoxItemOrder(boxId: string, orderedPaths: string[]): Promise<void> {
@@ -310,6 +349,63 @@ export async function removeBoxVirtualItemIds(
 }
 
 /**
+ * 读取 Dasktop 管理过的系统桌面图标隐藏记录，供启动同步和关闭总开关时恢复状态。
+ */
+export async function loadShellIconVisibilityRecords(): Promise<ShellIconVisibilityRecord[]> {
+  const database = await getDatabase();
+  await ensureShellIconVisibilityRecordStorage(database);
+  const rows = await database.select<Array<Record<string, unknown>>>(`
+    SELECT shell_id, previous_visible, managed_hidden
+    FROM ${APP_SETTINGS_STORAGE.tables.shellIconVisibilityRecords}
+    ORDER BY updated_at ASC
+  `);
+
+  return rows.map((row) => ({
+    managedHidden: sanitizeStoredBoolean(row.managed_hidden),
+    previousVisible: sanitizeStoredBoolean(row.previous_visible),
+    shellId: String(row.shell_id),
+  }));
+}
+
+/**
+ * 保存单个系统图标的接管记录；重复接管时只更新当前管理态，不覆盖首次接管前状态。
+ */
+export async function saveShellIconVisibilityRecord(
+  record: ShellIconVisibilityRecord,
+): Promise<void> {
+  const database = await getDatabase();
+  await ensureShellIconVisibilityRecordStorage(database);
+  await database.execute(
+    `
+      INSERT INTO ${APP_SETTINGS_STORAGE.tables.shellIconVisibilityRecords} (shell_id, previous_visible, managed_hidden, updated_at)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT(shell_id) DO UPDATE SET
+        previous_visible = ${APP_SETTINGS_STORAGE.tables.shellIconVisibilityRecords}.previous_visible,
+        managed_hidden = excluded.managed_hidden,
+        updated_at = excluded.updated_at
+    `,
+    [
+      record.shellId,
+      record.previousVisible ? 1 : 0,
+      record.managedHidden ? 1 : 0,
+      Date.now(),
+    ],
+  );
+}
+
+/**
+ * 原生图标已经按规则恢复或总开关关闭后，清理 Dasktop 的接管痕迹。
+ */
+export async function deleteShellIconVisibilityRecord(shellId: string): Promise<void> {
+  const database = await getDatabase();
+  await ensureShellIconVisibilityRecordStorage(database);
+  await database.execute(
+    `DELETE FROM ${APP_SETTINGS_STORAGE.tables.shellIconVisibilityRecords} WHERE shell_id = $1`,
+    [shellId],
+  );
+}
+
+/**
  * 删除 Box 记录只影响 Dasktop 窗口状态；真实文件夹处理必须先由调用方完成并确认成功
  */
 export async function deleteBoxRecord(boxId: string): Promise<void> {
@@ -385,6 +481,7 @@ function sanitizeSettingValue<Key extends keyof AppSettings>(
     key === APP_SETTING_KEYS.boxResizeGridEnabled ||
     key === APP_SETTING_KEYS.showItemLabels ||
     key === APP_SETTING_KEYS.showShortcutArrow ||
+    key === APP_SETTING_KEYS.autoHideNativeShellIcons ||
     key === APP_SETTING_KEYS.doubleClickOpenItems
   ) {
     return (typeof value === "boolean" ? value : DEFAULT_APP_SETTINGS[key]) as AppSettings[Key];
@@ -465,6 +562,13 @@ function isBoxDropAction(value: unknown): value is BoxDropAction {
  */
 function isDesktopNameDisplayMode(value: unknown): value is AppSettings["nameDisplayMode"] {
   return DESKTOP_NAME_DISPLAY_MODES.some((mode) => mode === value);
+}
+
+/**
+ * SQLite 中布尔值统一以 0/1 保存，读取时保持严格归一，避免字符串脏值影响恢复逻辑。
+ */
+function sanitizeStoredBoolean(value: unknown): boolean {
+  return Number(value) === 1;
 }
 
 /**

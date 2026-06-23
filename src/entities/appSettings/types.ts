@@ -59,6 +59,10 @@ export interface AppSettings {
    */
   showShortcutArrow: boolean;
   /**
+   * 系统桌面图标进入 Box 后是否自动隐藏 Windows 原生桌面上的同名入口
+   */
+  autoHideNativeShellIcons: boolean;
+  /**
    * 是否使用双击打开文件；关闭后单击即可打开，更适合触控板快速整理
    */
   doubleClickOpenItems: boolean;

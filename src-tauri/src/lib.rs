@@ -41,11 +41,13 @@ pub fn run() {
             commands::box_folder::open_box_folder,
             commands::desktop_item::delete_desktop_items,
             commands::desktop_item::get_desktop_snapshot,
+            commands::desktop_item::get_shell_desktop_icon_visible,
             commands::desktop_item::list_box_folder_items,
             commands::desktop_item::list_shell_desktop_items,
             commands::desktop_item::open_desktop_item,
             commands::desktop_item::paste_desktop_items_from_clipboard,
             commands::desktop_item::rename_desktop_item,
+            commands::desktop_item::set_shell_desktop_icon_visible,
             commands::desktop_item::show_native_item_context_menu,
             commands::desktop_item::write_desktop_items_to_clipboard,
             commands::native_drop::register_box_native_drop_target,
@@ -57,5 +59,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to build dasktop");
 
-    app.run(|_app_handle, _event| {});
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            if let Err(error) =
+                services::app_lifecycle::restore_shell_desktop_icons_before_exit(app_handle)
+            {
+                eprintln!("failed to restore shell desktop icons before exit: {error}");
+            }
+        }
+    });
 }

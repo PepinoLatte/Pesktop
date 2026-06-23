@@ -20,6 +20,18 @@ pub fn list_shell_desktop_items(shell_ids: Vec<String>) -> Result<Vec<DesktopIte
     desktop_item::list_shell_desktop_items(&shell_ids)
 }
 
+/// 读取 Windows 原生桌面上某个系统图标当前是否显示，用于记录 Dasktop 接管前状态。
+#[tauri::command]
+pub fn get_shell_desktop_icon_visible(shell_id: String) -> Result<bool, String> {
+    desktop_item::get_shell_desktop_icon_visible(&shell_id)
+}
+
+/// 设置 Windows 原生桌面上某个系统图标是否显示，Box 内虚拟项引用不受影响。
+#[tauri::command]
+pub fn set_shell_desktop_icon_visible(shell_id: String, visible: bool) -> Result<(), String> {
+    desktop_item::set_shell_desktop_icon_visible(&shell_id, visible)
+}
+
 /// 使用系统默认程序打开 Box 文件项，保持与 Explorer 双击一致。
 #[tauri::command]
 pub fn open_desktop_item(path: String) -> Result<(), String> {

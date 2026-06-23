@@ -114,8 +114,8 @@ fn handle_tray_menu_event(
 /// Windows WebView2/Chromium 在进程退出时会注销 `Chrome_WidgetWin_0` 等内部窗口类。
 /// 如果直接调用 `AppHandle::exit`，隐藏设置窗、Box 窗口和预载菜单窗可能尚未收到
 /// `Destroyed` 事件，底层清理就会和窗口销毁交错，从而打印 class unregister 失败日志。
-/// 这里逐个关闭现有 WebViewWindow，让 Tauri 在最后一个窗口销毁后自然触发退出；最终
-/// 桌面图标恢复仍由 `RunEvent::ExitRequested` 兜底执行。
+/// 这里逐个关闭现有 WebViewWindow，让 Tauri 在最后一个窗口销毁后自然触发退出；系统
+/// 桌面图标由 `RunEvent::ExitRequested` 按接管记录恢复到 Dasktop 启动前状态。
 pub(crate) fn request_graceful_exit(app_handle: &AppHandle) {
     let webview_windows = app_handle.webview_windows();
     if webview_windows.is_empty() {
