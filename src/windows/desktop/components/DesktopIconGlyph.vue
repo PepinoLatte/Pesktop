@@ -50,8 +50,8 @@ const iconFrameStyle = computed(
 const iconImageStyle = computed(
   () =>
     ({
-      maxHeight: `${props.iconSize}px`,
-      maxWidth: `${props.iconSize}px`,
+      height: `${props.iconSize}px`,
+      width: `${props.iconSize}px`,
     }) as CSSProperties,
 );
 const shortcutBadgeStyle = computed(

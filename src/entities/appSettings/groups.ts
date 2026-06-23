@@ -125,7 +125,10 @@ export const WINDOW_BEHAVIOR_SETTING_CONTROLS: Array<{
  */
 export type BoxCollapseTimingSettingKey = Extract<
   AppSettingNumberKey,
-  "boxCollapseAnimationMs" | "boxCollapseDelayMs"
+  | "boxCollapseAnimationMs"
+  | "boxCollapseDelayMs"
+  | "boxIdleOpacityHideAnimationMs"
+  | "boxIdleOpacityShowAnimationMs"
 >;
 
 /**
@@ -164,6 +167,18 @@ export const BOX_COLLAPSE_TIMING_SETTING_CONTROLS: Array<{
     label: "离开后延迟收缩",
     description: "鼠标离开 Box 后等待多久再开始自动收起",
     ...APP_SETTING_NUMBER_LIMITS.boxCollapseDelayMs,
+  },
+  {
+    key: "boxIdleOpacityShowAnimationMs",
+    label: "可见度淡入时长",
+    description: "Box 从闲置透明状态恢复到完全可见时的动画时间",
+    ...APP_SETTING_NUMBER_LIMITS.boxIdleOpacityShowAnimationMs,
+  },
+  {
+    key: "boxIdleOpacityHideAnimationMs",
+    label: "可见度淡出时长",
+    description: "Box 收缩后回到闲置透明状态时的动画时间",
+    ...APP_SETTING_NUMBER_LIMITS.boxIdleOpacityHideAnimationMs,
   },
 ];
 

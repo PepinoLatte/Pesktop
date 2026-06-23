@@ -2,7 +2,6 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -48,7 +47,7 @@ pub(crate) fn normalize_existing_paths(paths: &[String]) -> Result<Vec<PathBuf>,
     Ok(normalized_paths)
 }
 
-/// 普通拖拽传输统一绕开 Shell 文件操作，避免冲突框和权限提升框被 Box 窗口遮挡。
+/// 普通拖拽传输会预先解析冲突目标，移动交给 Windows Shell 执行以同步刷新 Explorer 桌面视图。
 /// 返回实际完成的目标路径，供前端按释放位置写入手动排序；冲突跳过的项目不会出现在结果中。
 pub(crate) fn transfer_paths_without_shell_prompts(
     paths: &[PathBuf],
@@ -60,30 +59,13 @@ pub(crate) fn transfer_paths_without_shell_prompts(
     execute_transfer_plans(&plans)
 }
 
-/// 移动单个路径；跨盘时退回复制后删除，保持迁移 Box 文件夹时的用户预期。
+/// 移动单个路径；内部使用 Shell 文件操作，让 Explorer 立即收到桌面文件增删事件。
 pub(crate) fn move_path_without_shell_prompt(source: &Path, target: &Path) -> Result<(), String> {
     if target.exists() {
         return Err("目标文件已经存在，已停止移动".to_string());
     }
 
-    match fs::rename(source, target) {
-        Ok(()) => Ok(()),
-        Err(error) if is_cross_device_move_error(&error) => {
-            if let Err(copy_error) = copy_path_without_shell_prompt(source, target) {
-                let _ = remove_path_if_exists(target);
-                return Err(format!("无法跨盘移动文件项：{copy_error}"));
-            }
-            if let Err(remove_error) = remove_original_after_copy(source) {
-                let _ = remove_path_if_exists(target);
-                return Err(format!("无法删除原文件，已取消跨盘移动：{remove_error}"));
-            }
-
-            Ok(())
-        }
-        Err(error) => Err(format!(
-            "无法移动文件项，可能没有写入权限或文件正在使用：{error}"
-        )),
-    }
+    shell_file::move_paths_with_shell(&[(source.to_path_buf(), target.to_path_buf())])
 }
 
 fn create_transfer_plans(
@@ -194,8 +176,37 @@ fn resolve_conflict_destination(
 
 fn execute_transfer_plans(plans: &[FileTransferPlan]) -> Result<Vec<PathBuf>, String> {
     let mut completed_transfers = Vec::new();
+    let mut index = 0;
 
-    for plan in plans {
+    while index < plans.len() {
+        let plan = &plans[index];
+        if plan.kind == FileTransferKind::Move && !plan.replaces_existing {
+            let mut next_index = index + 1;
+            while next_index < plans.len()
+                && plans[next_index].kind == FileTransferKind::Move
+                && !plans[next_index].replaces_existing
+            {
+                next_index += 1;
+            }
+
+            if let Err(error) = execute_shell_move_batch(&plans[index..next_index]) {
+                rollback_failed_move_batch(&plans[index..next_index]);
+                rollback_completed_transfers(&completed_transfers);
+                return Err(error);
+            }
+
+            completed_transfers.extend(plans[index..next_index].iter().map(|completed_plan| {
+                CompletedTransfer {
+                    source: completed_plan.source.clone(),
+                    destination: completed_plan.destination.clone(),
+                    kind: completed_plan.kind,
+                    backup: None,
+                }
+            }));
+            index = next_index;
+            continue;
+        }
+
         // 替换策略先把旧目标改名成隐藏备份，只有整批传输成功后才清理，保证失败可回滚。
         let backup = if plan.replaces_existing {
             prepare_replace_backup(&plan.destination)?
@@ -204,7 +215,7 @@ fn execute_transfer_plans(plans: &[FileTransferPlan]) -> Result<Vec<PathBuf>, St
         };
 
         if let Err(error) = execute_single_transfer(plan) {
-            let _ = remove_path_if_exists(&plan.destination);
+            cleanup_failed_single_transfer(plan);
             if let Some(backup_path) = backup {
                 let _ = restore_replace_backup(&backup_path, &plan.destination);
             }
@@ -218,6 +229,7 @@ fn execute_transfer_plans(plans: &[FileTransferPlan]) -> Result<Vec<PathBuf>, St
             kind: plan.kind,
             backup,
         });
+        index += 1;
     }
 
     cleanup_replace_backups(&completed_transfers)?;
@@ -234,6 +246,34 @@ fn execute_single_transfer(plan: &FileTransferPlan) -> Result<(), String> {
         FileTransferKind::Move => move_path_without_shell_prompt(&plan.source, &plan.destination),
         FileTransferKind::Shortcut => {
             shell_file::create_shortcut_for_path(&plan.source, &plan.destination)
+        }
+    }
+}
+
+/// 执行计划时连续的移动操作可以合并为一次 Shell 调用，避免多文件拖拽反复刷新桌面。
+fn execute_shell_move_batch(plans: &[FileTransferPlan]) -> Result<(), String> {
+    let moves = plans
+        .iter()
+        .map(|plan| (plan.source.clone(), plan.destination.clone()))
+        .collect::<Vec<_>>();
+
+    shell_file::move_paths_with_shell(&moves)
+}
+
+fn cleanup_failed_single_transfer(plan: &FileTransferPlan) {
+    match plan.kind {
+        FileTransferKind::Move => rollback_failed_move_batch(std::slice::from_ref(plan)),
+        FileTransferKind::Copy | FileTransferKind::Shortcut => {
+            let _ = remove_path_if_exists(&plan.destination);
+        }
+    }
+}
+
+fn rollback_failed_move_batch(plans: &[FileTransferPlan]) {
+    for plan in plans.iter().rev() {
+        // Shell 文件操作可能在批量移动中途返回失败；只有确认来源已消失且目标存在时才回滚，避免误删用户数据。
+        if !plan.source.exists() && plan.destination.exists() {
+            let _ = move_path_without_shell_prompt(&plan.destination, &plan.source);
         }
     }
 }
@@ -348,14 +388,6 @@ fn copy_directory_without_shell_prompt(source: &Path, target: &Path) -> Result<(
     Ok(())
 }
 
-fn remove_original_after_copy(source: &Path) -> Result<(), String> {
-    if source.is_dir() {
-        fs::remove_dir_all(source).map_err(|error| format!("无法删除原文件夹：{error}"))
-    } else {
-        fs::remove_file(source).map_err(|error| format!("无法删除原文件：{error}"))
-    }
-}
-
 fn remove_path_if_exists(path: &Path) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
@@ -366,11 +398,6 @@ fn remove_path_if_exists(path: &Path) -> Result<(), String> {
     } else {
         fs::remove_file(path).map_err(|error| format!("无法清理目标文件：{error}"))
     }
-}
-
-/// Windows 跨盘重命名会返回 ERROR_NOT_SAME_DEVICE；这时可以退回复制后删除。
-fn is_cross_device_move_error(error: &io::Error) -> bool {
-    matches!(error.raw_os_error(), Some(17))
 }
 
 fn is_windows_shortcut(path: &Path) -> bool {

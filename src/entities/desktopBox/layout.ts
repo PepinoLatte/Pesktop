@@ -32,14 +32,6 @@ export const BOX_TITLE_OPACITY = {
 } as const;
 
 /**
- * 闲置可见度显示要快速响应 hover，隐藏稍慢一点，避免自动收起后视觉上突然消失
- */
-export const BOX_IDLE_OPACITY_ANIMATION = {
-  hideDurationMs: 420,
-  showDurationMs: 420,
-} as const;
-
-/**
  * 收缩相关的窗口写入需要短暂屏蔽，避免动画过程把中间高度当成用户手动 resize 落库
  */
 export const BOX_COLLAPSE_INTERACTION = {

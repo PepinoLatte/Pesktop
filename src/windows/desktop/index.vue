@@ -108,6 +108,8 @@ const {
   getBoxCollapseAnimationMs: () => desktopStore.getBoxCollapseAnimationMs(),
   getBoxCollapseDelayMs: () => desktopStore.getBoxCollapseDelayMs(),
   getBoxCornerRadius: () => desktopStore.settings.boxCornerRadius,
+  getBoxIdleOpacityHideAnimationMs: () => desktopStore.getBoxIdleOpacityHideAnimationMs(),
+  getBoxIdleOpacityShowAnimationMs: () => desktopStore.getBoxIdleOpacityShowAnimationMs(),
   isContextMenuOpen: () => readContextMenuOpen(),
   isEditingTitle: () => readEditingTitle(),
   isManualDraggingBox: () => isManualDraggingBox.value,

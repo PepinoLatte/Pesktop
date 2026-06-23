@@ -747,6 +747,26 @@ export const useDesktopStore = defineStore("desktop", () => {
   }
 
   /**
+   * 闲置可见度淡出动画由全局设置控制，保证自动收缩后的透明过渡节奏可调。
+   */
+  function getBoxIdleOpacityHideAnimationMs(): number {
+    return sanitizeNumberAppSetting(
+      APP_SETTING_KEYS.boxIdleOpacityHideAnimationMs,
+      settings.value.boxIdleOpacityHideAnimationMs,
+    );
+  }
+
+  /**
+   * 闲置可见度淡入动画由全局设置控制，保证鼠标进入 Box 后的恢复速度可调。
+   */
+  function getBoxIdleOpacityShowAnimationMs(): number {
+    return sanitizeNumberAppSetting(
+      APP_SETTING_KEYS.boxIdleOpacityShowAnimationMs,
+      settings.value.boxIdleOpacityShowAnimationMs,
+    );
+  }
+
+  /**
    * 跟随系统只影响渲染标识，不把解析后的明暗值写回数据库
    */
   function applyTheme(theme: ThemeMode, shouldAnimate = false): void {
@@ -824,6 +844,8 @@ export const useDesktopStore = defineStore("desktop", () => {
     desktopPath,
     getBoxCollapseAnimationMs,
     getBoxCollapseDelayMs,
+    getBoxIdleOpacityHideAnimationMs,
+    getBoxIdleOpacityShowAnimationMs,
     initialize,
     initializeFromStartupSnapshot,
     initializeBoxMenu,

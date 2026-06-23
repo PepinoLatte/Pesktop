@@ -95,6 +95,14 @@ export interface AppSettings {
    */
   boxCollapseDelayMs: number;
   /**
+   * Box 从闲置透明状态恢复到完全可见时的淡入动画时长
+   */
+  boxIdleOpacityShowAnimationMs: number;
+  /**
+   * Box 回到闲置透明状态时的淡出动画时长
+   */
+  boxIdleOpacityHideAnimationMs: number;
+  /**
    * Box 内系统图标的显示尺寸，真实图像仍由 Windows Shell 解析
    */
   boxIconSize: number;

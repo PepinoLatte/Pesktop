@@ -72,6 +72,30 @@ pub fn recycle_paths(paths: &[PathBuf]) -> Result<(), String> {
     Ok(())
 }
 
+/// 使用 Windows Shell 移动真实文件路径，让 Explorer 桌面视图立即收到标准文件变更事件。
+#[cfg(target_os = "windows")]
+pub(crate) fn move_paths_with_shell(moves: &[(PathBuf, PathBuf)]) -> Result<(), String> {
+    if moves.is_empty() {
+        return Ok(());
+    }
+
+    if let Some(shared_destination_folder) = resolve_shared_plain_move_destination(moves) {
+        return move_paths_to_shared_folder_with_shell(moves, &shared_destination_folder);
+    }
+
+    for (source, destination) in moves {
+        move_single_path_with_shell(source, destination)?;
+    }
+
+    Ok(())
+}
+
+/// 非 Windows 平台没有 Explorer Shell 移动能力，保持显式错误避免误以为桌面刷新语义一致。
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn move_paths_with_shell(_moves: &[(PathBuf, PathBuf)]) -> Result<(), String> {
+    Err("当前平台暂不支持使用系统 Shell 移动 Box 文件项".to_string())
+}
+
 /// 非 Windows 平台没有回收站语义，删除文件夹时退回直接删除以便开发调试。
 #[cfg(not(target_os = "windows"))]
 pub fn recycle_paths(paths: &[PathBuf]) -> Result<(), String> {
@@ -205,6 +229,84 @@ fn open_shell_parsing_name_with_system_default(_parsing_name: &str) -> Result<()
     Err("当前平台暂不支持打开系统桌面项目".to_string())
 }
 
+#[cfg(target_os = "windows")]
+fn move_paths_to_shared_folder_with_shell(
+    moves: &[(PathBuf, PathBuf)],
+    destination_folder: &Path,
+) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::Shell::{
+        SHFileOperationW, FOF_NOCONFIRMMKDIR, FO_MOVE, SHFILEOPSTRUCTW,
+    };
+
+    let sources = moves
+        .iter()
+        .map(|(source, _)| source.clone())
+        .collect::<Vec<_>>();
+    let mut from = to_double_null_path_list(&sources);
+    let mut to = to_double_null_single_path(destination_folder);
+    let mut operation = SHFILEOPSTRUCTW {
+        wFunc: FO_MOVE,
+        pFrom: PCWSTR(from.as_mut_ptr()),
+        pTo: PCWSTR(to.as_mut_ptr()),
+        fFlags: FOF_NOCONFIRMMKDIR.0 as u16,
+        ..SHFILEOPSTRUCTW::default()
+    };
+    let result = unsafe { SHFileOperationW(&mut operation) };
+
+    if result != 0 {
+        return Err(format!("Windows 无法移动 Box 文件项，错误码 {result}"));
+    }
+    if operation.fAnyOperationsAborted.as_bool() {
+        return Err("已取消移动 Box 文件项".to_string());
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn move_single_path_with_shell(source: &Path, destination: &Path) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::Shell::{
+        SHFileOperationW, FOF_NOCONFIRMMKDIR, FO_MOVE, SHFILEOPSTRUCTW,
+    };
+
+    let mut from = to_double_null_single_path(source);
+    let mut to = to_double_null_single_path(destination);
+    let mut operation = SHFILEOPSTRUCTW {
+        wFunc: FO_MOVE,
+        pFrom: PCWSTR(from.as_mut_ptr()),
+        pTo: PCWSTR(to.as_mut_ptr()),
+        fFlags: FOF_NOCONFIRMMKDIR.0 as u16,
+        ..SHFILEOPSTRUCTW::default()
+    };
+    let result = unsafe { SHFileOperationW(&mut operation) };
+
+    if result != 0 {
+        return Err(format!("Windows 无法移动 Box 文件项，错误码 {result}"));
+    }
+    if operation.fAnyOperationsAborted.as_bool() {
+        return Err("已取消移动 Box 文件项".to_string());
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_shared_plain_move_destination(moves: &[(PathBuf, PathBuf)]) -> Option<PathBuf> {
+    let first_destination_folder = moves.first()?.1.parent()?.to_path_buf();
+    for (source, destination) in moves {
+        if destination.parent()? != first_destination_folder {
+            return None;
+        }
+        if source.file_name()? != destination.file_name()? {
+            return None;
+        }
+    }
+
+    Some(first_destination_folder)
+}
+
 #[cfg(not(target_os = "windows"))]
 fn recycle_path_without_shell(path: &Path) -> Result<(), String> {
     if path.is_dir() {
@@ -212,6 +314,14 @@ fn recycle_path_without_shell(path: &Path) -> Result<(), String> {
     } else {
         fs::remove_file(path).map_err(|error| format!("无法删除 Box 文件项：{error}"))
     }
+}
+
+#[cfg(target_os = "windows")]
+fn to_double_null_single_path(path: &Path) -> Vec<u16> {
+    let mut wide = path.to_string_lossy().encode_utf16().collect::<Vec<_>>();
+    wide.push(0);
+    wide.push(0);
+    wide
 }
 
 #[cfg(target_os = "windows")]

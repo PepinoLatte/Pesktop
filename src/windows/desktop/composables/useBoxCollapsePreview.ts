@@ -5,7 +5,6 @@ import type { DesktopBox } from "@/entities/desktopBox/types";
 import {
   BOX_COLLAPSE_INTERACTION,
   BOX_GRID_LAYOUT,
-  BOX_IDLE_OPACITY_ANIMATION,
   BOX_TITLE_OPACITY,
   BOX_TITLE_VISIBILITY,
 } from "@/entities/desktopBox/layout";
@@ -38,6 +37,8 @@ export function useBoxCollapsePreview(options: {
   getBoxCollapseAnimationMs: () => number;
   getBoxCollapseDelayMs: () => number;
   getBoxCornerRadius: () => number;
+  getBoxIdleOpacityHideAnimationMs: () => number;
+  getBoxIdleOpacityShowAnimationMs: () => number;
   isContextMenuOpen: () => boolean;
   isEditingTitle: () => boolean;
   isManualDraggingBox: () => boolean;
@@ -276,7 +277,7 @@ export function useBoxCollapsePreview(options: {
       return 0;
     }
 
-    return Math.min(options.getBoxCollapseAnimationMs() * 0.36, 140) / 1000;
+    return Math.min(options.getBoxCollapseAnimationMs() * 0.2, 140) / 1000;
   }
 
   /**
@@ -285,8 +286,8 @@ export function useBoxCollapsePreview(options: {
   function resolveBoxIdleOpacityAnimationDuration(): number {
     const durationMs =
       boxIdleOpacity.value >= 1
-        ? BOX_IDLE_OPACITY_ANIMATION.showDurationMs
-        : BOX_IDLE_OPACITY_ANIMATION.hideDurationMs;
+        ? options.getBoxIdleOpacityShowAnimationMs()
+        : options.getBoxIdleOpacityHideAnimationMs();
 
     return durationMs / 1000;
   }
