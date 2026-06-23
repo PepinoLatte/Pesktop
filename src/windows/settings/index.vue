@@ -21,6 +21,7 @@ import {
 
 const desktopStore = useDesktopStore();
 const activeSection = ref<SettingsSection>("boxes");
+const settingsScrollArea = ref<HTMLElement | null>(null);
 const activeTitle = computed(() => resolveSettingsSectionTitle(activeSection.value));
 const settingsActions = useSettingsActions(desktopStore);
 const settingsBoxes = useSettingsBoxes(desktopStore);
@@ -49,6 +50,26 @@ onUnmounted(() => {
   settingsWindow.disposeSettingsWindow();
   settingsStartup.disposeSettingsStartup();
 });
+
+/**
+ * 切换设置面板前先同步复位共享滚动容器，避免旧面板底部滚动位置参与新面板进入动画。
+ *
+ * 右侧内容区由多个设置面板共用同一个滚动容器；如果先换 key 再等浏览器根据新内容高度修正
+ * scrollTop，用户会看到面板已经开始过渡后又突然跳到顶部。这里在状态变更前复位，让过渡首帧
+ * 就落在新面板顶部，同时保留点击当前菜单时的阅读位置。
+ */
+function changeActiveSection(section: SettingsSection): void {
+  if (section === activeSection.value) {
+    return;
+  }
+
+  if (settingsScrollArea.value) {
+    settingsScrollArea.value.scrollTop = 0;
+    settingsScrollArea.value.scrollLeft = 0;
+  }
+
+  activeSection.value = section;
+}
 </script>
 
 <template>
@@ -57,7 +78,7 @@ onUnmounted(() => {
       <SettingsSidebar
         :active-section="activeSection"
         :sections="SETTINGS_SECTIONS"
-        @section-change="activeSection = $event"
+        @section-change="changeActiveSection"
       />
 
       <section class="flex min-w-0 flex-1 flex-col bg-[#fbfbfd] dark:bg-[#101116]">
@@ -69,7 +90,7 @@ onUnmounted(() => {
           @toggle-maximize="settingsWindow.toggleSettingsMaximize"
         />
 
-        <div class="dasktop-scrollarea min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div ref="settingsScrollArea" class="dasktop-scrollarea min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           <div
             v-if="settingsStartup.startupError.value"
             class="mx-8 mt-6 rounded-[12px] border border-[#f0c7c7] bg-[#fff6f6] px-4 py-3 text-[13px] text-[#9f1d1d] dark:border-[#5b2a2d] dark:bg-[#281619] dark:text-[#ffb4b4]"
