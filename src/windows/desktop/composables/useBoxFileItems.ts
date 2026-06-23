@@ -8,7 +8,11 @@ import {
   saveBoxItemOrder,
   saveBoxVirtualItemIds,
 } from "@/shared/storage/database";
-import { listBoxFolderItems, listShellDesktopItems } from "@/entities/desktopItem/api";
+import {
+  getBoxFolderRevision,
+  listBoxFolderItems,
+  listShellDesktopItems,
+} from "@/entities/desktopItem/api";
 import type { DesktopItem } from "@/entities/desktopItem/types";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 import { syncShellDesktopIconVisibility } from "@/entities/desktopItem/shellDesktopIconVisibilitySync";
@@ -30,6 +34,14 @@ interface BoxFileItemsOptions {
 }
 
 /**
+ * 文件列表刷新可由轮询或用户操作触发；强制刷新用于绕过 revision 快捷判断。
+ */
+interface BoxFileRefreshOptions {
+  force?: boolean;
+  silent?: boolean;
+}
+
+/**
  * Box 文件列表状态和刷新能力，供选择、拖拽和文件操作共享同一份扫描结果。
  */
 export interface BoxFileItemsState {
@@ -43,7 +55,7 @@ export interface BoxFileItemsState {
   removeBoxItemOrderPaths: (paths: string[]) => Promise<void>;
   removeBoxShellItems: (shellIds: string[]) => Promise<void>;
   replaceBoxItemOrderPath: (previousPath: string, nextPath: string) => Promise<void>;
-  refreshBoxFolderItems: (options?: { silent?: boolean }) => Promise<void>;
+  refreshBoxFolderItems: (options?: BoxFileRefreshOptions) => Promise<void>;
   startFolderRefreshPolling: () => void;
   stopFolderRefreshPolling: () => void;
 }
@@ -56,48 +68,104 @@ export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState
   let loadedOrderBoxId: string | null = null;
   let orderedPaths: string[] = [];
   let virtualShellIds: string[] = [];
-  let refreshTimer: ReturnType<typeof window.setInterval> | null = null;
+  let refreshTimer: ReturnType<typeof window.setTimeout> | null = null;
+  let isRefreshPollingActive = false;
+  let isRefreshInFlight = false;
+  let lastFullRefreshSignature: string | null = null;
+  let queuedRefreshOptions: BoxFileRefreshOptions | null = null;
 
   /**
-   * 轮询是当前 WebView 文件视图的兜底刷新机制，避免外部文件变更长期停留在旧列表。
+   * 轮询是当前 WebView 文件视图的兜底刷新机制；下一轮必须等上一轮完成后再排队，避免慢速 Shell 扫描堆叠造成周期性卡顿。
    */
   function startFolderRefreshPolling(): void {
     stopFolderRefreshPolling();
-    refreshTimer = window.setInterval(() => {
-      void refreshBoxFolderItems({ silent: true });
-    }, BOX_FILE_VIEW.refreshIntervalMs);
+    isRefreshPollingActive = true;
+    scheduleNextFolderRefreshPoll();
   }
 
   /**
    * 清理文件扫描轮询，窗口卸载或重新启动轮询时必须成对调用。
    */
   function stopFolderRefreshPolling(): void {
-    if (!refreshTimer) {
-      return;
+    isRefreshPollingActive = false;
+    queuedRefreshOptions = null;
+    if (refreshTimer) {
+      window.clearTimeout(refreshTimer);
+      refreshTimer = null;
     }
-
-    window.clearInterval(refreshTimer);
-    refreshTimer = null;
   }
 
   /**
-   * 扫描当前 Box 真实文件夹；静默刷新只吞掉错误，显式刷新会把错误交给窗口展示。
+   * 下一轮轮询由当前刷新完成后安排，保证低性能磁盘或大量图标解析时不会形成并发扫描。
+   */
+  function scheduleNextFolderRefreshPoll(): void {
+    if (!isRefreshPollingActive || refreshTimer) {
+      return;
+    }
+
+    refreshTimer = window.setTimeout(() => {
+      refreshTimer = null;
+      void refreshBoxFolderItems({ silent: true }).finally(scheduleNextFolderRefreshPoll);
+    }, BOX_FILE_VIEW.refreshIntervalMs);
+  }
+
+  /**
+   * 扫描当前 Box 真实文件夹；并发请求只保留一次后续刷新，避免多个入口同时触发重复扫描。
    */
   async function refreshBoxFolderItems(
-    refreshOptions: { silent?: boolean } = {},
+    refreshOptions: BoxFileRefreshOptions = {},
   ): Promise<void> {
-    if (!options.box.value?.folderPath) {
-      boxItems.value = [];
+    if (isRefreshInFlight) {
+      const previousQueuedRefreshOptions = queuedRefreshOptions;
+      queuedRefreshOptions = {
+        force: Boolean(previousQueuedRefreshOptions?.force || refreshOptions.force),
+        silent: previousQueuedRefreshOptions
+          ? previousQueuedRefreshOptions.silent === true && refreshOptions.silent === true
+          : refreshOptions.silent === true,
+      };
+      return;
+    }
+
+    isRefreshInFlight = true;
+    try {
+      await refreshBoxFolderItemsOnce(refreshOptions);
+    } finally {
+      isRefreshInFlight = false;
+    }
+
+    const nextRefreshOptions = queuedRefreshOptions;
+    queuedRefreshOptions = null;
+    if (nextRefreshOptions) {
+      await refreshBoxFolderItems(nextRefreshOptions);
+    }
+  }
+
+  /**
+   * 执行一次真实扫描；静默刷新只吞掉错误，显式刷新会把错误交给窗口展示。
+   */
+  async function refreshBoxFolderItemsOnce(
+    refreshOptions: BoxFileRefreshOptions = {},
+  ): Promise<void> {
+    const currentBox = options.box.value;
+    if (!currentBox?.folderPath) {
+      lastFullRefreshSignature = null;
+      updateBoxItemsIfChanged([]);
       return;
     }
 
     try {
-      await ensureBoxItemOrderLoaded(options.box.value.id);
+      await ensureBoxItemOrderLoaded(currentBox.id);
+      const nextFullRefreshSignature = await resolveFullRefreshSignature(currentBox.folderPath);
+      if (!refreshOptions.force && lastFullRefreshSignature === nextFullRefreshSignature) {
+        return;
+      }
+
       const [scannedItems, shellItems] = await Promise.all([
-        listBoxFolderItems(options.box.value.folderPath),
+        listBoxFolderItems(currentBox.folderPath),
         listShellDesktopItems(virtualShellIds),
       ]);
-      boxItems.value = applyManualOrder([...scannedItems, ...shellItems]);
+      updateBoxItemsIfChanged(applyManualOrder([...scannedItems, ...shellItems]));
+      lastFullRefreshSignature = nextFullRefreshSignature;
     } catch (error) {
       if (!refreshOptions.silent) {
         options.setLastError(error instanceof Error ? error.message : String(error));
@@ -138,6 +206,60 @@ export function useBoxFileItems(options: BoxFileItemsOptions): BoxFileItemsState
     const unorderedItems = items.filter((item) => !orderedPathSet.has(item.path));
 
     return [...orderedItems, ...unorderedItems];
+  }
+
+  /**
+   * 完整刷新签名合并真实文件夹 revision 和 Shell 虚拟项列表，二者任一变化都需要重新拉完整展示模型。
+   */
+  async function resolveFullRefreshSignature(folderPath: string): Promise<string> {
+    const folderRevision = await getBoxFolderRevision(folderPath);
+
+    return [
+      folderPath,
+      folderRevision,
+      virtualShellIds.join("\u0000"),
+    ].join("\u0001");
+  }
+
+  /**
+   * 轮询结果未变化时不替换数组引用，避免 Vue 重新渲染整个文件网格造成可感知顿挫。
+   */
+  function updateBoxItemsIfChanged(nextItems: DesktopItem[]): void {
+    if (areDesktopItemListsEqual(boxItems.value, nextItems)) {
+      return;
+    }
+
+    boxItems.value = nextItems;
+  }
+
+  /**
+   * 文件项展示字段完全一致时视为同一快照；图标 data URL 也纳入比较，确保真实图标变化仍会刷新。
+   */
+  function areDesktopItemListsEqual(left: DesktopItem[], right: DesktopItem[]): boolean {
+    return (
+      left.length === right.length &&
+      left.every((leftItem, index) => areDesktopItemsEqual(leftItem, right[index]))
+    );
+  }
+
+  /**
+   * 比较展示层会读取的所有字段，避免只按路径判断而漏掉重命名、类型或图标变化。
+   */
+  function areDesktopItemsEqual(left: DesktopItem, right: DesktopItem | undefined): boolean {
+    if (!right) {
+      return false;
+    }
+
+    return (
+      left.extension === right.extension &&
+      left.iconDataUrl === right.iconDataUrl &&
+      left.id === right.id &&
+      left.kind === right.kind &&
+      left.name === right.name &&
+      left.path === right.path &&
+      left.shellId === right.shellId &&
+      left.source === right.source
+    );
   }
 
   /**

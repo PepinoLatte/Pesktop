@@ -43,6 +43,7 @@ pub fn run() {
             commands::box_folder::migrate_box_folder,
             commands::box_folder::open_box_folder,
             commands::desktop_item::delete_desktop_items,
+            commands::desktop_item::get_box_folder_revision,
             commands::desktop_item::get_desktop_snapshot,
             commands::desktop_item::get_shell_desktop_icon_visible,
             commands::desktop_item::list_box_folder_items,

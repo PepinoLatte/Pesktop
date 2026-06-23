@@ -1,10 +1,16 @@
 //! Windows Shell 虚拟桌面项封装，负责把“此电脑”等无文件路径对象映射成稳定业务引用。
 
+use std::collections::HashMap;
+use std::sync::{Mutex, MutexGuard, OnceLock};
+
 use crate::domain::desktop_item::{DesktopItem, DesktopItemKind, DesktopItemSource};
 use crate::infrastructure::windows::{shell_context, shell_file, shell_icon};
 
 /// Box 持久化 Shell 虚拟项时使用的路径前缀，前端排序和选择逻辑可继续复用 path 主键。
 pub const SHELL_ITEM_PATH_PREFIX: &str = "shell::";
+
+/// Shell 虚拟项进程内展示缓存，避免 Box 文件轮询时重复解析系统图标和用户文件夹路径。
+static SHELL_VIRTUAL_ITEM_CACHE: OnceLock<Mutex<HashMap<String, DesktopItem>>> = OnceLock::new();
 
 /// Shell 虚拟项只维护 Windows 系统稳定解析名，展示名走固定中文以匹配当前产品语言。
 #[derive(Debug, Clone, Copy)]
@@ -48,7 +54,7 @@ const USER_FOLDER_PARSING_NAMES: &[&str] = &["::{59031A47-3F72-44A7-89C5-5595FE6
 pub fn list_shell_virtual_desktop_items(shell_ids: &[String]) -> Vec<DesktopItem> {
     shell_ids
         .iter()
-        .filter_map(|shell_id| create_shell_desktop_item(shell_id))
+        .filter_map(|shell_id| resolve_cached_shell_desktop_item(shell_id))
         .collect()
 }
 
@@ -121,6 +127,28 @@ fn create_shell_desktop_item(shell_id: &str) -> Option<DesktopItem> {
         shell_id: Some(shell_id.to_string()),
         source: DesktopItemSource::Shell,
     })
+}
+
+/// 读取 Shell 虚拟项展示模型；已知项在当前进程生命周期内稳定，可复用图标 data URL 降低轮询成本。
+fn resolve_cached_shell_desktop_item(shell_id: &str) -> Option<DesktopItem> {
+    {
+        let cache = lock_shell_virtual_item_cache();
+        if let Some(item) = cache.get(shell_id) {
+            return Some(item.clone());
+        }
+    }
+
+    let item = create_shell_desktop_item(shell_id)?;
+    lock_shell_virtual_item_cache().insert(shell_id.to_string(), item.clone());
+    Some(item)
+}
+
+/// 获取 Shell 虚拟项缓存；锁中毒时继续复用内部数据，保证展示降级不影响文件操作链路。
+fn lock_shell_virtual_item_cache() -> MutexGuard<'static, HashMap<String, DesktopItem>> {
+    SHELL_VIRTUAL_ITEM_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// 已知项静态清单不包含用户文件夹解析名，但仍通过同一个 ID 暴露给前端。

@@ -14,6 +14,12 @@ pub fn list_box_folder_items(folder_path: String) -> Result<Vec<DesktopItem>, St
     desktop_item::list_box_folder_items(&folder_path)
 }
 
+/// 读取 Box 文件夹轻量版本号，前端轮询用它避免无变化时重复传输图标列表。
+#[tauri::command]
+pub fn get_box_folder_revision(folder_path: String) -> Result<String, String> {
+    desktop_item::get_box_folder_revision(&folder_path)
+}
+
 /// 根据 Box 保存的 Shell 虚拟项 ID 生成展示模型，供系统桌面图标进入文件网格。
 #[tauri::command]
 pub fn list_shell_desktop_items(shell_ids: Vec<String>) -> Result<Vec<DesktopItem>, String> {

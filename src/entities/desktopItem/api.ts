@@ -26,6 +26,15 @@ export function listBoxFolderItems(folderPath: string): Promise<DesktopItem[]> {
 }
 
 /**
+ * 读取 Box 文件夹轻量版本号；轮询先比对版本，避免无变化时重复传输完整图标列表。
+ */
+export function getBoxFolderRevision(folderPath: string): Promise<string> {
+  return invoke<string>("get_box_folder_revision", {
+    folderPath,
+  });
+}
+
+/**
  * 按 Shell 虚拟项 ID 读取展示模型，Box 用它把持久化引用合并进文件网格。
  */
 export function listShellDesktopItems(shellIds: string[]): Promise<DesktopItem[]> {
