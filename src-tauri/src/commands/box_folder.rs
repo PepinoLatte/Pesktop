@@ -1,4 +1,4 @@
-use crate::domain::box_policy::{BoxConflictPolicy, BoxDeletePolicy, BoxDropAction};
+use crate::domain::desktop::{BoxConflictPolicy, BoxDeletePolicy, BoxDropAction};
 use crate::services::box_folder;
 
 /// 打开系统文件夹选择器，选择后续新建 Box 使用的收纳根目录。
@@ -40,8 +40,8 @@ pub fn delete_box_folder(
     box_folder::delete_box_folder(
         &folder_path,
         &desktop_path,
-        BoxDeletePolicy::from_str(&policy)?,
-        BoxConflictPolicy::from_str(&conflict_policy)?,
+        policy.parse::<BoxDeletePolicy>()?,
+        conflict_policy.parse::<BoxConflictPolicy>()?,
     )
 }
 
@@ -79,9 +79,9 @@ pub fn handle_box_dropped_paths(
     box_folder::handle_box_dropped_paths(
         &folder_path,
         &paths,
-        BoxDropAction::from_str(&action)?,
+        action.parse::<BoxDropAction>()?,
         owner,
-        BoxConflictPolicy::from_str(&conflict_policy)?,
+        conflict_policy.parse::<BoxConflictPolicy>()?,
     )
 }
 
@@ -107,8 +107,8 @@ pub fn handle_box_dragged_paths_to_desktop(
     box_folder::handle_box_dragged_paths_to_desktop(
         &desktop_path,
         &paths,
-        BoxDropAction::from_str(&action)?,
+        action.parse::<BoxDropAction>()?,
         owner,
-        BoxConflictPolicy::from_str(&conflict_policy)?,
+        conflict_policy.parse::<BoxConflictPolicy>()?,
     )
 }

@@ -26,7 +26,7 @@ pub fn run() {
             infrastructure::windows::single_instance::start_show_settings_listener(
                 app.handle().clone(),
             )
-            .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
+            .map_err(std::io::Error::other)?;
             infrastructure::tauri::tray::setup_app_tray(app)?;
 
             Ok(())
@@ -42,18 +42,18 @@ pub fn run() {
             commands::box_folder::handle_box_dropped_paths,
             commands::box_folder::migrate_box_folder,
             commands::box_folder::open_box_folder,
-            commands::desktop_item::delete_desktop_items,
-            commands::desktop_item::get_box_folder_revision,
-            commands::desktop_item::get_desktop_snapshot,
-            commands::desktop_item::get_shell_desktop_icon_visible,
-            commands::desktop_item::list_box_folder_items,
-            commands::desktop_item::list_shell_desktop_items,
-            commands::desktop_item::open_desktop_item,
-            commands::desktop_item::paste_desktop_items_from_clipboard,
-            commands::desktop_item::rename_desktop_item,
-            commands::desktop_item::set_shell_desktop_icon_visible,
-            commands::desktop_item::show_native_item_context_menu,
-            commands::desktop_item::write_desktop_items_to_clipboard,
+            commands::desktop::delete_desktop_items,
+            commands::desktop::get_box_folder_revision,
+            commands::desktop::get_desktop_snapshot,
+            commands::desktop::get_shell_desktop_icon_visible,
+            commands::desktop::list_box_folder_items,
+            commands::desktop::list_shell_desktop_items,
+            commands::desktop::open_desktop_item,
+            commands::desktop::paste_desktop_items_from_clipboard,
+            commands::desktop::rename_desktop_item,
+            commands::desktop::set_shell_desktop_icon_visible,
+            commands::desktop::show_native_item_context_menu,
+            commands::desktop::write_desktop_items_to_clipboard,
             commands::native_drop::register_box_native_drop_target,
             commands::native_drop::unregister_box_native_drop_target,
             commands::app::is_autostart_enabled,
@@ -66,7 +66,7 @@ pub fn run() {
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
             if let Err(error) =
-                services::app_lifecycle::restore_shell_desktop_icons_before_exit(app_handle)
+                services::app::lifecycle::restore_shell_desktop_icons_before_exit(app_handle)
             {
                 eprintln!("failed to restore shell desktop icons before exit: {error}");
             }

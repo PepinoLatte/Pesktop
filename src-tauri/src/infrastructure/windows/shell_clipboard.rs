@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::domain::desktop_item::FileClipboardOperation;
+use crate::domain::desktop::FileClipboardOperation;
 
 /// 从系统剪贴板读取到的文件路径和用户操作意图。
 pub(crate) struct FileClipboardPayload {
@@ -87,8 +87,6 @@ pub(crate) fn read_file_list() -> Result<Option<FileClipboardPayload>, String> {
 #[cfg(target_os = "windows")]
 use std::mem::size_of;
 #[cfg(target_os = "windows")]
-use std::ptr;
-#[cfg(target_os = "windows")]
 use windows::core::w;
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::{HANDLE, HGLOBAL, POINT};
@@ -98,15 +96,16 @@ use windows::Win32::System::DataExchange::{
     RegisterClipboardFormatW, SetClipboardData,
 };
 #[cfg(target_os = "windows")]
-use windows::Win32::System::Memory::{
-    GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
-};
+use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Ole::{CF_HDROP, DROPEFFECT_COPY, DROPEFFECT_MOVE};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Shell::{DragQueryFileW, DROPFILES, HDROP};
 #[cfg(target_os = "windows")]
 use windows_core::BOOL;
+
+#[cfg(target_os = "windows")]
+use crate::infrastructure::windows::common::global_memory;
 
 #[cfg(target_os = "windows")]
 struct ClipboardSession;
@@ -159,7 +158,7 @@ fn create_hdrop_memory(paths: &[PathBuf]) -> Result<HGLOBAL, String> {
     }
     bytes.extend(0u16.to_le_bytes());
 
-    create_global_memory_from_bytes(&bytes, "无法创建文件剪贴板路径内存")
+    global_memory::create_moveable_from_bytes(&bytes, "无法创建文件剪贴板路径内存")
 }
 
 #[cfg(target_os = "windows")]
@@ -169,24 +168,7 @@ fn create_drop_effect_memory(operation: FileClipboardOperation) -> Result<HGLOBA
         FileClipboardOperation::Cut => DROPEFFECT_MOVE.0,
     };
 
-    create_global_memory_from_bytes(&effect.to_le_bytes(), "无法创建文件剪贴板操作内存")
-}
-
-#[cfg(target_os = "windows")]
-fn create_global_memory_from_bytes(bytes: &[u8], message: &str) -> Result<HGLOBAL, String> {
-    let handle = unsafe { GlobalAlloc(GMEM_MOVEABLE, bytes.len()) }
-        .map_err(|error| format!("{message}：{error}"))?;
-    let pointer = unsafe { GlobalLock(handle) }.cast::<u8>();
-    if pointer.is_null() {
-        return Err(format!("{message}：无法锁定全局内存"));
-    }
-
-    unsafe {
-        ptr::copy_nonoverlapping(bytes.as_ptr(), pointer, bytes.len());
-        let _ = GlobalUnlock(handle);
-    }
-
-    Ok(handle)
+    global_memory::create_moveable_from_bytes(&effect.to_le_bytes(), "无法创建文件剪贴板操作内存")
 }
 
 #[cfg(target_os = "windows")]

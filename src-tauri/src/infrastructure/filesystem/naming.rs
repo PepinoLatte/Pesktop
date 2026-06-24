@@ -4,7 +4,11 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::domain::filesystem::WINDOWS_SHORTCUT_SUFFIX;
+
 const BOX_FOLDER_PREFIX: &str = "box_";
+/// 自动重命名最多尝试的副本序号上限，防止异常目录导致无界循环。
+const DUPLICATE_NAME_LIMIT: usize = 10_000;
 
 /// 校验由前端 Box ID 派生的物理目录名，避免用户标题参与真实路径拼接。
 pub(crate) fn sanitize_box_folder_name(folder_name: &str) -> Result<String, String> {
@@ -50,7 +54,7 @@ pub(crate) fn desired_shortcut_path(source: &Path, destination: &Path) -> PathBu
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "映射项目".to_string());
 
-    destination.join(format!("{stem}.lnk"))
+    destination.join(format!("{stem}{WINDOWS_SHORTCUT_SUFFIX}"))
 }
 
 /// 重命名冲突目标时保持 Explorer 常见的 `名称 (2).ext` 形式。
@@ -67,7 +71,7 @@ pub(crate) fn resolve_renamed_destination(
         .ok_or_else(|| "无法解析目标文件夹".to_string())?;
     let (stem, extension) = split_duplicate_name(desired_destination);
 
-    for duplicate_index in 2..10_000 {
+    for duplicate_index in 2..DUPLICATE_NAME_LIMIT {
         let candidate = parent.join(format!("{stem} ({duplicate_index}){extension}"));
         if !candidate.exists() && reserve_path(&candidate, reserved_paths)? {
             return Ok(candidate);

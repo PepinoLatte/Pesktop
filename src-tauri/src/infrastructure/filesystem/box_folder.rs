@@ -4,7 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::domain::box_policy::{BoxConflictPolicy, BoxDeletePolicy, BoxDropAction};
+use crate::domain::desktop::{BoxConflictPolicy, BoxDeletePolicy, BoxDropAction};
 use crate::infrastructure::filesystem::{naming, transfer};
 use crate::infrastructure::windows::shell_file;
 

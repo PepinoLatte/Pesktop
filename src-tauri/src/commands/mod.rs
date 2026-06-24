@@ -2,5 +2,5 @@
 
 pub mod app;
 pub mod box_folder;
-pub mod desktop_item;
+pub mod desktop;
 pub mod native_drop;
