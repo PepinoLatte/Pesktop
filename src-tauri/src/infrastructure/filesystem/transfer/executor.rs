@@ -17,12 +17,9 @@ pub(super) fn execute_transfer_plans(plans: &[FileTransferPlan]) -> Result<Vec<P
 
     while index < plans.len() {
         let plan = &plans[index];
-        if plan.kind == FileTransferKind::Move && !plan.replaces_existing {
+        if plan.can_batch_shell_move() {
             let mut next_index = index + 1;
-            while next_index < plans.len()
-                && plans[next_index].kind == FileTransferKind::Move
-                && !plans[next_index].replaces_existing
-            {
+            while next_index < plans.len() && plans[next_index].can_batch_shell_move() {
                 next_index += 1;
             }
 
@@ -32,14 +29,11 @@ pub(super) fn execute_transfer_plans(plans: &[FileTransferPlan]) -> Result<Vec<P
                 return Err(error);
             }
 
-            completed_transfers.extend(plans[index..next_index].iter().map(|completed_plan| {
-                CompletedTransfer {
-                    source: completed_plan.source.clone(),
-                    destination: completed_plan.destination.clone(),
-                    kind: completed_plan.kind,
-                    backup: None,
-                }
-            }));
+            completed_transfers.extend(
+                plans[index..next_index]
+                    .iter()
+                    .map(FileTransferPlan::completed_without_backup),
+            );
             index = next_index;
             continue;
         }

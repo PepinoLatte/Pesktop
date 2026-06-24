@@ -17,11 +17,11 @@ pub(crate) fn create_box_folder(root_path: &str, folder_name: &str) -> Result<St
     fs::create_dir(&folder_path).map_err(|error| {
         format!(
             "无法创建 Box 文件夹 {}：{error}",
-            folder_path.to_string_lossy()
+            naming::display_path(&folder_path)
         )
     })?;
 
-    Ok(folder_path.to_string_lossy().to_string())
+    Ok(naming::display_path(&folder_path))
 }
 
 /// 删除 Box 前按策略处理真实文件夹；调用方只有在本函数成功后才能删除数据库记录。
@@ -50,16 +50,11 @@ pub(crate) fn delete_box_folder(
 
 /// 将单个 Box 的真实文件夹迁移到新的收纳根目录，保留物理目录名和 Box 展示标题的解耦关系。
 pub(crate) fn migrate_box_folder(folder_path: &str, root_path: &str) -> Result<String, String> {
-    let source = PathBuf::from(folder_path);
-    if !source.exists() {
-        return Err(format!(
-            "Box 文件夹不存在，无法迁移：{}",
-            source.to_string_lossy()
-        ));
-    }
-    if !source.is_dir() {
-        return Err("Box 路径不是文件夹，已停止迁移以避免误操作".to_string());
-    }
+    let source = ensure_existing_directory(
+        folder_path,
+        "Box 文件夹不存在，无法迁移",
+        "Box 路径不是文件夹，已停止迁移以避免误操作",
+    )?;
 
     let root = ensure_collection_root(root_path)?;
     let folder_name = source
@@ -67,12 +62,12 @@ pub(crate) fn migrate_box_folder(folder_path: &str, root_path: &str) -> Result<S
         .ok_or_else(|| "无法解析 Box 文件夹名称".to_string())?;
     let destination = root.join(folder_name);
     if naming::paths_refer_to_same_entry(&source, &destination)? {
-        return Ok(destination.to_string_lossy().to_string());
+        return Ok(naming::display_path(&destination));
     }
     if destination.exists() {
         return Err(format!(
             "目标收纳位置已存在同名文件夹，已停止迁移：{}",
-            destination.to_string_lossy()
+            naming::display_path(&destination)
         ));
     }
     if naming::destination_is_inside_source(&source, &root)? {
@@ -81,7 +76,7 @@ pub(crate) fn migrate_box_folder(folder_path: &str, root_path: &str) -> Result<S
 
     transfer::move_path_without_shell_prompt(&source, &destination)?;
 
-    Ok(destination.to_string_lossy().to_string())
+    Ok(naming::display_path(&destination))
 }
 
 /// 将同一目录下的文件项重命名，避免前端拼接路径时跨目录移动真实文件。
@@ -97,7 +92,7 @@ pub(crate) fn rename_item(path: &str, new_name: &str) -> Result<String, String> 
         .ok_or_else(|| "无法解析文件所在目录，已停止重命名".to_string())?;
     let destination = parent.join(sanitized_name);
     if destination == source {
-        return Ok(destination.to_string_lossy().to_string());
+        return Ok(naming::display_path(&destination));
     }
     if destination.exists() {
         return Err("同名文件已经存在，已停止重命名".to_string());
@@ -105,7 +100,7 @@ pub(crate) fn rename_item(path: &str, new_name: &str) -> Result<String, String> 
 
     fs::rename(&source, &destination).map_err(|error| format!("无法重命名文件项：{error}"))?;
 
-    Ok(destination.to_string_lossy().to_string())
+    Ok(naming::display_path(&destination))
 }
 
 /// 按当前拖入策略处理外部文件路径；调用方只传真实文件系统路径，不接收 Shell 虚拟对象。
@@ -129,7 +124,7 @@ pub(crate) fn handle_box_dropped_paths(
         |destinations| {
             destinations
                 .iter()
-                .map(|destination| destination.to_string_lossy().to_string())
+                .map(|destination| naming::display_path(destination))
                 .collect()
         },
     )
@@ -142,17 +137,12 @@ pub(crate) fn handle_box_dragged_paths_to_desktop(
     action: BoxDropAction,
     conflict_policy: BoxConflictPolicy,
 ) -> Result<(), String> {
-    if desktop_path.trim().is_empty() {
-        return Err("无法定位桌面路径，已停止拖出文件".to_string());
-    }
-
-    let desktop = PathBuf::from(desktop_path);
-    if !desktop.exists() {
-        fs::create_dir_all(&desktop).map_err(|error| format!("无法创建桌面目录：{error}"))?;
-    }
-    if !desktop.is_dir() {
-        return Err("桌面路径不是文件夹，无法处理拖出文件".to_string());
-    }
+    let desktop = ensure_directory_with_create(
+        desktop_path,
+        "无法定位桌面路径，已停止拖出文件",
+        "无法创建桌面目录",
+        "桌面路径不是文件夹，无法处理拖出文件",
+    )?;
 
     let sources = transfer::normalize_existing_paths(paths)?;
     if sources.is_empty() {
@@ -164,18 +154,12 @@ pub(crate) fn handle_box_dragged_paths_to_desktop(
 }
 
 fn ensure_collection_root(root_path: &str) -> Result<PathBuf, String> {
-    let root = PathBuf::from(root_path);
-    if root_path.trim().is_empty() {
-        return Err("请先选择 Box 收纳位置".to_string());
-    }
-    if !root.exists() {
-        fs::create_dir_all(&root).map_err(|error| format!("无法创建收纳根目录：{error}"))?;
-    }
-    if !root.is_dir() {
-        return Err("收纳位置必须是文件夹".to_string());
-    }
-
-    Ok(root)
+    ensure_directory_with_create(
+        root_path,
+        "请先选择 Box 收纳位置",
+        "无法创建收纳根目录",
+        "收纳位置必须是文件夹",
+    )
 }
 
 fn move_folder_contents_to_desktop(
@@ -183,13 +167,12 @@ fn move_folder_contents_to_desktop(
     desktop_path: &str,
     conflict_policy: BoxConflictPolicy,
 ) -> Result<(), String> {
-    let desktop = PathBuf::from(desktop_path);
-    if desktop_path.trim().is_empty() {
-        return Err("无法定位桌面路径，已停止删除 Box".to_string());
-    }
-    if !desktop.exists() {
-        fs::create_dir_all(&desktop).map_err(|error| format!("无法创建桌面目录：{error}"))?;
-    }
+    let desktop = ensure_directory_with_create(
+        desktop_path,
+        "无法定位桌面路径，已停止删除 Box",
+        "无法创建桌面目录",
+        "桌面路径不是文件夹，已停止删除 Box",
+    )?;
 
     let children = collect_folder_children(folder)?;
     if !children.is_empty() {
@@ -222,4 +205,46 @@ fn collect_folder_children(folder: &Path) -> Result<Vec<PathBuf>, String> {
     }
 
     Ok(children)
+}
+
+/// 按业务上下文创建并校验目录，集中处理空路径、缺失目录和普通文件误传三类边界。
+fn ensure_directory_with_create(
+    raw_path: &str,
+    empty_message: &str,
+    create_message: &str,
+    not_dir_message: &str,
+) -> Result<PathBuf, String> {
+    if raw_path.trim().is_empty() {
+        return Err(empty_message.to_string());
+    }
+
+    let directory = PathBuf::from(raw_path);
+    if !directory.exists() {
+        fs::create_dir_all(&directory).map_err(|error| format!("{create_message}：{error}"))?;
+    }
+    if !directory.is_dir() {
+        return Err(not_dir_message.to_string());
+    }
+
+    Ok(directory)
+}
+
+/// 校验调用方传入的既有目录，避免迁移等危险操作误作用到普通文件。
+fn ensure_existing_directory(
+    raw_path: &str,
+    missing_message: &str,
+    not_dir_message: &str,
+) -> Result<PathBuf, String> {
+    let directory = PathBuf::from(raw_path);
+    if !directory.exists() {
+        return Err(format!(
+            "{missing_message}：{}",
+            naming::display_path(&directory)
+        ));
+    }
+    if !directory.is_dir() {
+        return Err(not_dir_message.to_string());
+    }
+
+    Ok(directory)
 }

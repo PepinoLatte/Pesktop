@@ -15,28 +15,18 @@ pub fn recycle_path(path: &Path) -> Result<(), String> {
 /// 删除多个路径时进入回收站，避免自绘文件区绕过系统恢复能力。
 #[cfg(target_os = "windows")]
 pub fn recycle_paths(paths: &[PathBuf]) -> Result<(), String> {
-    use windows::core::PCWSTR;
-    use windows::Win32::UI::Shell::{SHFileOperationW, FOF_ALLOWUNDO, FO_DELETE, SHFILEOPSTRUCTW};
+    use windows::Win32::UI::Shell::{FOF_ALLOWUNDO, FO_DELETE};
 
-    let mut from = wide::double_null_path_list(paths);
-    let mut operation = SHFILEOPSTRUCTW {
-        wFunc: FO_DELETE,
-        pFrom: PCWSTR(from.as_mut_ptr()),
-        fFlags: FOF_ALLOWUNDO.0 as u16,
-        ..SHFILEOPSTRUCTW::default()
-    };
-    let result = unsafe { SHFileOperationW(&mut operation) };
-
-    if result != 0 {
-        return Err(format!(
-            "Windows 无法将 Box 文件项移入回收站，错误码 {result}"
-        ));
-    }
-    if operation.fAnyOperationsAborted.as_bool() {
-        return Err("已取消删除 Box 文件项".to_string());
-    }
-
-    Ok(())
+    run_shell_operation(
+        FO_DELETE,
+        wide::double_null_path_list(paths),
+        None,
+        FOF_ALLOWUNDO,
+        ShellFileOperationMessages {
+            failed: "Windows 无法将 Box 文件项移入回收站",
+            aborted: "已取消删除 Box 文件项",
+        },
+    )
 }
 
 /// 非 Windows 平台没有回收站语义，删除文件夹时退回直接删除以便开发调试。
@@ -78,59 +68,74 @@ fn move_paths_to_shared_folder_with_shell(
     moves: &[(PathBuf, PathBuf)],
     destination_folder: &Path,
 ) -> Result<(), String> {
-    use windows::core::PCWSTR;
-    use windows::Win32::UI::Shell::{
-        SHFileOperationW, FOF_NOCONFIRMMKDIR, FO_MOVE, SHFILEOPSTRUCTW,
-    };
-
-    let sources = moves
-        .iter()
-        .map(|(source, _)| source.clone())
-        .collect::<Vec<_>>();
-    let mut from = wide::double_null_path_list(&sources);
-    let mut to = wide::double_null_single_path(destination_folder);
-    let mut operation = SHFILEOPSTRUCTW {
-        wFunc: FO_MOVE,
-        pFrom: PCWSTR(from.as_mut_ptr()),
-        pTo: PCWSTR(to.as_mut_ptr()),
-        fFlags: FOF_NOCONFIRMMKDIR.0 as u16,
-        ..SHFILEOPSTRUCTW::default()
-    };
-    let result = unsafe { SHFileOperationW(&mut operation) };
-
-    if result != 0 {
-        return Err(format!("Windows 无法移动 Box 文件项，错误码 {result}"));
-    }
-    if operation.fAnyOperationsAborted.as_bool() {
-        return Err("已取消移动 Box 文件项".to_string());
-    }
-
-    Ok(())
+    run_shell_move(
+        wide::double_null_paths(moves.iter().map(|(source, _)| source.as_path())),
+        wide::double_null_single_path(destination_folder),
+    )
 }
 
 #[cfg(target_os = "windows")]
 fn move_single_path_with_shell(source: &Path, destination: &Path) -> Result<(), String> {
-    use windows::core::PCWSTR;
-    use windows::Win32::UI::Shell::{
-        SHFileOperationW, FOF_NOCONFIRMMKDIR, FO_MOVE, SHFILEOPSTRUCTW,
-    };
+    run_shell_move(
+        wide::double_null_single_path(source),
+        wide::double_null_single_path(destination),
+    )
+}
 
-    let mut from = wide::double_null_single_path(source);
-    let mut to = wide::double_null_single_path(destination);
+#[cfg(target_os = "windows")]
+fn run_shell_move(from: Vec<u16>, to: Vec<u16>) -> Result<(), String> {
+    use windows::Win32::UI::Shell::{FOF_NOCONFIRMMKDIR, FO_MOVE};
+
+    run_shell_operation(
+        FO_MOVE,
+        from,
+        Some(to),
+        FOF_NOCONFIRMMKDIR,
+        ShellFileOperationMessages {
+            failed: "Windows 无法移动 Box 文件项",
+            aborted: "已取消移动 Box 文件项",
+        },
+    )
+}
+
+#[cfg(target_os = "windows")]
+struct ShellFileOperationMessages {
+    failed: &'static str,
+    aborted: &'static str,
+}
+
+#[cfg(target_os = "windows")]
+fn run_shell_operation(
+    operation_kind: u32,
+    mut from: Vec<u16>,
+    to: Option<Vec<u16>>,
+    flags: windows::Win32::UI::Shell::FILEOPERATION_FLAGS,
+    messages: ShellFileOperationMessages,
+) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::Shell::{SHFileOperationW, SHFILEOPSTRUCTW};
+
+    let mut to = to;
+    let to_pointer = to
+        .as_mut()
+        .map(|value| PCWSTR(value.as_mut_ptr()))
+        .unwrap_or_else(PCWSTR::null);
+
+    // SHFileOperationW 需要双空结尾的 UTF-16 缓冲区在调用期间保持存活，故由本函数接管 Vec 生命周期。
     let mut operation = SHFILEOPSTRUCTW {
-        wFunc: FO_MOVE,
+        wFunc: operation_kind,
         pFrom: PCWSTR(from.as_mut_ptr()),
-        pTo: PCWSTR(to.as_mut_ptr()),
-        fFlags: FOF_NOCONFIRMMKDIR.0 as u16,
+        pTo: to_pointer,
+        fFlags: flags.0 as u16,
         ..SHFILEOPSTRUCTW::default()
     };
     let result = unsafe { SHFileOperationW(&mut operation) };
 
     if result != 0 {
-        return Err(format!("Windows 无法移动 Box 文件项，错误码 {result}"));
+        return Err(format!("{}，错误码 {result}", messages.failed));
     }
     if operation.fAnyOperationsAborted.as_bool() {
-        return Err("已取消移动 Box 文件项".to_string());
+        return Err(messages.aborted.to_string());
     }
 
     Ok(())

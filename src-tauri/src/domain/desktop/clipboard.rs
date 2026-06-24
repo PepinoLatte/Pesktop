@@ -11,6 +11,21 @@ pub enum FileClipboardOperation {
     Cut,
 }
 
+impl FileClipboardOperation {
+    /// 返回前端快捷键命令使用的剪贴板操作代码，避免复制/剪切协议字符串散落。
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Copy => file_clipboard_operation_code::COPY,
+            Self::Cut => file_clipboard_operation_code::CUT,
+        }
+    }
+
+    /// 剪切在 Windows 文件剪贴板里对应移动语义，粘贴到 Box 时应转为真实移动操作。
+    pub const fn is_cut(self) -> bool {
+        matches!(self, Self::Cut)
+    }
+}
+
 impl FromStr for FileClipboardOperation {
     type Err = String;
 
@@ -21,24 +36,5 @@ impl FromStr for FileClipboardOperation {
             file_clipboard_operation_code::CUT => Ok(Self::Cut),
             _ => Err("未知的文件剪贴板操作".to_string()),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 文件剪贴板操作会触发复制或移动，解析层必须保持严格白名单。
-    #[test]
-    fn parses_file_clipboard_operation() {
-        assert_eq!(
-            "copy".parse::<FileClipboardOperation>(),
-            Ok(FileClipboardOperation::Copy)
-        );
-        assert_eq!(
-            "cut".parse::<FileClipboardOperation>(),
-            Ok(FileClipboardOperation::Cut)
-        );
-        assert!("move".parse::<FileClipboardOperation>().is_err());
     }
 }

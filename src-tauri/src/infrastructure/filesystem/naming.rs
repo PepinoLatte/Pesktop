@@ -1,12 +1,22 @@
 //! 文件名、Box 物理目录名和冲突目标命名策略集中在这里，避免真实文件操作接收未校验路径片段。
 
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::domain::filesystem::WINDOWS_SHORTCUT_SUFFIX;
 
 const BOX_FOLDER_PREFIX: &str = "box_";
+/// Windows 文件名禁止字符集中维护，避免重命名校验散落多处 `matches!` 字面量。
+const WINDOWS_FORBIDDEN_FILE_NAME_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+/// Windows 设备保留名即使带扩展名也不能作为普通文件名使用。
+const WINDOWS_RESERVED_DEVICE_NAMES: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+const SHORTCUT_FALLBACK_STEM: &str = "映射项目";
+const DUPLICATE_FALLBACK_STEM: &str = "文件";
 /// 自动重命名最多尝试的副本序号上限，防止异常目录导致无界循环。
 const DUPLICATE_NAME_LIMIT: usize = 10_000;
 
@@ -15,6 +25,9 @@ pub(crate) fn sanitize_box_folder_name(folder_name: &str) -> Result<String, Stri
     let trimmed = folder_name.trim();
     if !trimmed.starts_with(BOX_FOLDER_PREFIX) {
         return Err("Box 文件夹名必须由 Dasktop 生成".to_string());
+    }
+    if trimmed.len() == BOX_FOLDER_PREFIX.len() {
+        return Err("Box 文件夹名缺少业务 ID".to_string());
     }
     if trimmed
         .chars()
@@ -35,24 +48,32 @@ pub(crate) fn sanitize_user_file_name(file_name: &str) -> Result<String, String>
     if trimmed == "." || trimmed == ".." {
         return Err("文件名不能使用系统保留名称".to_string());
     }
+    if trimmed.chars().any(|value| value.is_control()) {
+        return Err("文件名包含不可见控制字符".to_string());
+    }
     if trimmed
         .chars()
-        .any(|value| matches!(value, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'))
+        .any(|value| WINDOWS_FORBIDDEN_FILE_NAME_CHARS.contains(&value))
     {
         return Err("文件名包含 Windows 不允许的字符".to_string());
     }
+    let normalized = trimmed.trim_end_matches(['.', ' ']);
+    if normalized.is_empty() {
+        return Err("文件名不能为空".to_string());
+    }
+    if is_windows_reserved_device_name(normalized) {
+        return Err("文件名不能使用 Windows 保留设备名".to_string());
+    }
 
-    Ok(trimmed.trim_end_matches('.').trim_end().to_string())
+    Ok(normalized.to_string())
 }
 
 /// 为映射模式生成 `.lnk` 目标路径，文件夹和无扩展名路径都使用稳定展示名兜底。
 pub(crate) fn desired_shortcut_path(source: &Path, destination: &Path) -> PathBuf {
-    let stem = source
-        .file_stem()
-        .or_else(|| source.file_name())
-        .map(|value| value.to_string_lossy().to_string())
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "映射项目".to_string());
+    let stem = non_empty_os_text(
+        source.file_stem().or_else(|| source.file_name()),
+        SHORTCUT_FALLBACK_STEM,
+    );
 
     destination.join(format!("{stem}{WINDOWS_SHORTCUT_SUFFIX}"))
 }
@@ -132,18 +153,35 @@ pub(crate) fn destination_is_inside_source(
 }
 
 fn split_duplicate_name(path: &Path) -> (String, String) {
-    let stem = path
-        .file_stem()
-        .or_else(|| path.file_name())
-        .map(|value| value.to_string_lossy().to_string())
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "文件".to_string());
+    let stem = non_empty_os_text(
+        path.file_stem().or_else(|| path.file_name()),
+        DUPLICATE_FALLBACK_STEM,
+    );
     let extension = path
         .extension()
         .map(|value| format!(".{}", value.to_string_lossy()))
         .unwrap_or_default();
 
     (stem, extension)
+}
+
+/// 统一路径返回和错误展示格式，避免各文件系统模块重复 `to_string_lossy` 转换。
+pub(crate) fn display_path(path: &Path) -> String {
+    path.to_string_lossy().to_string()
+}
+
+fn non_empty_os_text(value: Option<&OsStr>, fallback: &str) -> String {
+    value
+        .map(|value| value.to_string_lossy().to_string())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn is_windows_reserved_device_name(file_name: &str) -> bool {
+    let stem = file_name.split('.').next().unwrap_or_default();
+    WINDOWS_RESERVED_DEVICE_NAMES
+        .iter()
+        .any(|reserved_name| stem.eq_ignore_ascii_case(reserved_name))
 }
 
 fn path_key(path: &Path) -> Result<String, String> {
@@ -156,7 +194,7 @@ fn path_key(path: &Path) -> Result<String, String> {
             .map_err(|error| format!("无法读取当前目录：{error}"))?
             .join(path)
     };
-    let text = absolute_path.to_string_lossy().to_string();
+    let text = display_path(&absolute_path);
 
     #[cfg(target_os = "windows")]
     {

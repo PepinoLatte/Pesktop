@@ -13,7 +13,7 @@ pub(crate) use window::{handle_window_close_requested, show_settings_window};
 
 /// 初始化系统托盘图标和右键菜单；菜单只分发动作，具体 Box 生命周期仍由前端统一处理。
 pub fn setup_app_tray(app: &App) -> tauri::Result<()> {
-    let autostart_enabled = resolve_autostart_enabled(app.handle()).unwrap_or(false);
+    let autostart_enabled = autostart::resolve_initial_autostart_enabled(app.handle());
     let (tray_menu, autostart_item) = menu::build_tray_menu(app, autostart_enabled)?;
     let autostart_item_for_menu = autostart_item.clone();
     let mut tray_builder = TrayIconBuilder::with_id(menu::TRAY_ID)

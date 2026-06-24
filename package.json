@@ -1,8 +1,13 @@
 {
   "name": "dasktop",
   "private": true,
-  "version": "0.2.3",
+  "version": "0.2.4",
   "author": "Aug_Sakura",
+  "homepage": "https://github.com/AugSakura/Dasktop",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AugSakura/Dasktop.git"
+  },
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.5.3",

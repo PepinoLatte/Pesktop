@@ -3,6 +3,8 @@
 use std::fs;
 use std::path::Path;
 
+use crate::infrastructure::filesystem::naming;
+
 /// 复制单个文件或目录；目录复制逐层回滚，避免失败时留下半截目录树。
 pub(super) fn copy_path_without_shell_prompt(source: &Path, target: &Path) -> Result<(), String> {
     if target.exists() {
@@ -18,7 +20,7 @@ pub(super) fn copy_path_without_shell_prompt(source: &Path, target: &Path) -> Re
     } else {
         Err(format!(
             "无法处理未知类型的文件项：{}",
-            source.to_string_lossy()
+            naming::display_path(source)
         ))
     }
 }

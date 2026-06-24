@@ -37,14 +37,11 @@ fn resolve_current_dir() -> PathBuf {
 /// 调用 Windows Shell Known Folder API 读取当前用户真实桌面，覆盖 D 盘、OneDrive 和组策略重定向场景。
 #[cfg(target_os = "windows")]
 fn resolve_windows_known_desktop_path() -> Option<PathBuf> {
-    use windows::Win32::System::Com::CoTaskMemFree;
+    use crate::infrastructure::windows::common::com;
     use windows::Win32::UI::Shell::{FOLDERID_Desktop, SHGetKnownFolderPath, KF_FLAG_DEFAULT};
 
     let path = unsafe { SHGetKnownFolderPath(&FOLDERID_Desktop, KF_FLAG_DEFAULT, None).ok()? };
-    let path_text_result = unsafe { path.to_string() };
-    unsafe {
-        CoTaskMemFree(Some(path.as_ptr() as *const _));
-    }
+    let path_text_result = unsafe { com::take_pwstr_string(path) };
 
     path_text_result
         .ok()

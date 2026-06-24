@@ -3,6 +3,14 @@
 /// 设置窗口 label 由 Tauri 配置和前端入口共同约定，托盘与单实例唤起都依赖它。
 pub const SETTINGS_WINDOW_LABEL: &str = "main";
 
+/// Box WebView 窗口 label 前缀，原生拖放注册只允许作用于真实 Box 窗口。
+pub const BOX_WINDOW_LABEL_PREFIX: &str = "box_";
+
+/// 判断窗口 label 是否属于 Box 实例，集中维护前后端动态 Box 窗口命名规则。
+pub fn is_box_window_label(window_label: &str) -> bool {
+    window_label.starts_with(BOX_WINDOW_LABEL_PREFIX)
+}
+
 /// 托盘请求创建 Box 的前端事件；主 WebView 作为隐藏控制器复用现有 Store 创建流程。
 pub const TRAY_CREATE_BOX_EVENT: &str = "dasktop://tray-create-box";
 

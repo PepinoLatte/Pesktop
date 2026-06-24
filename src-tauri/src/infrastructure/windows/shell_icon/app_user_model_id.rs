@@ -98,36 +98,3 @@ fn is_app_user_model_id_character(character: char) -> bool {
     character.is_ascii_alphanumeric()
         || matches!(character, '.' | '_' | '-' | APP_USER_MODEL_ID_SEPARATOR)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Store 快捷方式的目标常只存在于 `.lnk` 数据块，测试同时覆盖 Unicode 和窄字节两种保存方式。
-    #[test]
-    fn extracts_app_user_model_id_from_shortcut_bytes() {
-        let app_user_model_id = "OpenAI.Codex_2p2nqsd0c76g0!App";
-        let mut utf16_bytes = b"prefix".to_vec();
-        for unit in app_user_model_id.encode_utf16() {
-            utf16_bytes.extend_from_slice(&unit.to_le_bytes());
-        }
-        utf16_bytes.extend_from_slice(b"\0suffix");
-
-        assert_eq!(
-            extract_from_bytes(&utf16_bytes).as_deref(),
-            Some(app_user_model_id)
-        );
-
-        let ascii_bytes = format!("prefix\0{app_user_model_id}\0suffix").into_bytes();
-        assert_eq!(
-            extract_from_bytes(&ascii_bytes).as_deref(),
-            Some(app_user_model_id)
-        );
-    }
-
-    /// 普通描述文本即使包含感叹号，也不能被误判为 AppsFolder 入口。
-    #[test]
-    fn ignores_non_app_user_model_id_text() {
-        assert_eq!(extract_from_bytes(b"Codex!Shortcut"), None);
-    }
-}

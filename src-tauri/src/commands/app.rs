@@ -1,4 +1,3 @@
-use crate::infrastructure::windows::mouse;
 use crate::services::app::lifecycle;
 use tauri::AppHandle;
 
@@ -17,5 +16,5 @@ pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<bool, Stri
 /// 读取系统级左键状态，跨 WebView 拖拽释放时不依赖当前窗口能否收到鼠标事件。
 #[tauri::command]
 pub fn is_primary_mouse_button_pressed() -> bool {
-    mouse::is_primary_mouse_button_pressed()
+    lifecycle::is_primary_mouse_button_pressed()
 }

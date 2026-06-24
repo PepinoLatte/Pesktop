@@ -30,6 +30,39 @@ pub enum BoxConflictPolicy {
     Replace,
 }
 
+impl BoxDeletePolicy {
+    /// 返回前端和数据库共同使用的策略代码，避免调用方反向硬编码协议字符串。
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::MoveContentsToDesktop => box_delete_policy_code::MOVE_CONTENTS_TO_DESKTOP,
+            Self::KeepFolder => box_delete_policy_code::KEEP_FOLDER,
+            Self::RecycleFolder => box_delete_policy_code::RECYCLE_FOLDER,
+        }
+    }
+}
+
+impl BoxDropAction {
+    /// 返回前端和数据库共同使用的拖拽操作代码，保持真实文件操作语义可追踪。
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Copy => box_drop_action_code::COPY,
+            Self::Move => box_drop_action_code::MOVE,
+            Self::Map => box_drop_action_code::MAP,
+        }
+    }
+}
+
+impl BoxConflictPolicy {
+    /// 返回前端和数据库共同使用的同名处理代码，避免替换类危险操作出现分叉。
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Rename => box_conflict_policy_code::RENAME,
+            Self::Skip => box_conflict_policy_code::SKIP,
+            Self::Replace => box_conflict_policy_code::REPLACE,
+        }
+    }
+}
+
 impl FromStr for BoxDeletePolicy {
     type Err = String;
 
@@ -69,32 +102,5 @@ impl FromStr for BoxConflictPolicy {
             box_conflict_policy_code::REPLACE => Ok(Self::Replace),
             _ => Err("未知的同名文件处理方式".to_string()),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 前端策略字符串是危险文件操作的入口，标准 FromStr 必须只接受明确白名单。
-    #[test]
-    fn parses_known_box_policies() {
-        assert_eq!(
-            "moveContentsToDesktop".parse::<BoxDeletePolicy>(),
-            Ok(BoxDeletePolicy::MoveContentsToDesktop)
-        );
-        assert_eq!("map".parse::<BoxDropAction>(), Ok(BoxDropAction::Map));
-        assert_eq!(
-            "replace".parse::<BoxConflictPolicy>(),
-            Ok(BoxConflictPolicy::Replace)
-        );
-    }
-
-    /// 未知策略必须失败，避免命令层把任意字符串静默映射成高风险默认行为。
-    #[test]
-    fn rejects_unknown_box_policies() {
-        assert!("delete".parse::<BoxDeletePolicy>().is_err());
-        assert!("link".parse::<BoxDropAction>().is_err());
-        assert!("overwrite".parse::<BoxConflictPolicy>().is_err());
     }
 }

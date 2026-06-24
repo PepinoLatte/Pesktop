@@ -6,7 +6,7 @@ use std::path::Path;
 
 use super::{app_user_model_id, bitmap};
 use crate::domain::filesystem::WINDOWS_SHORTCUT_EXTENSION;
-use crate::infrastructure::windows::common::{error, wide};
+use crate::infrastructure::windows::common::{com, error, wide};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use windows::core::{Interface, PCWSTR};
@@ -14,8 +14,8 @@ use windows::Win32::Foundation::{MAX_PATH, SIZE};
 use windows::Win32::Graphics::Gdi::DeleteObject;
 use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoTaskMemFree, IPersistFile, CLSCTX_INPROC_SERVER,
-    COINIT_APARTMENTTHREADED, STGM_READ,
+    CoCreateInstance, CoInitializeEx, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+    STGM_READ,
 };
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
@@ -66,7 +66,7 @@ fn resolve_shortcut_icon_data_url(path: &Path) -> io::Result<Option<String>> {
     }
 
     let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-    let shortcut_path = wide::null_terminated(&path.to_string_lossy());
+    let shortcut_path = wide::path_null_terminated(path);
 
     let shell_link: IShellLinkW =
         unsafe { CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER) }
@@ -90,7 +90,7 @@ fn resolve_shortcut_icon_data_url(path: &Path) -> io::Result<Option<String>> {
 
     let result = unsafe { resolve_pidl_icon_data_url(pidl) };
     unsafe {
-        CoTaskMemFree(Some(pidl as *const _));
+        com::free_cotaskmem_ptr(pidl);
     }
 
     result
@@ -204,7 +204,7 @@ fn resolve_shell_icon_data_url_from_pidl(parsing_name: &str) -> io::Result<Optio
 
     let result = unsafe { resolve_pidl_icon_data_url(pidl) };
     unsafe {
-        CoTaskMemFree(Some(pidl as *const _));
+        com::free_cotaskmem_ptr(pidl);
     }
 
     result

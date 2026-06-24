@@ -4,6 +4,8 @@
 use std::ptr;
 
 #[cfg(target_os = "windows")]
+use windows::Win32::Foundation::GlobalFree;
+#[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HGLOBAL;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
@@ -24,4 +26,14 @@ pub(crate) fn create_moveable_from_bytes(bytes: &[u8], message: &str) -> Result<
     }
 
     Ok(handle)
+}
+
+/// 释放尚未成功交给 Windows Shell 接管的全局内存，避免剪贴板写入失败时泄漏句柄。
+#[cfg(target_os = "windows")]
+pub(crate) unsafe fn free_if_unclaimed(handle: HGLOBAL) {
+    if handle.is_invalid() {
+        return;
+    }
+
+    let _ = GlobalFree(Some(handle));
 }

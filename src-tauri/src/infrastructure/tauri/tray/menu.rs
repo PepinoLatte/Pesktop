@@ -49,15 +49,7 @@ pub(super) fn handle_tray_menu_event(
     match event.id().as_ref() {
         MENU_ID_SETTINGS => window::show_settings_window(app_handle),
         MENU_ID_CREATE_BOX => request_create_box(app_handle),
-        MENU_ID_AUTOSTART => {
-            let next_enabled = autostart_item.is_checked().unwrap_or(false);
-            if let Err(error) = autostart::set_autostart_enabled(app_handle, next_enabled) {
-                eprintln!("{error}");
-                if let Ok(current_enabled) = autostart::resolve_autostart_enabled(app_handle) {
-                    autostart::sync_autostart_state(app_handle, current_enabled);
-                }
-            }
-        }
+        MENU_ID_AUTOSTART => autostart::toggle_autostart_from_tray(app_handle, autostart_item),
         MENU_ID_QUIT => window::request_graceful_exit(app_handle),
         _ => {}
     }

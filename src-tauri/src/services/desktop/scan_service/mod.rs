@@ -1,11 +1,14 @@
 //! Box 文件夹扫描服务负责生成文件展示项、轻量 revision 和扫描缓存。
 
+use std::collections::HashSet;
+
 mod cache;
 mod entry;
 mod item_factory;
 mod revision;
 
 use crate::domain::desktop::{DesktopItem, DesktopSnapshot};
+use crate::infrastructure::filesystem::naming;
 use crate::infrastructure::windows::common::desktop_path;
 
 use cache::CachedDesktopItem;
@@ -22,7 +25,7 @@ pub fn get_desktop_snapshot() -> DesktopSnapshot {
     let desktop_path = desktop_path::resolve_desktop_path();
 
     DesktopSnapshot {
-        desktop_path: desktop_path.to_string_lossy().to_string(),
+        desktop_path: naming::display_path(&desktop_path),
     }
 }
 
@@ -38,37 +41,56 @@ pub fn get_box_folder_revision(folder_path: &str) -> Result<String, String> {
 
 fn scan_box_folder(folder_path: &str) -> std::io::Result<Vec<DesktopItem>> {
     let folder = entry::resolve_existing_box_folder(folder_path)?;
-
     let folder_cache_key = entry::stable_path_key(&folder);
     let entries = entry::read_box_folder_entries(&folder)?;
-    let mut resolutions = Vec::with_capacity(entries.len());
+
+    let resolutions = resolve_scan_resolutions(&folder_cache_key, entries);
+    let (mut items, refreshed_items) = create_items_from_scan_resolutions(resolutions);
+    store_refreshed_items(&folder_cache_key, refreshed_items);
+    item_factory::sort_desktop_items(&mut items);
+    Ok(items)
+}
+
+fn resolve_scan_resolutions(
+    folder_cache_key: &str,
+    entries: Vec<BoxFolderScanEntry>,
+) -> Vec<BoxFolderScanResolution> {
+    let mut scan_cache = cache::lock_box_folder_scan_cache();
+    let folder_cache = scan_cache.entry(folder_cache_key.to_string()).or_default();
+
     {
-        let mut scan_cache = cache::lock_box_folder_scan_cache();
-        let folder_cache = scan_cache.entry(folder_cache_key.clone()).or_default();
         let present_path_keys = entries
             .iter()
-            .map(|entry| entry.path_key.clone())
-            .collect::<std::collections::HashSet<_>>();
+            .map(|entry| entry.path_key.as_str())
+            .collect::<HashSet<_>>();
 
         folder_cache
             .items_by_path
-            .retain(|path_key, _| present_path_keys.contains(path_key));
-        for entry in entries {
+            .retain(|path_key, _| present_path_keys.contains(path_key.as_str()));
+    }
+
+    entries
+        .into_iter()
+        .map(|entry| {
             if let Some(cached_item) = folder_cache
                 .items_by_path
                 .get(&entry.path_key)
                 .filter(|cached_item| cached_item.signature == entry.signature)
             {
-                resolutions.push(BoxFolderScanResolution::Cached(cached_item.item.clone()));
-                continue;
+                BoxFolderScanResolution::Cached(cached_item.item.clone())
+            } else {
+                BoxFolderScanResolution::Pending(entry)
             }
+        })
+        .collect()
+}
 
-            resolutions.push(BoxFolderScanResolution::Pending(entry));
-        }
-    }
-
+fn create_items_from_scan_resolutions(
+    resolutions: Vec<BoxFolderScanResolution>,
+) -> (Vec<DesktopItem>, Vec<(String, CachedDesktopItem)>) {
     let mut items = Vec::with_capacity(resolutions.len());
     let mut refreshed_items = Vec::new();
+
     for resolution in resolutions {
         match resolution {
             BoxFolderScanResolution::Cached(item) => items.push(item),
@@ -85,13 +107,19 @@ fn scan_box_folder(folder_path: &str) -> std::io::Result<Vec<DesktopItem>> {
             }
         }
     }
-    if !refreshed_items.is_empty() {
-        let mut scan_cache = cache::lock_box_folder_scan_cache();
-        let folder_cache = scan_cache.entry(folder_cache_key).or_default();
-        for (path_key, cached_item) in refreshed_items {
-            folder_cache.items_by_path.insert(path_key, cached_item);
-        }
+
+    (items, refreshed_items)
+}
+
+fn store_refreshed_items(
+    folder_cache_key: &str,
+    refreshed_items: Vec<(String, CachedDesktopItem)>,
+) {
+    if refreshed_items.is_empty() {
+        return;
     }
-    items.sort_by(item_factory::compare_desktop_items);
-    Ok(items)
+
+    let mut scan_cache = cache::lock_box_folder_scan_cache();
+    let folder_cache = scan_cache.entry(folder_cache_key.to_string()).or_default();
+    folder_cache.items_by_path.extend(refreshed_items);
 }

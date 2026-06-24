@@ -10,6 +10,8 @@ use crate::infrastructure::windows::{shell_context, shell_file, shell_icon};
 
 /// Box 持久化 Shell 虚拟项时使用的路径前缀，前端排序和选择逻辑可继续复用 path 主键。
 pub const SHELL_ITEM_PATH_PREFIX: &str = "shell::";
+/// Shell 虚拟项前端 ID 前缀，避免与真实文件路径生成的 ID 混用。
+const SHELL_ITEM_ID_PREFIX: &str = "shell_";
 
 /// 根据持久化的 Shell ID 重建前端文件项模型，未知 ID 会被静默丢弃。
 pub fn list_shell_virtual_desktop_items(shell_ids: &[String]) -> Vec<DesktopItem> {
@@ -22,6 +24,11 @@ pub fn list_shell_virtual_desktop_items(shell_ids: &[String]) -> Vec<DesktopItem
 /// 判断路径键是否为 Dasktop 自己生成的 Shell 虚拟项引用。
 pub fn strip_shell_item_path(path: &str) -> Option<&str> {
     path.strip_prefix(SHELL_ITEM_PATH_PREFIX)
+}
+
+/// 构造可写入前端排序和拖放 payload 的 Shell 虚拟项路径键。
+pub fn shell_item_path(shell_id: &str) -> String {
+    format!("{SHELL_ITEM_PATH_PREFIX}{shell_id}")
 }
 
 /// 打开 Shell 虚拟项时使用 Windows Shell 解析名，而不是要求存在真实文件路径。
@@ -63,11 +70,16 @@ fn create_shell_desktop_item(shell_id: &str) -> Option<DesktopItem> {
     Some(DesktopItem {
         extension: None,
         icon_data_url: shell_icon::resolve_parsing_name_icon_data_url(&parsing_name),
-        id: format!("shell_{shell_id}"),
+        id: shell_item_id(shell_id),
         kind: DesktopItemKind::Shell,
         name: known_item.name.to_string(),
-        path: format!("{SHELL_ITEM_PATH_PREFIX}{shell_id}"),
+        path: shell_item_path(shell_id),
         shell_id: Some(shell_id.to_string()),
         source: DesktopItemSource::Shell,
     })
+}
+
+/// 构造前端列表使用的 Shell 虚拟项 ID，和路径键分开便于后续调整展示协议。
+fn shell_item_id(shell_id: &str) -> String {
+    format!("{SHELL_ITEM_ID_PREFIX}{shell_id}")
 }

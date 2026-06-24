@@ -10,6 +10,7 @@ mod rollback;
 use std::path::{Path, PathBuf};
 
 use crate::domain::desktop::{BoxConflictPolicy, BoxDropAction};
+use crate::infrastructure::filesystem::naming;
 
 /// 过滤并规范化外部传入的真实路径，任何不存在的路径都会阻止本批次继续执行。
 pub(crate) fn normalize_existing_paths(paths: &[String]) -> Result<Vec<PathBuf>, String> {
@@ -18,7 +19,7 @@ pub(crate) fn normalize_existing_paths(paths: &[String]) -> Result<Vec<PathBuf>,
     for raw_path in paths {
         let path = PathBuf::from(raw_path);
         if !path.exists() {
-            return Err(format!("拖入项目不存在：{}", path.to_string_lossy()));
+            return Err(format!("拖入项目不存在：{}", naming::display_path(&path)));
         }
         normalized_paths.push(path);
     }

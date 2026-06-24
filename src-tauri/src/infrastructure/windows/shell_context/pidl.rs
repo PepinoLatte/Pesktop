@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use crate::infrastructure::windows::common::wide;
+use crate::infrastructure::windows::common::{com, wide};
 use windows::core::PCWSTR;
-use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::SHParseDisplayName;
 
@@ -49,7 +49,7 @@ impl ShellPidl {
 impl Drop for ShellPidl {
     fn drop(&mut self) {
         unsafe {
-            CoTaskMemFree(Some(self.pidl as *const _));
+            com::free_cotaskmem_ptr(self.pidl);
         }
     }
 }

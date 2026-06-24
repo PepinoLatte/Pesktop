@@ -1,6 +1,8 @@
 //! 开机自启状态读写与 UI 同步。
 
 use crate::domain::app::contract::{AUTOSTART_CHANGED_EVENT, SETTINGS_WINDOW_LABEL};
+use tauri::menu::CheckMenuItem;
+use tauri::Wry;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -11,6 +13,17 @@ pub fn resolve_autostart_enabled(app: &AppHandle) -> Result<bool, String> {
     app.autolaunch()
         .is_enabled()
         .map_err(|error| format!("无法读取开机自启状态：{error}"))
+}
+
+/// 托盘初始化时读取自启状态；失败时只影响初始勾选展示，记录日志后使用关闭态兜底。
+pub(super) fn resolve_initial_autostart_enabled(app: &AppHandle) -> bool {
+    match resolve_autostart_enabled(app) {
+        Ok(enabled) => enabled,
+        Err(error) => {
+            eprintln!("{error}");
+            false
+        }
+    }
 }
 
 /// 写入系统自启状态并同步所有 UI 入口，避免设置页和托盘出现互相矛盾的勾选状态。
@@ -28,6 +41,29 @@ pub fn set_autostart_enabled(app: &AppHandle, enabled: bool) -> Result<bool, Str
 
     sync_autostart_state(app, enabled);
     Ok(enabled)
+}
+
+/// 托盘菜单切换自启时使用当前勾选状态作为目标值；读取或写入失败时回读系统状态修正 UI。
+pub(super) fn toggle_autostart_from_tray(app: &AppHandle, autostart_item: &CheckMenuItem<Wry>) {
+    let next_enabled = match autostart_item.is_checked() {
+        Ok(enabled) => enabled,
+        Err(error) => {
+            eprintln!("failed to read tray autostart check state: {error}");
+            resync_autostart_from_system(app);
+            return;
+        }
+    };
+
+    if let Err(error) = set_autostart_enabled(app, next_enabled) {
+        eprintln!("{error}");
+        resync_autostart_from_system(app);
+    }
+}
+
+fn resync_autostart_from_system(app: &AppHandle) {
+    if let Ok(current_enabled) = resolve_autostart_enabled(app) {
+        sync_autostart_state(app, current_enabled);
+    }
 }
 
 /// 同步托盘勾选状态和设置页开关状态，保证多个入口看到的系统状态一致。

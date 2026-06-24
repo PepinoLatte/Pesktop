@@ -17,8 +17,8 @@ pub(crate) type FolderDialogOwner = ();
 /// 文件夹选择器必须使用 Windows Shell 原生对话框，保证用户看到熟悉的目录选择体验。
 #[cfg(target_os = "windows")]
 pub fn choose_collection_root_folder(owner: FolderDialogOwner) -> Result<Option<String>, String> {
-    use windows::core::PCWSTR;
-    use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_INPROC_SERVER};
+    use crate::infrastructure::windows::common::com;
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
     use windows::Win32::System::Ole::OleInitialize;
     use windows::Win32::UI::Shell::{
         FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
@@ -46,12 +46,9 @@ pub fn choose_collection_root_folder(owner: FolderDialogOwner) -> Result<Option<
         let path = item
             .GetDisplayName(SIGDN_FILESYSPATH)
             .map_err(|error| format!("无法解析选择的文件夹路径：{error}"))?;
-        let path_text = path
-            .to_string()
+        let path_text = com::take_pwstr_string(path)
             .map_err(|error| format!("无法转换选择的文件夹路径：{error}"))?;
 
-        CoTaskMemFree(Some(path.as_ptr() as *const _));
-        let _ = PCWSTR::null();
         Ok(Some(path_text))
     }
 }

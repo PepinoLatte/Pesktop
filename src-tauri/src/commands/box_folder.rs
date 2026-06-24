@@ -60,27 +60,15 @@ pub fn open_box_folder(folder_path: String) -> Result<(), String> {
 /// 按当前拖入策略把外部文件复制、移动或映射到 Box 真实文件夹。
 #[tauri::command]
 pub fn handle_box_dropped_paths(
-    window: tauri::WebviewWindow,
     folder_path: String,
     paths: Vec<String>,
     action: String,
     conflict_policy: String,
 ) -> Result<Vec<String>, String> {
-    #[cfg(target_os = "windows")]
-    let owner = window
-        .hwnd()
-        .map_err(|error| format!("无法获取 Box 窗口句柄：{error}"))?;
-
-    #[cfg(not(target_os = "windows"))]
-    let owner = {
-        let _ = window;
-    };
-
     box_folder::handle_box_dropped_paths(
         &folder_path,
         &paths,
         action.parse::<BoxDropAction>()?,
-        owner,
         conflict_policy.parse::<BoxConflictPolicy>()?,
     )
 }
@@ -88,27 +76,15 @@ pub fn handle_box_dropped_paths(
 /// 按当前拖出策略把 Box 内文件复制、移动或映射到 Windows 桌面目录。
 #[tauri::command]
 pub fn handle_box_dragged_paths_to_desktop(
-    window: tauri::WebviewWindow,
     desktop_path: String,
     paths: Vec<String>,
     action: String,
     conflict_policy: String,
 ) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    let owner = window
-        .hwnd()
-        .map_err(|error| format!("无法获取 Box 窗口句柄：{error}"))?;
-
-    #[cfg(not(target_os = "windows"))]
-    let owner = {
-        let _ = window;
-    };
-
     box_folder::handle_box_dragged_paths_to_desktop(
         &desktop_path,
         &paths,
         action.parse::<BoxDropAction>()?,
-        owner,
         conflict_policy.parse::<BoxConflictPolicy>()?,
     )
 }

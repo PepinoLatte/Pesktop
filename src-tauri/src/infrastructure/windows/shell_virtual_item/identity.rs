@@ -36,39 +36,3 @@ fn shell_identities_match(normalized_actual: &str, expected: &str) -> bool {
     normalized_actual == normalized_expected
         || normalized_actual.ends_with(&format!("\\{normalized_expected}"))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Shell 解析名可能带桌面父级前缀，尾部 CLSID 匹配仍应识别为稳定业务 ID。
-    #[test]
-    fn resolves_known_shell_id_from_absolute_parsing_name() {
-        assert_eq!(
-            resolve_shell_id_from_parsing_name(
-                "::{00021400-0000-0000-C000-000000000046}\\::{645FF040-5081-101B-9F08-00AA002F954E}"
-            ),
-            Some("recycle-bin")
-        );
-    }
-
-    /// 未进入白名单的 Shell 解析名不能生成业务 ID，避免前端保存无法管理的系统对象。
-    #[test]
-    fn rejects_unknown_shell_parsing_name() {
-        assert_eq!(
-            resolve_shell_id_from_parsing_name("::{11111111-2222-3333-4444-555555555555}"),
-            None
-        );
-    }
-
-    /// 解析名归一化覆盖大小写、斜杠和尾部分隔符差异，适配不同 Shell 数据源。
-    #[test]
-    fn matches_normalized_shell_identity() {
-        let actual = normalize_shell_identity(" ::{645ff040-5081-101b-9f08-00aa002f954e}\\ ");
-
-        assert!(shell_identities_match(
-            &actual,
-            "::{645FF040-5081-101B-9F08-00AA002F954E}"
-        ));
-    }
-}

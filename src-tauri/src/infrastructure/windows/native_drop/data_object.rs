@@ -1,28 +1,24 @@
 //! Windows IDataObject 拖放数据解析，负责 HDROP、ShellItemArray 和 CIDA 三类来源。
 
-use std::ffi::OsString;
 use std::mem::size_of;
-use std::os::windows::ffi::OsStringExt;
 use std::ptr;
 
 use super::payload::{push_unique_shell_drop_item, NativeDropItems, NativeShellDropItem};
+use crate::infrastructure::windows::common::{com, hdrop};
 use crate::infrastructure::windows::shell_virtual_item;
-use windows::Win32::System::Com::{
-    CoTaskMemFree, IDataObject, DVASPECT_CONTENT, FORMATETC, TYMED_HGLOBAL,
-};
+use windows::Win32::Foundation::HGLOBAL;
+use windows::Win32::System::Com::{IDataObject, DVASPECT_CONTENT, FORMATETC, TYMED_HGLOBAL};
 use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
 use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::System::Ole::{ReleaseStgMedium, CF_HDROP};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
-    DragQueryFileW, ILCombine, ILFree, IShellItemArray, SHCreateShellItemArrayFromDataObject,
-    SHGetNameFromIDList, CFSTR_SHELLIDLIST, HDROP, SIGDN_DESKTOPABSOLUTEPARSING, SIGDN_FILESYSPATH,
+    ILCombine, ILFree, IShellItemArray, SHCreateShellItemArrayFromDataObject, SHGetNameFromIDList,
+    CFSTR_SHELLIDLIST, HDROP, SIGDN_DESKTOPABSOLUTEPARSING, SIGDN_FILESYSPATH,
 };
 
 /// `FORMATETC.lindex` 对非多页数据固定为 -1，命名后避免散落裸值。
 const FORMAT_ALL_ITEMS_INDEX: i32 = -1;
-/// `DragQueryFileW` 用 u32::MAX 查询 HDROP 文件数量。
-const HDROP_QUERY_FILE_COUNT_INDEX: u32 = u32::MAX;
 /// CIDA 头至少包含 item count 和父 PIDL 偏移两个 u32。
 const CIDA_MINIMUM_OFFSET_COUNT: usize = 2;
 /// CIDA 第一个偏移指向父 PIDL，后续偏移指向子项 PIDL。
@@ -88,31 +84,9 @@ fn supports_shell_idlist_data(data_obj: &IDataObject) -> bool {
 
 fn resolve_hdrop_paths(data_obj: &IDataObject) -> Option<Vec<String>> {
     let format = hglobal_format(CF_HDROP.0);
-    let mut medium = unsafe { data_obj.GetData(&format).ok()? };
-    let hdrop = HDROP(unsafe { medium.u.hGlobal.0 } as _);
-    let item_count = unsafe { DragQueryFileW(hdrop, HDROP_QUERY_FILE_COUNT_INDEX, None) };
-    let mut paths = Vec::new();
-
-    for index in 0..item_count {
-        let character_count = unsafe { DragQueryFileW(hdrop, index, None) } as usize;
-        if character_count == 0 {
-            continue;
-        }
-
-        let mut buffer = vec![0; character_count + 1];
-        unsafe {
-            DragQueryFileW(hdrop, index, Some(&mut buffer));
-        }
-        paths.push(
-            OsString::from_wide(&buffer[..character_count])
-                .to_string_lossy()
-                .to_string(),
-        );
-    }
-
-    unsafe {
-        ReleaseStgMedium(&mut medium);
-    }
+    let paths = with_hglobal_medium(data_obj, &format, |hglobal| {
+        hdrop::read_path_strings(HDROP(hglobal.0 as _))
+    })?;
 
     (!paths.is_empty()).then_some(paths)
 }
@@ -148,22 +122,40 @@ fn resolve_shell_drop_items(data_obj: &IDataObject) -> Option<Vec<NativeShellDro
 fn resolve_shell_idlist_drop_items(data_obj: &IDataObject) -> Option<Vec<NativeShellDropItem>> {
     let clipboard_format = shell_idlist_clipboard_format()?;
     let format = hglobal_format(clipboard_format);
-    let mut medium = unsafe { data_obj.GetData(&format).ok()? };
-    let hglobal = unsafe { medium.u.hGlobal };
-    let locked = unsafe { GlobalLock(hglobal) };
-    if locked.is_null() {
-        unsafe {
-            ReleaseStgMedium(&mut medium);
-        }
-        return None;
-    }
+    with_hglobal_medium(data_obj, &format, |hglobal| unsafe {
+        resolve_shell_idlist_items_from_hglobal(hglobal)
+    })?
+}
 
-    let size = unsafe { GlobalSize(hglobal) };
-    let shell_items = unsafe { resolve_shell_idlist_items_from_memory(locked.cast(), size) };
-    let _ = unsafe { GlobalUnlock(hglobal) };
+/// `IDataObject::GetData` 返回的 STGMEDIUM 必须释放；通过闭包集中资源边界，避免每个解析分支重复写释放代码。
+fn with_hglobal_medium<T>(
+    data_obj: &IDataObject,
+    format: &FORMATETC,
+    read: impl FnOnce(HGLOBAL) -> T,
+) -> Option<T> {
+    let mut medium = unsafe { data_obj.GetData(format).ok()? };
+    let hglobal = unsafe { medium.u.hGlobal };
+    let result = read(hglobal);
+
     unsafe {
         ReleaseStgMedium(&mut medium);
     }
+
+    Some(result)
+}
+
+/// Shell IDList Array 存在全局内存里，锁定后只在读取 CIDA 期间短暂借用。
+unsafe fn resolve_shell_idlist_items_from_hglobal(
+    hglobal: HGLOBAL,
+) -> Option<Vec<NativeShellDropItem>> {
+    let locked = GlobalLock(hglobal);
+    if locked.is_null() {
+        return None;
+    }
+
+    let size = GlobalSize(hglobal);
+    let shell_items = resolve_shell_idlist_items_from_memory(locked.cast(), size);
+    let _ = GlobalUnlock(hglobal);
 
     shell_items
 }
@@ -232,10 +224,7 @@ unsafe fn resolve_shell_idlist_items_from_memory(
 /// PIDL 名称由 Shell 分配，需要释放 PWSTR，避免拖放系统图标时泄漏内存。
 unsafe fn pidl_display_name(pidl: *const ITEMIDLIST) -> Option<String> {
     let display_name = SHGetNameFromIDList(pidl, SIGDN_DESKTOPABSOLUTEPARSING).ok()?;
-    let value = display_name.to_string().ok();
-    CoTaskMemFree(Some(display_name.0 as *const _));
-
-    value
+    com::take_pwstr_string(display_name).ok()
 }
 
 /// Shell 分配的 PWSTR 由调用方释放，避免持续拖放系统图标时泄漏 COM 内存。
@@ -244,8 +233,5 @@ unsafe fn shell_item_display_name(
     sigdn: windows::Win32::UI::Shell::SIGDN,
 ) -> Option<String> {
     let display_name = shell_item.GetDisplayName(sigdn).ok()?;
-    let value = display_name.to_string().ok();
-    CoTaskMemFree(Some(display_name.0 as *const _));
-
-    value
+    com::take_pwstr_string(display_name).ok()
 }

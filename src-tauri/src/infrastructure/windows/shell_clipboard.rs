@@ -25,20 +25,19 @@ pub(crate) fn write_file_list(
         EmptyClipboard().map_err(|error| format!("无法清空系统剪贴板：{error}"))?;
     }
 
-    let hdrop_memory = create_hdrop_memory(paths)?;
-    unsafe {
-        SetClipboardData(u32::from(CF_HDROP.0), Some(HANDLE(hdrop_memory.0)))
-            .map_err(|error| format!("无法写入文件剪贴板路径列表：{error}"))?;
-    }
+    let hdrop_memory = hdrop::create_file_list_memory(paths, "无法创建文件剪贴板路径内存")?;
+    set_clipboard_hglobal(
+        u32::from(CF_HDROP.0),
+        hdrop_memory,
+        "无法写入文件剪贴板路径列表",
+    )?;
 
     let effect_memory = create_drop_effect_memory(operation)?;
-    unsafe {
-        SetClipboardData(
-            preferred_drop_effect_format()?,
-            Some(HANDLE(effect_memory.0)),
-        )
-        .map_err(|error| format!("无法写入文件剪贴板操作意图：{error}"))?;
-    }
+    set_clipboard_hglobal(
+        preferred_drop_effect_format()?,
+        effect_memory,
+        "无法写入文件剪贴板操作意图",
+    )?;
 
     Ok(())
 }
@@ -58,7 +57,7 @@ pub(crate) fn read_file_list() -> Result<Option<FileClipboardPayload>, String> {
         return Ok(None);
     }
 
-    let paths = read_hdrop_paths(hdrop)?;
+    let paths = hdrop::read_paths(hdrop);
     if paths.is_empty() {
         return Ok(None);
     }
@@ -89,7 +88,7 @@ use std::mem::size_of;
 #[cfg(target_os = "windows")]
 use windows::core::w;
 #[cfg(target_os = "windows")]
-use windows::Win32::Foundation::{HANDLE, HGLOBAL, POINT};
+use windows::Win32::Foundation::{HANDLE, HGLOBAL};
 #[cfg(target_os = "windows")]
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
@@ -100,12 +99,10 @@ use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Ole::{CF_HDROP, DROPEFFECT_COPY, DROPEFFECT_MOVE};
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::Shell::{DragQueryFileW, DROPFILES, HDROP};
-#[cfg(target_os = "windows")]
-use windows_core::BOOL;
+use windows::Win32::UI::Shell::HDROP;
 
 #[cfg(target_os = "windows")]
-use crate::infrastructure::windows::common::global_memory;
+use crate::infrastructure::windows::common::{global_memory, hdrop};
 
 #[cfg(target_os = "windows")]
 struct ClipboardSession;
@@ -132,68 +129,14 @@ impl Drop for ClipboardSession {
 }
 
 #[cfg(target_os = "windows")]
-fn create_hdrop_memory(paths: &[PathBuf]) -> Result<HGLOBAL, String> {
-    let mut bytes = Vec::new();
-    let header = DROPFILES {
-        pFiles: size_of::<DROPFILES>() as u32,
-        pt: POINT { x: 0, y: 0 },
-        fNC: BOOL(0),
-        fWide: BOOL(1),
-    };
-    let header_bytes = unsafe {
-        std::slice::from_raw_parts(
-            (&header as *const DROPFILES).cast::<u8>(),
-            size_of::<DROPFILES>(),
-        )
-    };
-    bytes.extend_from_slice(header_bytes);
-
-    for path in paths {
-        bytes.extend(
-            path.to_string_lossy()
-                .encode_utf16()
-                .flat_map(u16::to_le_bytes),
-        );
-        bytes.extend(0u16.to_le_bytes());
-    }
-    bytes.extend(0u16.to_le_bytes());
-
-    global_memory::create_moveable_from_bytes(&bytes, "无法创建文件剪贴板路径内存")
-}
-
-#[cfg(target_os = "windows")]
 fn create_drop_effect_memory(operation: FileClipboardOperation) -> Result<HGLOBAL, String> {
-    let effect = match operation {
-        FileClipboardOperation::Copy => DROPEFFECT_COPY.0,
-        FileClipboardOperation::Cut => DROPEFFECT_MOVE.0,
+    let effect = if operation.is_cut() {
+        DROPEFFECT_MOVE.0
+    } else {
+        DROPEFFECT_COPY.0
     };
 
     global_memory::create_moveable_from_bytes(&effect.to_le_bytes(), "无法创建文件剪贴板操作内存")
-}
-
-#[cfg(target_os = "windows")]
-fn read_hdrop_paths(hdrop: HDROP) -> Result<Vec<PathBuf>, String> {
-    let count = unsafe { DragQueryFileW(hdrop, u32::MAX, None) };
-    let mut paths = Vec::new();
-
-    for index in 0..count {
-        let length = unsafe { DragQueryFileW(hdrop, index, None) };
-        if length == 0 {
-            continue;
-        }
-
-        let mut buffer = vec![0u16; length as usize + 1];
-        let copied = unsafe { DragQueryFileW(hdrop, index, Some(&mut buffer)) };
-        if copied == 0 {
-            continue;
-        }
-
-        paths.push(PathBuf::from(String::from_utf16_lossy(
-            &buffer[..copied as usize],
-        )));
-    }
-
-    Ok(paths)
 }
 
 #[cfg(target_os = "windows")]
@@ -223,6 +166,20 @@ fn read_preferred_operation() -> Option<FileClipboardOperation> {
     } else {
         Some(FileClipboardOperation::Copy)
     }
+}
+
+/// 剪贴板成功接管 HGLOBAL 后不能再手动释放；失败时必须释放，避免持续复制造成内存泄漏。
+#[cfg(target_os = "windows")]
+fn set_clipboard_hglobal(format: u32, memory: HGLOBAL, error_message: &str) -> Result<(), String> {
+    let result = unsafe { SetClipboardData(format, Some(HANDLE(memory.0))) };
+    if let Err(error) = result {
+        unsafe {
+            global_memory::free_if_unclaimed(memory);
+        }
+        return Err(format!("{error_message}：{error}"));
+    }
+
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]

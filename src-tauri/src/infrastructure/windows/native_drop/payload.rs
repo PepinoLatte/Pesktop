@@ -64,11 +64,7 @@ pub(super) fn optional_non_empty<T>(values: Vec<T>) -> Option<Vec<T>> {
 pub(super) fn resolve_payload_paths(payload: &NativeDropItems) -> Vec<String> {
     let mut paths = payload.paths.clone();
     for shell_item in &payload.shell_items {
-        paths.push(format!(
-            "{}{}",
-            shell_virtual_item::SHELL_ITEM_PATH_PREFIX,
-            shell_item.shell_id
-        ));
+        paths.push(shell_virtual_item::shell_item_path(&shell_item.shell_id));
     }
 
     paths

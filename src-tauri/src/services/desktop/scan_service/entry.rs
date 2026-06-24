@@ -5,6 +5,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use crate::infrastructure::filesystem::naming;
+
 /// 文件项缓存签名只包含会影响展示快照的低成本元数据，避免每轮扫描都访问 Shell 图像工厂。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct FileItemCacheSignature {
@@ -53,7 +55,7 @@ pub(super) fn read_box_folder_entries(folder: &Path) -> io::Result<Vec<BoxFolder
 
 /// 路径缓存键统一使用前端看到的 Windows 字符串，确保排序路径和缓存路径保持一致。
 pub(super) fn stable_path_key(path: &Path) -> String {
-    path.to_string_lossy().to_string()
+    naming::display_path(path)
 }
 
 /// 文件签名用修改时间毫秒值而非 SystemTime 本体，便于跨平台稳定比较和缓存失效。
