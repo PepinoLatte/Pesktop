@@ -1,6 +1,6 @@
 [package]
 name = "Dasktop"
-version = "0.2.4"
+version = "0.2.5"
 description = "Dasktop - 面向 Windows 桌面的轻量整理工具"
 authors = ["Aug_Sakura"]
 homepage = "https://github.com/AugSakura/Dasktop"

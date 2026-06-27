@@ -588,10 +588,15 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 缩放事件只安排最终保存，不在拖动过程中写 SQLite
+   * 只有用户从缩放热区发起的 resize 才允许安排尺寸落库；自动收起、启动恢复和 DPI 校准也会触发
+   * Tauri 的 onResized，必须把这些展示态尺寸排除在正式 Box 布局之外。
    */
   function scheduleResizePersist(): void {
-    if (options.isCollapseWindowSizeApplying() || isApplyingProgrammaticResize) {
+    if (
+      activeResizeDirection === null ||
+      options.isCollapseWindowSizeApplying() ||
+      isApplyingProgrammaticResize
+    ) {
       return;
     }
 
@@ -603,11 +608,12 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 缩放静止或释放时保存最终边界，并同步给设置页与其他 Box 窗口
+   * 缩放静止或释放时保存最终边界；没有缩放方向说明当前 resize 不是用户手动调整，
+   * 这类程序性窗口尺寸不能覆盖用户保存的 Box 宽高。
    */
   function persistResizeBounds(): void {
     clearResizePersistTimer();
-    if (isResizingBox.value) {
+    if (isResizingBox.value || activeResizeDirection === null) {
       return;
     }
 
@@ -624,6 +630,7 @@ export function useBoxWindowFrame(options: {
     isResizingBox.value = false;
     resizeReleasedStableTicks = 0;
     clearResizeReleaseEvents();
+    clearResizePersistTimer();
     clearResizeInteractionReleaseProbe();
     clearManualResizeFrameLoop();
     manualResizeState = null;

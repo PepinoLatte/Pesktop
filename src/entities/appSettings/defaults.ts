@@ -94,7 +94,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   boxIconSize: 48,
   boxLabelTextSize: 12,
   boxIconGapX: 6,
-  boxIconGapY: 6,
+  boxIconGapY: 4,
   boxFilenameWidth: 82,
   boxCornerRadius: 8,
 };

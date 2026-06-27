@@ -15,6 +15,7 @@ import { useBoxFileSelection } from "@/windows/desktop/composables/useBoxFileSel
 import { useBoxTitleEditing } from "@/windows/desktop/composables/useBoxTitleEditing";
 import { useBoxWindowFrame } from "@/windows/desktop/composables/useBoxWindowFrame";
 import { useBoxWindowLifecycle } from "@/windows/desktop/composables/useBoxWindowLifecycle";
+import { resolveBoxResizeGridRowHeight } from "@/windows/desktop/utils/boxResizeGrid";
 import { useDesktopStore } from "@/entities/desktopBox/store";
 import { BOX_WINDOW_INTERACTION_TIMING } from "@/entities/desktopBox/layout";
 import type { DesktopItem } from "@/entities/desktopItem/types";
@@ -145,6 +146,7 @@ const boxGridStyle = computed(
   () =>
     ({
       columnGap: `${desktopStore.settings.boxIconGapX}px`,
+      gridAutoRows: `${resolveBoxResizeGridRowHeight(desktopStore.settings)}px`,
       gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${boxItemWidth.value}px), ${boxItemWidth.value}px))`,
       rowGap: `${desktopStore.settings.boxIconGapY}px`,
     }) as CSSProperties,

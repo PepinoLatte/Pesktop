@@ -46,6 +46,9 @@ const labelLineHeight = computed(() => Math.max(14, Math.ceil(props.labelTextSiz
 const labelBlockHeight = computed(() => labelLineHeight.value * 2 + 2);
 const renameTextareaRef = ref<HTMLTextAreaElement | null>(null);
 const renameTextareaHeight = ref(0);
+/**
+ * 外层网格的行高由窗口缩放逻辑统一控制，图标按钮本身只按内容收缩，避免预留两行时把一行背景也铺满。
+ */
 const iconButtonStyle = computed(
   () =>
     ({
@@ -150,7 +153,7 @@ function updateRenameDraft(event: Event): void {
 
 <template>
   <div
-    class="dasktop-icon-button relative flex min-w-0 cursor-default select-none flex-col items-center justify-start self-start bg-transparent text-center text-slate-900 transition-colors hover:bg-white/55 dark:text-white dark:hover:bg-white/10"
+    class="dasktop-icon-button relative flex h-fit min-w-0 cursor-default select-none flex-col items-center justify-start self-start bg-transparent text-center text-slate-900 transition-colors hover:bg-white/55 dark:text-white dark:hover:bg-white/10"
     :class="iconStateClasses"
     :data-box-item-path="item.path"
     role="button"

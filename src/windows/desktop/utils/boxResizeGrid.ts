@@ -22,6 +22,17 @@ interface BoxGridCellMetrics {
 }
 
 /**
+ * 盒内网格的行轨道按两行标题预留，避免 resize 吸附和实际排版使用两套不同的步进。
+ */
+export function resolveBoxResizeGridRowHeight(settings: AppSettings): number {
+  const labelLineHeight = Math.max(14, Math.ceil(settings.boxLabelTextSize * 1.32));
+  const labelBlockHeight = settings.showItemLabels ? labelLineHeight * 2 + 2 : 0;
+  const labelGap = settings.showItemLabels ? DESKTOP_ICON_VIEW.labelGap : 0;
+
+  return settings.boxIconSize + labelGap + labelBlockHeight + DESKTOP_ICON_VIEW.itemBlockPadding * 2;
+}
+
+/**
  * 将任意 Box 窗口边界吸附到最近的“列 x 行”网格尺寸，并根据拖拽边保持对侧锚点不漂移。
  */
 export function resolveBoxResizeGridSnappedBounds(
@@ -58,19 +69,11 @@ export function resolveBoxResizeGridSnappedBounds(
 }
 
 /**
- * 图标按钮真实高度来自图标、可选双行标签、按钮内边距和图标/标签间距。
+ * 图标按钮的 resize 步进与网格行轨道共用同一套尺寸，避免吸附结果和视觉占位互相打架。
  */
 function resolveBoxGridCellMetrics(settings: AppSettings): BoxGridCellMetrics {
-  const labelLineHeight = Math.max(14, Math.ceil(settings.boxLabelTextSize * 1.32));
-  const labelHeight = settings.showItemLabels ? labelLineHeight * 2 + 2 : 0;
-  const labelGap = settings.showItemLabels ? DESKTOP_ICON_VIEW.labelGap : 0;
-
   return {
-    height:
-      settings.boxIconSize +
-      labelGap +
-      labelHeight +
-      DESKTOP_ICON_VIEW.itemBlockPadding * 2,
+    height: resolveBoxResizeGridRowHeight(settings),
     width: Math.max(
       settings.boxFilenameWidth,
       settings.boxIconSize + DESKTOP_ICON_VIEW.itemInlinePadding * 2,
