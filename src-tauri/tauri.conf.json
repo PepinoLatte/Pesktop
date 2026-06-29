@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Dasktop",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "identifier": "cn.syand.dasktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -43,7 +43,9 @@
       "icons/icon.ico"
     ],
     "windows": {
+      "allowDowngrades": false,
       "wix": {
+        "upgradeCode": "254aa95b-a941-57f9-a27a-9fca09b603ee",
         "language": {
           "zh-CN": {
             "localePath": "bundle/wix/languages/zh-CN.wxl"
@@ -53,6 +55,7 @@
       "nsis": {
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
+        "installMode": "currentUser",
         "languages": ["SimpChinese"],
         "customLanguageFiles": {
           "SimpChinese": "bundle/nsis/languages/SimpChinese.nsh"
