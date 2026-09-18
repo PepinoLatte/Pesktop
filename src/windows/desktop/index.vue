@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { ComponentPublicInstance, CSSProperties } from "vue";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
+import { emit, listen } from "@tauri-apps/api/event";
 import { Folder } from "@lucide/vue";
 import BoxFileGrid from "@/windows/desktop/components/BoxFileGrid.vue";
 import BoxHeader from "@/windows/desktop/components/BoxHeader.vue";
@@ -19,6 +20,7 @@ import { useBoxWindowLifecycle } from "@/windows/desktop/composables/useBoxWindo
 import { resolveBoxResizeGridRowHeight } from "@/windows/desktop/utils/boxResizeGrid";
 import { useDesktopStore } from "@/entities/desktopBox/store";
 import { BOX_WINDOW_INTERACTION_TIMING } from "@/entities/desktopBox/layout";
+import { BOX_HOVER_HANDOFF_EVENT, type BoxHoverHandoffPayload } from "@/shared/ipc/desktop";
 import type { DesktopItem } from "@/entities/desktopItem/types";
 import type {
   BoxScreenPoint,
@@ -113,6 +115,7 @@ const {
   getBoxCollapseDelayMs: () => desktopStore.getBoxCollapseDelayMs(),
   getBoxCollapseMode: () => box.value?.collapseMode ?? "icon",
   getBoxCornerRadius: () => desktopStore.settings.boxCornerRadius,
+  getBoxIconFadeInMs: () => desktopStore.settings.boxIconFadeInMs,
   getBoxIdleOpacityHideAnimationMs: () => desktopStore.getBoxIdleOpacityHideAnimationMs(),
   getBoxIdleOpacityShowAnimationMs: () => desktopStore.getBoxIdleOpacityShowAnimationMs(),
   isContextMenuOpen: () => readContextMenuOpen(),
@@ -159,6 +162,102 @@ const boxTitleOrderClass = computed(() =>
  * 没有文件时回落到默认文件夹图标；自定义封面由后续设置能力接入同一出口
  */
 const iconStateImageSrc = computed(() => boxItems.value[0]?.iconDataUrl ?? null);
+
+/**
+ * 过界判定容差：鼠标落点落在相邻 Box 逻辑边界向外扩展该值的范围内即视为越界进入
+ */
+const HOVER_HANDOFF_TOLERANCE_PX = 24;
+let unlistenHoverHandoff: (() => void) | null = null;
+let hoverHandoffTimer: ReturnType<typeof window.setTimeout> | null = null;
+
+/**
+ * 鼠标离开当前 Box 后判定落点：落在吸附相邻且处于收缩形态的 Box 边界内时广播过界事件，
+ * 让目标 Box 无需被精确命中小图标即可承接展开态
+ */
+async function broadcastHoverHandoffOnLeave(): Promise<void> {
+  const currentBox = box.value;
+  if (!currentBox) {
+    return;
+  }
+
+  const [cursor, scaleFactor] = await Promise.all([
+    cursorPosition(),
+    currentWindow.scaleFactor(),
+  ]);
+  const logicalX = cursor.x / scaleFactor;
+  const logicalY = cursor.y / scaleFactor;
+  const tolerance = desktopStore.settings.snapThreshold;
+  const target = desktopStore.boxes.find((candidate) => {
+    if (candidate.id === currentBox.id || !candidate.collapsed) {
+      return false;
+    }
+
+    return (
+      logicalX >= candidate.x - tolerance &&
+      logicalX <= candidate.x + candidate.width + tolerance &&
+      logicalY >= candidate.y - tolerance &&
+      logicalY <= candidate.y + candidate.height + tolerance
+    );
+  });
+
+  if (!target) {
+    return;
+  }
+
+  await emit(BOX_HOVER_HANDOFF_EVENT, { fromBoxId: currentBox.id, toBoxId: target.id });
+}
+
+function handleBoxMouseLeaveWithHandoff(): void {
+  handleBoxMouseLeave();
+  void broadcastHoverHandoffOnLeave().catch(() => undefined);
+}
+
+/**
+ * 接收相邻 Box 的过界切换：防误触延迟后确认鼠标确实落在自己边界内才临时展开，
+ * 鼠标快速划过桌面时不会反复拉起沿途的收缩 Box
+ */
+async function acceptHoverHandoff(): Promise<void> {
+  const currentBox = box.value;
+  if (!currentBox?.collapsed) {
+    return;
+  }
+
+  const [cursor, scaleFactor] = await Promise.all([
+    cursorPosition(),
+    currentWindow.scaleFactor(),
+  ]);
+  const logicalX = cursor.x / scaleFactor;
+  const logicalY = cursor.y / scaleFactor;
+  const inside =
+    logicalX >= currentBox.x - HOVER_HANDOFF_TOLERANCE_PX &&
+    logicalX <= currentBox.x + currentBox.width + HOVER_HANDOFF_TOLERANCE_PX &&
+    logicalY >= currentBox.y - HOVER_HANDOFF_TOLERANCE_PX &&
+    logicalY <= currentBox.y + currentBox.height + HOVER_HANDOFF_TOLERANCE_PX;
+  if (inside) {
+    openCollapsedPreviewForActiveInteraction();
+  }
+}
+
+onMounted(() => {
+  void listen<BoxHoverHandoffPayload>(BOX_HOVER_HANDOFF_EVENT, ({ payload }) => {
+    if (payload.toBoxId !== props.boxId || !box.value?.collapsed) {
+      return;
+    }
+
+    if (hoverHandoffTimer) {
+      window.clearTimeout(hoverHandoffTimer);
+    }
+
+    hoverHandoffTimer = window.setTimeout(() => {
+      hoverHandoffTimer = null;
+      void acceptHoverHandoff().catch(() => undefined);
+    }, BOX_WINDOW_INTERACTION_TIMING.hoverSwitchDelayMs);
+  })
+    .then((unlisten) => {
+      unlistenHoverHandoff = unlisten;
+    })
+    .catch(() => undefined);
+});
 const boxGridStyle = computed(
   () =>
     ({
@@ -202,6 +301,12 @@ function clearSortInsertionPreviewExpireTimer(): void {
 
 onUnmounted(() => {
   clearSortInsertionPreviewExpireTimer();
+  unlistenHoverHandoff?.();
+  unlistenHoverHandoff = null;
+  if (hoverHandoffTimer) {
+    window.clearTimeout(hoverHandoffTimer);
+    hoverHandoffTimer = null;
+  }
 });
 
 const {
@@ -576,7 +681,7 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
       }"
       :style="boxSurfaceStyle"
       @mouseenter="handleBoxMouseEnter"
-      @mouseleave="handleBoxMouseLeave"
+      @mouseleave="handleBoxMouseLeaveWithHandoff"
     >
       <!--
         图标态：图标模式收缩闲置的形态，整面只渲染一个图标入口。
@@ -589,6 +694,7 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         v-if="isBoxInIconState && !isCollapseAnimating"
         aria-label="展开 Box"
         class="dasktop-icon-state-button grid h-full w-full place-items-center"
+        :style="{ '--dasktop-icon-fade-ms': `${desktopStore.settings.boxIconFadeInMs}ms` }"
         type="button"
         @click="openCollapsedPreviewForActiveInteraction()"
         @contextmenu.prevent.stop="toggleContextMenu"

@@ -39,6 +39,7 @@ export function useBoxCollapsePreview(options: {
   getBoxCollapseDelayMs: () => number;
   getBoxCollapseMode: () => BoxCollapseMode;
   getBoxCornerRadius: () => number;
+  getBoxIconFadeInMs: () => number;
   getBoxIdleOpacityHideAnimationMs: () => number;
   getBoxIdleOpacityShowAnimationMs: () => number;
   isContextMenuOpen: () => boolean;
@@ -125,7 +126,7 @@ export function useBoxCollapsePreview(options: {
       ({
         height: `${BOX_TITLE_VISIBILITY.expandedHeight}px`,
         opacity: isCollapseContentFaded.value ? "0" : "1",
-        transition: "opacity 160ms ease-out",
+        transition: `opacity ${options.getBoxIconFadeInMs()}ms ease-out`,
       }) as CSSProperties,
   );
   const boxBodyStyle = computed(
@@ -154,7 +155,7 @@ export function useBoxCollapsePreview(options: {
         paddingTop: verticalPadding === undefined ? undefined : `${verticalPadding}px`,
         pointerEvents: isBoxCollapsedToTitle.value ? "none" : "auto",
         transform: isBoxCollapsedToTitle.value ? "translateY(-6px)" : "translateY(0)",
-        transition: "opacity 160ms ease-out",
+        transition: `opacity ${options.getBoxIconFadeInMs()}ms ease-out`,
       } as CSSProperties;
     },
   );

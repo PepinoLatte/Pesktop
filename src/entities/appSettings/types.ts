@@ -115,6 +115,10 @@ export interface AppSettings {
    */
   boxTitleTextSize: number;
   /**
+   * 图标模式展开时内容淡入的时长；同时驱动图标入口淡入，数值越小过渡越干脆
+   */
+  boxIconFadeInMs: number;
+  /**
    * Box 图标列之间的横向间距，控制整理面板的信息密度
    */
   boxIconGapX: number;

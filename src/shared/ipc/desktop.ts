@@ -13,6 +13,19 @@ export const DESKTOP_STATE_CHANGED_EVENT = "dasktop-desktop-state-changed";
 export const BOX_WINDOW_READY_EVENT = "dasktop-box-window-ready";
 
 /**
+ * 鼠标越过吸附相邻 Box 边界时由来源窗口广播，目标窗口据此提前展开承接叠加态
+ */
+export const BOX_HOVER_HANDOFF_EVENT = "dasktop-box-hover-handoff";
+
+/**
+ * 过界切换事件只携带来源与目标 Box 标识，位置校验由目标窗口用自身 DPI 自行完成
+ */
+export interface BoxHoverHandoffPayload {
+  fromBoxId: string;
+  toBoxId: string;
+}
+
+/**
  * 启动快照请求/响应走 Tauri 事件总线，避免每个 Box 窗口重复读取 SQLite
  */
 export const DESKTOP_STARTUP_SNAPSHOT_REQUEST_EVENT =

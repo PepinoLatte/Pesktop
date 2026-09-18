@@ -225,6 +225,12 @@ export const BOX_VISUAL_SETTING_CONTROLS: Array<{
     ...APP_SETTING_NUMBER_LIMITS.boxTitleTextSize,
   },
   {
+    key: "boxIconFadeInMs",
+    label: "展开淡入时长",
+    description: "调整图标模式展开后内容与图标的淡入时间",
+    ...APP_SETTING_NUMBER_LIMITS.boxIconFadeInMs,
+  },
+  {
     key: "boxIconGapX",
     label: "横向间距",
     description: "调整图标列之间的水平距离",

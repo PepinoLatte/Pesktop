@@ -19,6 +19,10 @@ const BITMAP_COLOR_DEPTH_BITS: u16 = 32;
 const BITMAP_COLOR_PLANES: u16 = 1;
 /// 传统 icon mask 中高亮通道大于该阈值时视为透明。
 const ICON_MASK_ALPHA_THRESHOLD: u8 = 127;
+/// 内容像素的 Alpha 判定阈值，低于该值视为透明背景。
+const CONTENT_ALPHA_THRESHOLD: u8 = 8;
+/// 裁剪后保留的相对边距比例，避免内容紧贴画布边缘产生压迫感。
+const CONTENT_MARGIN_RATIO: f64 = 0.04;
 /// 完全透明 Alpha 值。
 const TRANSPARENT_ALPHA: u8 = 0;
 /// 完全不透明 Alpha 值。
@@ -57,11 +61,9 @@ pub(super) unsafe fn bitmap_to_png(bitmap: HBITMAP) -> io::Result<Vec<u8>> {
         ));
     }
 
-    encode_png(
-        rgba_bitmap.width as u32,
-        rgba_bitmap.height as u32,
-        &rgba_bitmap.pixels,
-    )
+    let (width, height, pixels) =
+        crop_transparent_padding(rgba_bitmap.width as u32, rgba_bitmap.height as u32, &rgba_bitmap.pixels);
+    encode_png(width, height, &pixels)
 }
 
 /// HICON 的透明度可能存放在传统 AND mask 中，AppX/快捷方式图标尤其依赖这条兜底。
@@ -80,7 +82,61 @@ unsafe fn icon_bitmaps_to_png(color_bitmap: HBITMAP, mask_bitmap: HBITMAP) -> io
         ));
     }
 
-    encode_png(color.width as u32, color.height as u32, &color.pixels)
+    let (width, height, pixels) =
+        crop_transparent_padding(color.width as u32, color.height as u32, &color.pixels);
+    encode_png(width, height, &pixels)
+}
+
+/// 裁掉四周完全透明的背景，让不同来源的图标以一致的视觉密度铺满画布。
+///
+/// Shell 返回的图标位图普遍带大块透明留白，直接整图缩放会让不同文件类型的
+/// 图标在 Box 里看起来忽大忽小；裁剪后前端按 `object-contain` 等比缩放即可
+/// 天然实现"过大压入、过小放大"的统一观感，照片类铺满内容的缩略图不受影响。
+fn crop_transparent_padding(width: u32, height: u32, pixels: &[u8]) -> (u32, u32, Vec<u8>) {
+    let stride = width as usize * BYTES_PER_PIXEL as usize;
+    let mut min_x = width as usize;
+    let mut min_y = height as usize;
+    let mut max_x = 0_usize;
+    let mut max_y = 0_usize;
+    let mut has_content = false;
+
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let alpha = pixels[y * stride + x * BYTES_PER_PIXEL as usize + 3];
+            if alpha > CONTENT_ALPHA_THRESHOLD {
+                has_content = true;
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+        }
+    }
+
+    if !has_content {
+        return (width, height, pixels.to_vec());
+    }
+
+    let margin_x = ((max_x - min_x + 1) as f64 * CONTENT_MARGIN_RATIO).ceil() as usize;
+    let margin_y = ((max_y - min_y + 1) as f64 * CONTENT_MARGIN_RATIO).ceil() as usize;
+    let left = min_x.saturating_sub(margin_x);
+    let top = min_y.saturating_sub(margin_y);
+    let right = (max_x + 1 + margin_x).min(width as usize);
+    let bottom = (max_y + 1 + margin_y).min(height as usize);
+    let crop_width = right - left;
+    let crop_height = bottom - top;
+    if crop_width == width as usize && crop_height == height as usize {
+        return (width, height, pixels.to_vec());
+    }
+
+    let mut cropped = Vec::with_capacity(crop_width * crop_height * BYTES_PER_PIXEL as usize);
+    for row in top..bottom {
+        let start = row * stride + left * BYTES_PER_PIXEL as usize;
+        let end = start + crop_width * BYTES_PER_PIXEL as usize;
+        cropped.extend_from_slice(&pixels[start..end]);
+    }
+
+    (crop_width as u32, crop_height as u32, cropped)
 }
 
 /// 传统图标 mask 中白色表示透明、黑色表示不透明，用它补回空 Alpha 通道。

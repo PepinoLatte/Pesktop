@@ -117,6 +117,10 @@ export const BOX_WINDOW_INTERACTION_TIMING = {
    * 菜单窗口失焦可能早于更多按钮 click，短保护期内把这次 click 视为关闭动作而不是重新打开
    */
   menuToggleCloseGuardMs: 180,
+  /**
+   * 鼠标越过相邻 Box 边界后的防误触延迟：快速划过不切换，停留超过该时长才展开目标 Box
+   */
+  hoverSwitchDelayMs: 150,
   positionApplyLockMs: 80,
   /**
    * 原生 resize 刚启动时 WebView 可能短暂读不到左键按下，先给系统拖拽一点接管时间

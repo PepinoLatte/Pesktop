@@ -144,7 +144,8 @@ select:focus-visible {
 }
 
 /**
- * 图标态入口在收缩动画完成后切入，淡入出现避免与内容切换产生硬跳
+ * 图标态入口在收缩动画完成后切入，淡入出现避免与内容切换产生硬跳；
+ * 时长由设置键 boxIconFadeInMs 通过 CSS 变量下发
  */
 @keyframes dasktop-fade-in {
   from {
@@ -156,7 +157,7 @@ select:focus-visible {
 }
 
 .dasktop-icon-state-button {
-  animation: dasktop-fade-in 180ms ease-out;
+  animation: dasktop-fade-in var(--dasktop-icon-fade-ms, 160ms) ease-out;
 }
 
 /**
