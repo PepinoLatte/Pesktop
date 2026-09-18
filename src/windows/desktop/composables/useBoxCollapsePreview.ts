@@ -1,6 +1,7 @@
-import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch, type ComputedRef, type Ref } from "vue";
 import type { CSSProperties } from "vue";
 import { animate } from "motion";
+import { broadcastBoxHoverTransfer, listenBoxHoverTransfer } from "@/shared/ipc/desktop";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 import {
   BOX_COLLAPSE_INTERACTION,
@@ -34,6 +35,7 @@ export function useBoxCollapsePreview(options: {
   box: ComputedRef<DesktopBox | undefined>;
   boxSurfaceRef: Ref<HTMLElement | null>;
   getBoxBackgroundOpacity: () => number;
+  getBoxBlurStrength?: () => number;
   getBoxCollapseAnimationMs: () => number;
   getBoxCollapseDelayMs: () => number;
   getBoxCornerRadius: () => number;
@@ -50,11 +52,14 @@ export function useBoxCollapsePreview(options: {
 }) {
   const isCollapsedPreviewOpen = ref(false);
   const isBoxHovered = ref(false);
+  const isBoxConfirmed = ref(false);
   const isDragHoveringBox = ref(false);
   const isNativeItemContextMenuOpen = ref(false);
   const isTitleHovered = ref(false);
   const isCollapseAnimating = ref(false);
   const boxSurfaceVisualHeight = ref<number | null>(null);
+  let unlistenHoverTransfer: (() => void) | null = null;
+
   const isBoxCollapsedToTitle = computed(() =>
     Boolean(options.box.value?.collapsed && !isCollapsedPreviewOpen.value),
   );
@@ -65,18 +70,11 @@ export function useBoxCollapsePreview(options: {
   const isBottomTitleMovingDuringCollapse = computed(() =>
     Boolean(
       options.box.value?.titlePosition === "bottom" &&
-        (isCollapseAnimating.value || isBoxCollapsedToTitle.value),
+        options.box.value?.collapsed &&
+        isCollapseAnimating.value,
     ),
   );
   const boxIdleOpacity = computed(() =>
-    isBoxHovered.value ||
-    isDragHoveringBox.value ||
-    isNativeItemContextMenuOpen.value ||
-    options.isContextMenuOpen() ||
-    options.isEditingTitle() ||
-    options.isManualDraggingBox() ||
-    options.isResizeHandleHovered() ||
-    options.isResizingBox() ||
     Boolean(options.box.value?.collapsed && isCollapsedPreviewOpen.value)
       ? 1
       : (options.box.value?.titleOpacity ?? BOX_TITLE_OPACITY.max) / 100,
@@ -86,6 +84,7 @@ export function useBoxCollapsePreview(options: {
       ({
         "--dasktop-box-background-opacity": `${options.getBoxBackgroundOpacity() / 100}`,
         "--dasktop-box-radius": `${options.getBoxCornerRadius()}px`,
+        "--dasktop-box-blur": `${options.getBoxBlurStrength ? options.getBoxBlurStrength() : 16}px`,
         borderRadius: "var(--dasktop-box-radius)",
         clipPath: "inset(0 round var(--dasktop-box-radius))",
         height: boxSurfaceVisualHeight.value === null ? "100%" : `${boxSurfaceVisualHeight.value}px`,
@@ -544,11 +543,51 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * Box 区域 hover 进入时取消延迟收起；收缩态窗口只剩标题高度，因此进入可见区域等同于进入标题入口
+   * 挂载全局跨 Box 悬浮激活转移监听：当鼠标进入其它 Box 时，若本 Box 尚未被点击确认激活，立即无感平滑让位收回
+   */
+  onMounted(() => {
+    void listenBoxHoverTransfer((payload) => {
+      if (!options.box.value || payload.activeBoxId === options.box.value.id) {
+        return;
+      }
+
+      if (
+        !isBoxConfirmed.value &&
+        !options.isContextMenuOpen() &&
+        !options.isEditingTitle() &&
+        !options.isManualDraggingBox() &&
+        !options.isResizingBox()
+      ) {
+        isBoxHovered.value = false;
+        isTitleHovered.value = false;
+        closeCollapsedPreview();
+      }
+    }).then((unlisten) => {
+      unlistenHoverTransfer = unlisten;
+    });
+  });
+
+  onUnmounted(() => {
+    unlistenHoverTransfer?.();
+    unlistenHoverTransfer = null;
+  });
+
+  /**
+   * 用户在 Box 内点击、选框、重命名或展开菜单后，标记本 Box 为显式确认态，防止鼠标掠过邻近窗口时被强行切走
+   */
+  function confirmBoxActiveState(): void {
+    isBoxConfirmed.value = true;
+  }
+
+  /**
+   * Box 区域 hover 进入时取消延迟收起，并广播激活转移事件使其它未确认 Box 立即让位收起
    */
   function handleBoxMouseEnter(): void {
     isBoxHovered.value = true;
     openCollapsedPreviewForActiveInteraction();
+    if (options.box.value) {
+      void broadcastBoxHoverTransfer(options.box.value.id);
+    }
   }
 
   /**
@@ -557,6 +596,9 @@ export function useBoxCollapsePreview(options: {
   function handleBoxTitleMouseEnter(): void {
     isTitleHovered.value = true;
     openCollapsedPreviewForActiveInteraction();
+    if (options.box.value) {
+      void broadcastBoxHoverTransfer(options.box.value.id);
+    }
   }
 
   /**
@@ -568,11 +610,12 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 鼠标离开整个 Box 后延迟收回临时展开内容，避免移动到菜单或缩放边缘时立刻收缩
+   * 鼠标离开整个 Box 后延迟收回临时展开内容，并复位确认标记，使下次滑入能重新响应自由切换
    */
   function handleBoxMouseLeave(): void {
     isBoxHovered.value = false;
     isTitleHovered.value = false;
+    isBoxConfirmed.value = false;
     refreshCollapsedPreviewCloseSchedule();
   }
 
@@ -585,12 +628,14 @@ export function useBoxCollapsePreview(options: {
     boxSurfaceStyle,
     boxTitleAreaStyle,
     clearCollapseWindowAnimation,
+    confirmBoxActiveState,
     handleBoxMouseEnter,
     handleBoxMouseLeave,
     handleBoxTitleMouseEnter,
     handleBoxTitleMouseLeave,
     isApplyingCollapseWindowSize: () => isApplyingCollapseWindowSize,
     isBoxCollapsedToTitle,
+    isBoxConfirmed,
     isCollapseAnimating,
     openCollapsedPreviewForActiveInteraction,
     refreshCollapsedPreviewCloseSchedule,

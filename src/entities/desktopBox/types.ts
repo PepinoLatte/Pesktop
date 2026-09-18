@@ -36,4 +36,9 @@ export interface DesktopBox {
   y: number;
   width: number;
   height: number;
+  /**
+   * Box 预设图标或封面标识，小图标模式或标题栏展示时优先使用该图标
+   */
+  icon?: string;
 }
+

@@ -149,6 +149,8 @@ export function useBoxWindowFrame(options: {
   let programmaticResizeApplyVersion = 0;
   let manualDragState: ManualDragState | null = null;
   let manualDragCleanup: (() => void) | null = null;
+  let manualDragRafId: number | null = null;
+  let pendingManualDragPosition: PhysicalWindowPoint | null = null;
   let manualResizeState: ManualResizeState | null = null;
   let manualResizeFrameTimer: ReturnType<typeof window.setInterval> | null = null;
   let manualResizeApplyPending = false;
@@ -851,6 +853,12 @@ export function useBoxWindowFrame(options: {
    * 鼠标释放时停止拖动循环，并把最终物理坐标转换成逻辑坐标写入数据库
    */
   function stopManualDragging(shouldPersist: boolean): void {
+    if (manualDragRafId !== null) {
+      window.cancelAnimationFrame(manualDragRafId);
+      manualDragRafId = null;
+    }
+    pendingManualDragPosition = null;
+
     const dragState = manualDragState;
 
     manualDragState = null;
@@ -902,7 +910,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 鼠标移动时按用户给出的 DOM 示例实时计算位置，只移动窗口不持久化数据库
+   * 鼠标移动时利用 requestAnimationFrame 节流批处理并与屏幕物理刷新率对齐，彻底根除跨进程 IPC 堵塞掉帧
    */
   function updateManualDragCursor(event: MouseEvent): void {
     const dragState = manualDragState;
@@ -920,8 +928,28 @@ export function useBoxWindowFrame(options: {
     };
     const nextPosition = resolveManualDragPosition(rawPosition, dragState);
 
+    // 整数像素微量移动且坐标未变时不触发多余重绘
+    if (
+      dragState.lastPosition &&
+      Math.round(dragState.lastPosition.x) === Math.round(nextPosition.x) &&
+      Math.round(dragState.lastPosition.y) === Math.round(nextPosition.y)
+    ) {
+      return;
+    }
+
     dragState.lastPosition = nextPosition;
-    void applyWindowPhysicalPosition(nextPosition.x, nextPosition.y, false);
+    pendingManualDragPosition = nextPosition;
+
+    if (manualDragRafId === null) {
+      manualDragRafId = window.requestAnimationFrame(async () => {
+        manualDragRafId = null;
+        if (pendingManualDragPosition) {
+          const target = pendingManualDragPosition;
+          pendingManualDragPosition = null;
+          await applyWindowPhysicalPosition(target.x, target.y, false);
+        }
+      });
+    }
   }
 
   /**
@@ -946,7 +974,7 @@ export function useBoxWindowFrame(options: {
         if (windowPositionApplyVersion === applyVersion) {
           isApplyingWindowPosition = false;
         }
-      }, BOX_WINDOW_INTERACTION_TIMING.positionApplyLockMs);
+      }, shouldPersist ? BOX_WINDOW_INTERACTION_TIMING.positionApplyLockMs : 16);
     }
   }
 

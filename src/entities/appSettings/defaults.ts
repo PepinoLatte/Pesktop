@@ -65,6 +65,9 @@ export const APP_SETTING_KEYS = {
   showShortcutArrow: "showShortcutArrow",
   snapThreshold: "snapThreshold",
   snapToEdges: "snapToEdges",
+  boxTitleTextSize: "boxTitleTextSize",
+  boxBlurStrength: "boxBlurStrength",
+  boxIconBorderRadius: "boxIconBorderRadius",
 } as const satisfies Record<keyof AppSettings, keyof AppSettings>;
 
 /**
@@ -97,6 +100,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   boxIconGapY: 4,
   boxFilenameWidth: 82,
   boxCornerRadius: 8,
+  boxTitleTextSize: 13,
+  boxBlurStrength: 16,
+  boxIconBorderRadius: 6,
 };
 
 /**
@@ -114,6 +120,9 @@ export const APP_SETTING_NUMBER_LIMITS = {
   boxIconGapY: { min: 0, max: 32, step: 1, unit: "px" },
   boxIconSize: { min: 28, max: 96, step: 1, unit: "px" },
   boxLabelTextSize: { min: 9, max: 16, step: 0.5, unit: "px" },
+  boxTitleTextSize: { min: 11, max: 20, step: 1, unit: "px" },
+  boxBlurStrength: { min: 0, max: 32, step: 1, unit: "px" },
+  boxIconBorderRadius: { min: 0, max: 20, step: 1, unit: "px" },
   snapThreshold: { min: 8, max: 64, step: 1, unit: "px" },
 } as const satisfies Record<
   AppSettingNumberKey,

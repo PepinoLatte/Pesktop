@@ -201,10 +201,28 @@ export const BOX_VISUAL_SETTING_CONTROLS: Array<{
     ...APP_SETTING_NUMBER_LIMITS.boxBackgroundOpacity,
   },
   {
+    key: "boxBlurStrength",
+    label: "毛玻璃虚化",
+    description: "调节 Box 背部桌面壁纸的毛玻璃拟物模糊强度",
+    ...APP_SETTING_NUMBER_LIMITS.boxBlurStrength,
+  },
+  {
     key: "boxCornerRadius",
-    label: "圆角大小",
-    description: "调整 Box 面板和文件图标悬停区域的圆角",
+    label: "面板圆角",
+    description: "调整 Box 外观面板边缘的圆角弧度",
     ...APP_SETTING_NUMBER_LIMITS.boxCornerRadius,
+  },
+  {
+    key: "boxIconBorderRadius",
+    label: "图标圆角",
+    description: "调整 Box 内部文件与应用图标本身的圆角弧度",
+    ...APP_SETTING_NUMBER_LIMITS.boxIconBorderRadius,
+  },
+  {
+    key: "boxTitleTextSize",
+    label: "标题字号",
+    description: "调整 Box 顶部标题栏名称文字的显示大小",
+    ...APP_SETTING_NUMBER_LIMITS.boxTitleTextSize,
   },
   {
     key: "boxIconSize",

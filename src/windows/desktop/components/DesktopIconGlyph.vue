@@ -33,7 +33,7 @@ const props = defineProps<{
 const resolvedFallbackIconSize = computed(() =>
   Math.max(
     DESKTOP_ICON_VIEW.fallbackIconSize,
-    Math.round(props.iconSize * DESKTOP_ICON_VIEW.fallbackIconScale),
+    Math.round(props.iconSize * 0.88),
   ),
 );
 const shortcutBadgeScale = computed(
@@ -50,10 +50,15 @@ const iconFrameStyle = computed(
 const iconImageStyle = computed(
   () =>
     ({
+      borderRadius: `${props.radiusSize}px`,
       height: `${props.iconSize}px`,
+      maxHeight: `${props.iconSize}px`,
+      maxWidth: `${props.iconSize}px`,
+      objectFit: "contain",
       width: `${props.iconSize}px`,
     }) as CSSProperties,
 );
+
 const shortcutBadgeStyle = computed(
   () =>
     ({
@@ -93,7 +98,7 @@ function scaleShortcutBadgeValue(value: number): number {
     <img
       v-if="item.iconDataUrl"
       :alt="item.name"
-      class="object-contain drop-shadow-[0_4px_8px_rgba(15,23,42,0.16)]"
+      class="object-contain drop-shadow-[0_4px_8px_rgba(15,23,42,0.16)] transition-all duration-150 overflow-hidden"
       draggable="false"
       :src="item.iconDataUrl"
       :style="iconImageStyle"

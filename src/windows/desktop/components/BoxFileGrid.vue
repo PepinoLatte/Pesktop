@@ -81,7 +81,7 @@ function resolveItemSortInsertionPlacement(
       :label-text-size="settings.boxLabelTextSize"
       :label-width="settings.boxFilenameWidth"
       :name-display-mode="settings.nameDisplayMode"
-      :radius-size="settings.boxCornerRadius"
+      :radius-size="settings.boxIconBorderRadius"
       :rename-draft="renameDraft"
       :selected="isItemSelected(item)"
       :show-label="settings.showItemLabels"

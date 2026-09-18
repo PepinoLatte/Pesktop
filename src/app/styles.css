@@ -124,8 +124,8 @@ select:focus-visible {
  */
 .dasktop-box-surface {
   background: rgb(246 248 252 / var(--dasktop-box-background-opacity, 0.7));
-  backdrop-filter: blur(24px) saturate(1.65);
-  -webkit-backdrop-filter: blur(24px) saturate(1.65);
+  backdrop-filter: blur(var(--dasktop-box-blur, 20px)) saturate(1.65);
+  -webkit-backdrop-filter: blur(var(--dasktop-box-blur, 20px)) saturate(1.65);
 }
 
 .dark .dasktop-box-surface {

@@ -29,6 +29,8 @@ const {
   refreshDesktopFromMenu,
   toggleBoxLockedFromMenu,
   updateBoxAutoCollapseFromMenu,
+  updateBoxIconFromMenu,
+  updateBoxSizeModeFromMenu,
   updateIdleOpacityFromMenu,
   updateTitlePositionFromMenu,
 } = useBoxContextMenuActions({
@@ -65,6 +67,8 @@ function bindMenuRef(element: Element | ComponentPublicInstance | null): void {
         :box="box"
         :box-auto-collapse-mode="boxAutoCollapseMode"
         @update-auto-collapse="updateBoxAutoCollapseFromMenu"
+        @update-box-icon="updateBoxIconFromMenu"
+        @update-box-size-mode="updateBoxSizeModeFromMenu"
         @update-title-position="updateTitlePositionFromMenu"
       />
       <span class="my-0.5 h-px bg-[#e4e6eb] dark:bg-[#30333c]" />

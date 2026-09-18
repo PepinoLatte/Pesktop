@@ -29,6 +29,8 @@ export interface BoxContextMenuActions {
   refreshDesktopFromMenu: () => Promise<void>;
   toggleBoxLockedFromMenu: () => Promise<void>;
   updateBoxAutoCollapseFromMenu: (mode: BoxAutoCollapseMode) => Promise<void>;
+  updateBoxIconFromMenu: (icon: string) => Promise<void>;
+  updateBoxSizeModeFromMenu: (mode: "window" | "icon") => Promise<void>;
   updateIdleOpacityFromMenu: (nextOpacity: number) => Promise<void>;
   updateTitlePositionFromMenu: (position: DesktopBoxTitlePosition) => Promise<void>;
 }
@@ -141,6 +143,38 @@ export function useBoxContextMenuActions(
   }
 
   /**
+   * 更新当前 Box 的预选图标与封面，实时落库并广播到对应独立 Box 窗口
+   */
+  async function updateBoxIconFromMenu(icon: string): Promise<void> {
+    if (!options.box.value) {
+      return;
+    }
+
+    options.clearBoxDeleteConfirmation();
+    await desktopStore.updateBoxIcon(options.box.value.id, icon);
+  }
+
+  /**
+   * 切换 Box 为小图标模式 (72x72) 或恢复为常规窗口模式 (320x320)
+   */
+  async function updateBoxSizeModeFromMenu(mode: "window" | "icon"): Promise<void> {
+    if (!options.box.value) {
+      return;
+    }
+
+    options.clearBoxDeleteConfirmation();
+    const isIconMode = mode === "icon";
+    const nextWidth = isIconMode ? 72 : 320;
+    const nextHeight = isIconMode ? 72 : 320;
+
+    await desktopStore.updateBox({
+      ...options.box.value,
+      width: nextWidth,
+      height: nextHeight,
+    });
+  }
+
+  /**
    * 删除 Box 前先按当前删除策略处理真实文件夹，用户取消 Shell 操作时保留 Box。
    */
   async function deleteCurrentBox(): Promise<void> {
@@ -171,6 +205,8 @@ export function useBoxContextMenuActions(
     refreshDesktopFromMenu,
     toggleBoxLockedFromMenu,
     updateBoxAutoCollapseFromMenu,
+    updateBoxIconFromMenu,
+    updateBoxSizeModeFromMenu,
     updateIdleOpacityFromMenu,
     updateTitlePositionFromMenu,
   };

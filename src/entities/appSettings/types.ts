@@ -126,5 +126,17 @@ export interface AppSettings {
    * Box 面板和图标命中区域的圆角，保持桌面组件视觉一致
    */
   boxCornerRadius: number;
+  /**
+   * Box 标题名称的字体大小，适配不同审美偏好
+   */
+  boxTitleTextSize: number;
+  /**
+   * Box 背景毛玻璃拟物风虚化强度 (0px ~ 32px)
+   */
+  boxBlurStrength: number;
+  /**
+   * Box 内文件与应用图标的圆角弧度 (0px ~ 20px)
+   */
+  boxIconBorderRadius: number;
 }
 import type { DesktopNameDisplayMode } from "@/entities/desktopItem/types";

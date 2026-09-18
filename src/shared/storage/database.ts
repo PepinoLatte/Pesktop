@@ -70,9 +70,18 @@ export async function initializeStorage(): Promise<void> {
       y INTEGER NOT NULL,
       width INTEGER NOT NULL,
       height INTEGER NOT NULL,
+      icon TEXT NOT NULL DEFAULT '',
       updated_at INTEGER NOT NULL
     )
   `);
+
+  try {
+    await database.execute(
+      `ALTER TABLE ${APP_SETTINGS_STORAGE.tables.boxes} ADD COLUMN icon TEXT NOT NULL DEFAULT ''`,
+    );
+  } catch {
+    // 列已存在时直接忽略
+  }
 
   await database.execute(`
     CREATE TABLE IF NOT EXISTS ${APP_SETTINGS_STORAGE.tables.appSettings} (
@@ -156,7 +165,7 @@ async function resetIncompatibleBoxesTable(database: Database): Promise<void> {
 export async function loadBoxes(): Promise<DesktopBox[]> {
   const database = await getDatabase();
   const rows = await database.select<Array<Record<string, unknown>>>(`
-    SELECT id, title, folder_path, collapsed, locked, title_opacity, title_position, x, y, width, height
+    SELECT id, title, folder_path, collapsed, locked, title_opacity, title_position, x, y, width, height, icon
     FROM ${APP_SETTINGS_STORAGE.tables.boxes}
     ORDER BY updated_at ASC
   `);
@@ -164,6 +173,7 @@ export async function loadBoxes(): Promise<DesktopBox[]> {
   return rows.map((row) => ({
     collapsed: sanitizeDesktopBoxBoolean(row.collapsed),
     folderPath: String(row.folder_path),
+    icon: row.icon ? String(row.icon) : "Folder",
     id: String(row.id),
     locked: sanitizeDesktopBoxBoolean(row.locked),
     title: String(row.title),
@@ -184,8 +194,8 @@ export async function saveBox(box: DesktopBox): Promise<void> {
 
   await database.execute(
     `
-      INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxes} (id, title, folder_path, collapsed, locked, title_opacity, title_position, x, y, width, height, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxes} (id, title, folder_path, collapsed, locked, title_opacity, title_position, x, y, width, height, icon, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         folder_path = excluded.folder_path,
@@ -197,6 +207,7 @@ export async function saveBox(box: DesktopBox): Promise<void> {
         y = excluded.y,
         width = excluded.width,
         height = excluded.height,
+        icon = excluded.icon,
         updated_at = excluded.updated_at
     `,
     [
@@ -211,6 +222,7 @@ export async function saveBox(box: DesktopBox): Promise<void> {
       box.y,
       box.width,
       box.height,
+      box.icon || "Folder",
       Date.now(),
     ],
   );

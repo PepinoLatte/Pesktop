@@ -13,12 +13,18 @@ export const DESKTOP_STATE_CHANGED_EVENT = "dasktop-desktop-state-changed";
 export const BOX_WINDOW_READY_EVENT = "dasktop-box-window-ready";
 
 /**
+ * Box 悬浮激活转移事件：相邻吸附或堆叠 Box 在未点击确认时自由转移激活态
+ */
+export const BOX_HOVER_TRANSFER_EVENT = "dasktop-box-hover-transfer";
+
+/**
  * 启动快照请求/响应走 Tauri 事件总线，避免每个 Box 窗口重复读取 SQLite
  */
 export const DESKTOP_STARTUP_SNAPSHOT_REQUEST_EVENT =
   "dasktop-desktop-startup-snapshot-request";
 export const DESKTOP_STARTUP_SNAPSHOT_RESPONSE_EVENT =
   "dasktop-desktop-startup-snapshot-response";
+
 
 /**
  * 状态变更范围用于接收方判断刷新成本，设置变更只需要重读偏好，Box 变更才需要同步布局映射
@@ -182,3 +188,31 @@ export async function requestDesktopStartupSnapshot(
       });
   });
 }
+
+/**
+ * Box 悬浮激活转移载荷，包含当前激活的 Box ID
+ */
+export interface BoxHoverTransferPayload {
+  activeBoxId: string;
+}
+
+/**
+ * 广播当前 Box 被鼠标滑入激活，通知其他未确认 Box 迅速让位收起
+ */
+export async function broadcastBoxHoverTransfer(activeBoxId: string): Promise<void> {
+  await emit(BOX_HOVER_TRANSFER_EVENT, {
+    activeBoxId,
+  } satisfies BoxHoverTransferPayload);
+}
+
+/**
+ * 监听其他 Box 的滑入激活广播
+ */
+export function listenBoxHoverTransfer(
+  handler: (payload: BoxHoverTransferPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<BoxHoverTransferPayload>(BOX_HOVER_TRANSFER_EVENT, ({ payload }) => {
+    handler(payload);
+  });
+}
+

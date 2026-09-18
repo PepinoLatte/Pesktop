@@ -656,11 +656,27 @@ export const useDesktopStore = defineStore("desktop", () => {
       ...box,
       collapsed: Boolean(box.collapsed),
       folderPath: String(box.folderPath ?? ""),
+      icon: box.icon || "Folder",
       width: Math.max(box.width, BOX_WINDOW_SIZE.min.width),
       height: Math.max(box.height, BOX_WINDOW_SIZE.min.height),
       locked: Boolean(box.locked),
       titleOpacity: sanitizeBoxTitleOpacity(box.titleOpacity),
     };
+  }
+
+  /**
+   * 更新单个 Box 的预选图标或封面，用于小图标小部件模式与标题栏展示
+   */
+  async function updateBoxIcon(boxId: string, icon: string): Promise<void> {
+    const targetBox = boxes.value.find((box) => box.id === boxId);
+    if (!targetBox) {
+      return;
+    }
+
+    await updateBox({
+      ...targetBox,
+      icon,
+    });
   }
 
   /**
@@ -862,6 +878,7 @@ export const useDesktopStore = defineStore("desktop", () => {
     updateBoxConflictPolicy,
     updateBoxDragOutAction,
     updateBoxDropAction,
+    updateBoxIcon,
     updateBoxLocked,
     updateBoxTheme,
     updateBoxTitleOpacity,

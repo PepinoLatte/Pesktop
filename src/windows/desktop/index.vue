@@ -4,7 +4,9 @@ import type { ComponentPublicInstance, CSSProperties } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import BoxFileGrid from "@/windows/desktop/components/BoxFileGrid.vue";
 import BoxHeader from "@/windows/desktop/components/BoxHeader.vue";
+import BoxIconGlyph from "@/windows/desktop/components/BoxIconGlyph.vue";
 import BoxResizeHandles from "@/windows/desktop/components/BoxResizeHandles.vue";
+import { openDesktopItem } from "@/entities/desktopItem/api";
 import { DESKTOP_ICON_VIEW } from "@/windows/desktop/config/desktopIcon";
 import { useBoxCollapsePreview } from "@/windows/desktop/composables/useBoxCollapsePreview";
 import { useBoxContextMenu } from "@/windows/desktop/composables/useBoxContextMenu";
@@ -91,6 +93,7 @@ const {
   boxSurfaceStyle,
   boxTitleAreaStyle,
   clearCollapseWindowAnimation,
+  confirmBoxActiveState,
   handleBoxMouseEnter,
   handleBoxMouseLeave,
   handleBoxTitleMouseEnter,
@@ -106,6 +109,7 @@ const {
   box,
   boxSurfaceRef,
   getBoxBackgroundOpacity: () => desktopStore.settings.boxBackgroundOpacity,
+  getBoxBlurStrength: () => desktopStore.settings.boxBlurStrength,
   getBoxCollapseAnimationMs: () => desktopStore.getBoxCollapseAnimationMs(),
   getBoxCollapseDelayMs: () => desktopStore.getBoxCollapseDelayMs(),
   getBoxCornerRadius: () => desktopStore.settings.boxCornerRadius,
@@ -132,6 +136,22 @@ readBoxCollapsedToTitle = () => isBoxCollapsedToTitle.value;
 readCollapseWindowSizeApplying = () => isApplyingCollapseWindowSize();
 openCollapsedPreviewForActiveInteractionHandler = openCollapsedPreviewForActiveInteraction;
 refreshCollapsedPreviewCloseScheduleHandler = refreshCollapsedPreviewCloseSchedule;
+
+/**
+ * 当 Box 尺寸缩至极小（宽或高 <= 110px）时，自动切换为超简约的桌面小图标小部件模式
+ */
+const isCompactIconMode = computed(() =>
+  Boolean(box.value && (box.value.width <= 110 || box.value.height <= 110)),
+);
+
+/**
+ * 双击小图标时在系统资源管理器中打开对应 Box 绑定的物理存储文件夹
+ */
+function openBoxFolder(): void {
+  if (box.value?.folderPath) {
+    void openDesktopItem(box.value.folderPath);
+  }
+}
 
 const boxItemWidth = computed(() =>
   Math.max(
@@ -552,8 +572,9 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
     <article
       v-if="box"
       ref="boxSurfaceRef"
-      class="dasktop-box-surface relative flex h-full w-full flex-col overflow-hidden text-slate-950 dark:text-white"
+      class="dasktop-box-surface group/box relative flex h-full w-full flex-col overflow-hidden text-slate-950 dark:text-white"
       :style="boxSurfaceStyle"
+      @click="confirmBoxActiveState"
       @mouseenter="handleBoxMouseEnter"
       @mouseleave="handleBoxMouseLeave"
     >
@@ -565,47 +586,84 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         @start-resizing="startResizing"
       />
 
-      <BoxHeader
-        v-model:title-draft="titleDraft"
-        :box="box"
-        :box-title-area-style="boxTitleAreaStyle"
-        :box-title-order-class="boxTitleOrderClass"
-        :is-editing-title="isEditingTitle"
-        :set-title-input-ref="setTitleInputRef"
-        @cancel-title-editing="cancelTitleEditing"
-        @commit-title-editing="commitTitleEditing"
-        @start-dragging="startDragging"
-        @start-title-editing="startTitleEditing"
-        @title-mouse-enter="handleBoxTitleMouseEnter"
-        @title-mouse-leave="handleBoxTitleMouseLeave"
-        @toggle-context-menu="toggleContextMenu"
-      />
+      <!-- 边界判定拖动按钮：静默状态下鼠标不移入自动隐藏，hover 时浮现，抓取更方便 -->
+      <button
+        v-if="!isCompactIconMode && !box.locked"
+        aria-label="边界拖拽移动"
+        class="group/boundary pointer-events-auto absolute top-0.5 left-1/2 z-40 -translate-x-1/2 flex h-3 w-16 cursor-grab active:cursor-grabbing items-center justify-center rounded-full bg-transparent opacity-0 transition-all duration-200 group-hover/box:opacity-100 hover:w-24"
+        title="拖拽移动 Box"
+        type="button"
+        @mousedown.left.stop.prevent="startDragging($event)"
+      >
+        <span class="h-1 w-8 rounded-full bg-slate-400/50 shadow-sm transition-all duration-200 group-hover/boundary:h-1.5 group-hover/boundary:w-14 group-hover/boundary:bg-[#2f6bff] dark:bg-white/40" />
+      </button>
 
-      <BoxFileGrid
-        :box-body-style="boxBodyStyle"
-        :box-grid-overflow-class="boxGridOverflowClass"
-        :box-grid-style="boxGridStyle"
-        :box-items="boxItems"
-        :editing-path="editingPath"
-        :is-box-file-drag-active="isBoxFileDragActive"
-        :is-item-dragging="isItemDragging"
-        :is-item-selected="isItemSelected"
-        :is-selecting="isSelecting"
-        :rename-draft="renameDraft"
-        :selection-rect-style="selectionRectStyle"
-        :set-grid-ref="setBoxGridRef"
-        :sort-insertion-preview="boxSortInsertionPreview"
-        :settings="desktopStore.settings"
-        @cancel-rename="cancelRename"
-        @commit-rename="commitRename"
-        @file-view-keydown="handleFileViewKeydown"
-        @grid-pointer-down="handleGridPointerDown"
-        @item-click="handleItemClick"
-        @item-context-menu="handleItemContextMenu"
-        @item-double-click="handleItemDoubleClick"
-        @item-pointer-down="handleItemPointerDown"
-        @rename-draft-change="renameDraft = $event"
-      />
+      <!-- 小图标简约模式：当 Box 缩放至图标尺寸（宽或高 <= 110px）时展示 -->
+      <div
+        v-if="isCompactIconMode"
+        class="flex h-full w-full flex-col items-center justify-center p-1.5 text-center select-none cursor-default"
+        title="双击打开文件夹，右键打开菜单，拖拽边缘恢复大小"
+        @click="confirmBoxActiveState"
+        @contextmenu.prevent.stop="toggleContextMenu"
+        @dblclick.stop="openBoxFolder"
+        @mousedown.left="startDragging($event)"
+      >
+        <div class="relative grid place-items-center size-10 rounded-[12px] bg-[#2f6bff]/15 text-[#2f6bff] shadow-sm transition-transform duration-150 hover:scale-105 active:scale-95 dark:bg-[#2f6bff]/25 dark:text-white">
+          <BoxIconGlyph :icon="box.icon" :size="24" />
+        </div>
+        <span
+          class="mt-1 max-w-full truncate px-1 font-semibold text-slate-800 dark:text-white"
+          :style="{ fontSize: `${desktopStore.settings.boxTitleTextSize || 12}px` }"
+        >
+          {{ box.title }}
+        </span>
+      </div>
+
+      <!-- 常规完整模式：展示标题栏与文件网格 -->
+      <template v-else>
+        <BoxHeader
+          v-model:title-draft="titleDraft"
+          :box="box"
+          :box-title-area-style="boxTitleAreaStyle"
+          :box-title-order-class="boxTitleOrderClass"
+          :is-editing-title="isEditingTitle"
+          :set-title-input-ref="setTitleInputRef"
+          :title-font-size="desktopStore.settings.boxTitleTextSize"
+          @cancel-title-editing="cancelTitleEditing"
+          @commit-title-editing="commitTitleEditing"
+          @start-dragging="startDragging"
+          @start-title-editing="startTitleEditing"
+          @title-mouse-enter="handleBoxTitleMouseEnter"
+          @title-mouse-leave="handleBoxTitleMouseLeave"
+          @toggle-context-menu="toggleContextMenu"
+        />
+
+        <BoxFileGrid
+          :box-body-style="boxBodyStyle"
+          :box-grid-overflow-class="boxGridOverflowClass"
+          :box-grid-style="boxGridStyle"
+          :box-items="boxItems"
+          :editing-path="editingPath"
+          :is-box-file-drag-active="isBoxFileDragActive"
+          :is-item-dragging="isItemDragging"
+          :is-item-selected="isItemSelected"
+          :is-selecting="isSelecting"
+          :rename-draft="renameDraft"
+          :selection-rect-style="selectionRectStyle"
+          :set-grid-ref="setBoxGridRef"
+          :sort-insertion-preview="boxSortInsertionPreview"
+          :settings="desktopStore.settings"
+          @cancel-rename="cancelRename"
+          @commit-rename="commitRename"
+          @file-view-keydown="handleFileViewKeydown"
+          @grid-pointer-down="handleGridPointerDown"
+          @item-click="handleItemClick"
+          @item-context-menu="handleItemContextMenu"
+          @item-double-click="handleItemDoubleClick"
+          @item-pointer-down="handleItemPointerDown"
+          @rename-draft-change="renameDraft = $event"
+        />
+      </template>
     </article>
   </main>
 </template>

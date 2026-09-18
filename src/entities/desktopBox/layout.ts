@@ -7,8 +7,8 @@ export const BOX_WINDOW_SIZE = {
     height: 320,
   },
   min: {
-    width: 240,
-    height: 240,
+    width: 68,
+    height: 68,
   },
 } as const;
 
@@ -20,7 +20,9 @@ export const BOX_DEFAULT_STATE = {
   locked: false,
   titleOpacity: 100,
   titlePosition: "top",
+  icon: "Folder",
 } as const;
+
 
 /**
  * Box 闲置可见度使用百分比表达；0 表示鼠标未进入 Box 区域时整体不可见
