@@ -133,6 +133,16 @@ select:focus-visible {
 }
 
 /**
+ * 拖动期间暂停毛玻璃：半透明无边框窗口每次位移都会触发 DWM 对窗口后内容
+ * 重新做整面高斯模糊，是拖动掉帧的合成层大头；拖动中保留半透明底色、关闭
+ * 模糊与饱和度提升，松手立即恢复，视觉差异仅在移动过程短暂出现
+ */
+.dasktop-box-surface--dragging {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/**
  * Box 内保留滚轮滚动但隐藏视觉滚动条，避免滚动条出现时挤压网格列宽导致换行。
  */
 .dasktop-box-scrollarea {

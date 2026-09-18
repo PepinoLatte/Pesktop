@@ -149,6 +149,8 @@ export function useBoxWindowFrame(options: {
   let programmaticResizeApplyVersion = 0;
   let manualDragState: ManualDragState | null = null;
   let manualDragCleanup: (() => void) | null = null;
+  let manualDragApplyPending = false;
+  let pendingManualDragPosition: PhysicalWindowPoint | null = null;
   let manualResizeState: ManualResizeState | null = null;
   let manualResizeFrameTimer: ReturnType<typeof window.setInterval> | null = null;
   let manualResizeApplyPending = false;
@@ -848,13 +850,15 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 鼠标释放时停止拖动循环，并把最终物理坐标转换成逻辑坐标写入数据库
+   * 鼠标释放时停止拖动循环，并把最终物理坐标转换成逻辑坐标写入数据库；
+   * 待应用队列一并清空，落库路径的带锁 apply 会负责最后一次精确定位
    */
   function stopManualDragging(shouldPersist: boolean): void {
     const dragState = manualDragState;
 
     manualDragState = null;
     isManualDraggingBox.value = false;
+    pendingManualDragPosition = null;
     manualDragCleanup?.();
     manualDragCleanup = null;
     options.refreshCollapsedPreviewCloseSchedule();
@@ -873,7 +877,8 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 释放监听同时挂在 window 和 document，确保窗口跟随鼠标移动时仍能收到 mouseup
+   * 释放与移动监听只挂 document capture 一套：window 和 document 处于同一 WebView
+   * 事件流，双挂会让每次 mousemove 触发两次位置计算，属于纯粹的重复开销
    */
   function bindManualDragReleaseEvents(): void {
     manualDragCleanup?.();
@@ -885,16 +890,10 @@ export function useBoxWindowFrame(options: {
       updateManualDragCursor(event);
     };
 
-    window.addEventListener("mousemove", updateDragging, { capture: true });
-    window.addEventListener("mouseup", stopDragging, { capture: true, once: true });
-    window.addEventListener("pointerup", stopDragging, { capture: true, once: true });
     document.addEventListener("mousemove", updateDragging, { capture: true });
     document.addEventListener("mouseup", stopDragging, { capture: true, once: true });
     document.addEventListener("pointerup", stopDragging, { capture: true, once: true });
     manualDragCleanup = () => {
-      window.removeEventListener("mousemove", updateDragging, { capture: true });
-      window.removeEventListener("mouseup", stopDragging, { capture: true });
-      window.removeEventListener("pointerup", stopDragging, { capture: true });
       document.removeEventListener("mousemove", updateDragging, { capture: true });
       document.removeEventListener("mouseup", stopDragging, { capture: true });
       document.removeEventListener("pointerup", stopDragging, { capture: true });
@@ -902,7 +901,8 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 鼠标移动时按用户给出的 DOM 示例实时计算位置，只移动窗口不持久化数据库
+   * 鼠标移动时按用户给出的 DOM 示例实时计算位置，只移动窗口不持久化数据库；
+   * 实际 setPosition 交给合并队列，鼠标事件率再高也只保留最新目标位置
    */
   function updateManualDragCursor(event: MouseEvent): void {
     const dragState = manualDragState;
@@ -921,7 +921,42 @@ export function useBoxWindowFrame(options: {
     const nextPosition = resolveManualDragPosition(rawPosition, dragState);
 
     dragState.lastPosition = nextPosition;
-    void applyWindowPhysicalPosition(nextPosition.x, nextPosition.y, false);
+    requestManualDragPositionApply(nextPosition);
+  }
+
+  /**
+   * 拖动期间跳过 onMoved 锁：拖动循环本身由 manualDragState 短路移动事件持久化，
+   * 高频 setPosition 不再排布 positionApplyLockMs 定时器，避免计时器风暴
+   */
+  function requestManualDragPositionApply(position: PhysicalWindowPoint): void {
+    pendingManualDragPosition = position;
+    if (manualDragApplyPending) {
+      return;
+    }
+
+    manualDragApplyPending = true;
+    void flushManualDragPositionApply();
+  }
+
+  /**
+   * 原生窗口移动可能慢于鼠标事件，始终只保留最新一帧位置串行应用，避免并发 IPC 洪泛
+   */
+  async function flushManualDragPositionApply(): Promise<void> {
+    try {
+      while (pendingManualDragPosition) {
+        const position = pendingManualDragPosition;
+
+        pendingManualDragPosition = null;
+        await options.currentWindow.setPosition(new PhysicalPosition(position.x, position.y));
+      }
+    } catch (error) {
+      options.setLastError(error instanceof Error ? error.message : String(error));
+    } finally {
+      manualDragApplyPending = false;
+      if (pendingManualDragPosition) {
+        requestManualDragPositionApply(pendingManualDragPosition);
+      }
+    }
   }
 
   /**

@@ -553,6 +553,7 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
       v-if="box"
       ref="boxSurfaceRef"
       class="dasktop-box-surface relative flex h-full w-full flex-col overflow-hidden text-slate-950 dark:text-white"
+      :class="{ 'dasktop-box-surface--dragging': isManualDraggingBox }"
       :style="boxSurfaceStyle"
       @mouseenter="handleBoxMouseEnter"
       @mouseleave="handleBoxMouseLeave"
