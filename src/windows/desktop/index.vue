@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import type { ComponentPublicInstance, CSSProperties } from "vue";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import BoxFileGrid from "@/windows/desktop/components/BoxFileGrid.vue";
@@ -165,7 +165,28 @@ const EXPANDED_PANEL_WIDTH = 320;
 const EXPANDED_PANEL_HEIGHT = 360;
 
 /**
- * 小图标模式下鼠标移入，延时 100ms 平滑展开为完整大面板供用户直接浏览与交互
+ * 清理小图标展开延时计时器，避免快速掠过时误触发大面板展开
+ */
+function clearCompactExpandTimer(): void {
+  if (compactHoverExpandTimer) {
+    window.clearTimeout(compactHoverExpandTimer);
+    compactHoverExpandTimer = null;
+  }
+}
+
+/**
+ * 取消小图标收回计时器，鼠标重新移入大面板时保持展开
+ */
+function clearCompactCloseTimer(): void {
+  if (compactHoverCloseTimer) {
+    window.clearTimeout(compactHoverCloseTimer);
+    compactHoverCloseTimer = null;
+  }
+}
+
+/**
+ * 小图标模式下鼠标移入，延时 120ms 平滑展开为完整大面板供用户直接浏览与交互。
+ * 严禁调用 openCollapsedPreviewForActiveInteractionHandler，防止触发普通标题收缩的尺寸冲突。
  */
 function handleCompactMouseEnter(): void {
   clearCompactCloseTimer();
@@ -173,9 +194,7 @@ function handleCompactMouseEnter(): void {
     return;
   }
 
-  if (compactHoverExpandTimer) {
-    window.clearTimeout(compactHoverExpandTimer);
-  }
+  clearCompactExpandTimer();
   compactHoverExpandTimer = window.setTimeout(async () => {
     compactHoverExpandTimer = null;
     if (!box.value) {
@@ -189,18 +208,15 @@ function handleCompactMouseEnter(): void {
 
     await currentWindow.setSize(new LogicalSize(EXPANDED_PANEL_WIDTH, EXPANDED_PANEL_HEIGHT));
     isCompactHoverExpanded.value = true;
-    openCollapsedPreviewForActiveInteractionHandler();
-  }, 100);
+  }, 120);
 }
 
 /**
- * 鼠标离开面板后延时收起恢复为小图标尺寸
+ * 鼠标离开大面板后延时收起恢复为小图标尺寸。
+ * 在菜单打开、标题或文件编辑、正在拖拽或缩放时严禁自动收回。
  */
 function handleCompactMouseLeave(): void {
-  if (compactHoverExpandTimer) {
-    window.clearTimeout(compactHoverExpandTimer);
-    compactHoverExpandTimer = null;
-  }
+  clearCompactExpandTimer();
 
   if (!isCompactHoverExpanded.value) {
     return;
@@ -213,7 +229,9 @@ function handleCompactMouseLeave(): void {
       readContextMenuOpen() ||
       readEditingTitle() ||
       Boolean(editingPath.value) ||
-      isResizingBox.value
+      isResizingBox.value ||
+      isManualDraggingBox.value ||
+      isBoxFileDragActive.value
     ) {
       return;
     }
@@ -225,18 +243,50 @@ function handleCompactMouseLeave(): void {
     }
     isCompactHoverExpanded.value = false;
     originalCompactBounds = null;
-  }, desktopStore.getBoxCollapseDelayMs());
+  }, Math.max(desktopStore.getBoxCollapseDelayMs(), 260));
 }
 
 /**
- * 取消小图标收回计时器，鼠标重新移入大面板时保持展开
+ * Box 根容器鼠标进入事件：根据当前是否处于小图标模式，智能分发至小图标展开或常规展开
  */
-function clearCompactCloseTimer(): void {
-  if (compactHoverCloseTimer) {
-    window.clearTimeout(compactHoverCloseTimer);
-    compactHoverCloseTimer = null;
+function handleSurfaceMouseEnter(): void {
+  clearCompactCloseTimer();
+  if (isCompactIconMode.value) {
+    if (!isCompactHoverExpanded.value) {
+      handleCompactMouseEnter();
+    }
+    return;
   }
+
+  handleBoxMouseEnter();
 }
+
+/**
+ * Box 根容器鼠标离开事件：根据当前形态分发收起动作
+ */
+function handleSurfaceMouseLeave(): void {
+  if (isCompactIconMode.value) {
+    clearCompactExpandTimer();
+    if (isCompactHoverExpanded.value) {
+      handleCompactMouseLeave();
+    }
+    return;
+  }
+
+  handleBoxMouseLeave();
+}
+
+/**
+ * 监听小图标模式切换，当用户从菜单恢复为常规窗口时，立刻清理展开临时态
+ */
+watch(isCompactIconMode, (compact) => {
+  if (!compact) {
+    clearCompactExpandTimer();
+    clearCompactCloseTimer();
+    isCompactHoverExpanded.value = false;
+    originalCompactBounds = null;
+  }
+});
 
 const boxItemWidth = computed(() =>
   Math.max(
@@ -290,10 +340,7 @@ function clearSortInsertionPreviewExpireTimer(): void {
 
 onUnmounted(() => {
   clearSortInsertionPreviewExpireTimer();
-  if (compactHoverExpandTimer) {
-    window.clearTimeout(compactHoverExpandTimer);
-    compactHoverExpandTimer = null;
-  }
+  clearCompactExpandTimer();
   clearCompactCloseTimer();
 });
 
@@ -451,12 +498,17 @@ const {
 });
 consumeSuppressedItemClickHandler = consumeSuppressedItemClick;
 
+/**
+ * 是否允许通过四方边缘把手缩放 Box：
+ * 在小图标模式、折叠至标题状态、拖动文件或 Box 被锁定时完全隐藏并禁用。
+ */
 const canResizeBox = computed(
   () =>
     Boolean(box.value) &&
     !isBoxFileDragActive.value &&
     !isBoxCollapsedToTitle.value &&
-    !box.value?.locked,
+    !box.value?.locked &&
+    !isCompactIconMode.value,
 );
 
 useBoxWindowLifecycle({
@@ -665,8 +717,8 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
       class="dasktop-box-surface group/box relative flex h-full w-full flex-col overflow-hidden text-slate-950 dark:text-white"
       :style="boxSurfaceStyle"
       @click="confirmBoxActiveState"
-      @mouseenter="() => { clearCompactCloseTimer(); handleBoxMouseEnter(); }"
-      @mouseleave="() => { handleBoxMouseLeave(); handleCompactMouseLeave(); }"
+      @mouseenter="handleSurfaceMouseEnter"
+      @mouseleave="handleSurfaceMouseLeave"
     >
       <BoxResizeHandles
         :can-resize-box="canResizeBox"
@@ -676,27 +728,19 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         @start-resizing="startResizing"
       />
 
-      <!-- 小图标简约模式：当处于小图标模式且未 hover 展开时展示，移入自动展开大面板 -->
+      <!-- 小图标简约模式：仅展示纯净图标部件，隐藏文件名与把手，避免内部销毁触发额外 mouseleave -->
       <div
         v-if="isCompactIconMode && !isCompactHoverExpanded"
-        class="flex h-full w-full flex-col items-center justify-center p-1.5 text-center select-none cursor-default transition-all duration-200"
-        title="鼠标悬停自动展开大面板，双击打开文件夹，右键打开菜单"
+        class="flex h-full w-full items-center justify-center p-1 select-none cursor-default"
+        :title="`${box.title} (悬停展开大面板，双击打开文件夹，右键打开菜单)`"
         @click="confirmBoxActiveState"
         @contextmenu.prevent.stop="toggleContextMenu"
         @dblclick.stop="openBoxFolder"
         @mousedown.left="startDragging($event)"
-        @mouseenter="handleCompactMouseEnter"
-        @mouseleave="handleCompactMouseLeave"
       >
-        <div class="relative grid place-items-center size-10 rounded-[12px] bg-[#2f6bff]/15 text-[#2f6bff] shadow-sm transition-transform duration-150 hover:scale-105 active:scale-95 dark:bg-[#2f6bff]/25 dark:text-white">
-          <BoxIconGlyph :icon="box.icon" :size="24" />
+        <div class="relative grid place-items-center size-11 rounded-[13px] bg-[#2f6bff]/15 text-[#2f6bff] shadow-sm transition-transform duration-150 hover:scale-105 active:scale-95 dark:bg-[#2f6bff]/25 dark:text-white">
+          <BoxIconGlyph :icon="box.icon" :size="26" />
         </div>
-        <span
-          class="mt-1 max-w-full truncate px-1 font-semibold text-slate-800 dark:text-white"
-          :style="{ fontSize: `${desktopStore.settings.boxTitleTextSize || 12}px` }"
-        >
-          {{ box.title }}
-        </span>
       </div>
 
       <!-- 常规完整模式：展示标题栏与文件网格 -->

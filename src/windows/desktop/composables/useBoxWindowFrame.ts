@@ -164,7 +164,7 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 收缩和展开会主动调整窗口几何状态，需要加移动锁，防止 onMoved 把临时标题位置误写入数据库
+   * 收缩和展开会主动调整窗口几何状态，只改变窗口尺寸，不强行 setPosition 覆盖当前窗口坐标
    */
   async function applyCollapseWindowFrame(frame: LogicalWindowFrame): Promise<void> {
     const applyVersion = windowPositionApplyVersion + 1;
@@ -172,10 +172,7 @@ export function useBoxWindowFrame(options: {
     windowPositionApplyVersion = applyVersion;
     isApplyingWindowPosition = true;
     try {
-      await Promise.all([
-        options.currentWindow.setPosition(new LogicalPosition(frame.x, frame.y)),
-        options.currentWindow.setSize(new LogicalSize(frame.width, frame.height)),
-      ]);
+      await options.currentWindow.setSize(new LogicalSize(frame.width, frame.height));
     } finally {
       window.setTimeout(() => {
         if (windowPositionApplyVersion === applyVersion) {
@@ -186,10 +183,10 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 外部窗口移动事件用于持久化位置，通过防抖避免原生拖拽过程中高频写入 SQLite 造成磁盘 I/O 抖动
+   * 外部窗口移动事件用于持久化位置，原生拖拽进行中不执行写入，避免并发广播和破坏连续移动
    */
   async function handleWindowMoved(x: number, y: number): Promise<void> {
-    if (isApplyingWindowPosition) {
+    if (isApplyingWindowPosition || isManualDraggingBox.value) {
       return;
     }
 
@@ -199,7 +196,7 @@ export function useBoxWindowFrame(options: {
     movePersistTimer = window.setTimeout(() => {
       movePersistTimer = null;
       void persistWindowPositionFromPhysical(x, y);
-    }, 150);
+    }, 200);
   }
 
   /**
@@ -240,9 +237,15 @@ export function useBoxWindowFrame(options: {
       .catch((error) => {
         options.setLastError(error instanceof Error ? error.message : String(error));
       })
-      .finally(() => {
+      .finally(async () => {
         isManualDraggingBox.value = false;
         options.refreshCollapsedPreviewCloseSchedule();
+        try {
+          const position = await options.currentWindow.outerPosition();
+          await persistWindowPositionFromPhysical(position.x, position.y);
+        } catch {
+          // 窗口关闭时忽略坐标读取失败
+        }
       });
   }
 

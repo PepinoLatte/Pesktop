@@ -122,21 +122,18 @@ select:focus-visible {
 /**
  * Box 表面样式：配合 Rust 侧挂载的 Windows DWM 原生亚克力毛玻璃，
  * 呈现可调半透明底色、高光漫反射微边框与现代 Glassmorphism 毛玻璃质感。
+ * 注意：背景模糊已由 Windows DWM 硬件级直接处理，不叠加 CSS backdrop-filter，彻底根除画面撕裂和刷新延迟。
  */
 .dasktop-box-surface {
   background: rgb(255 255 255 / var(--dasktop-box-background-opacity, 0.65));
   border: 1px solid rgba(255, 255, 255, 0.45);
   box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.6), 0 8px 32px 0 rgba(15, 23, 42, 0.08);
-  backdrop-filter: blur(var(--dasktop-box-blur, 20px)) saturate(1.8);
-  -webkit-backdrop-filter: blur(var(--dasktop-box-blur, 20px)) saturate(1.8);
 }
 
 .dark .dasktop-box-surface {
   background: rgb(24 27 34 / var(--dasktop-box-background-opacity, 0.68));
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: inset 0 1px 1px 0 rgba(255, 255, 255, 0.15), 0 8px 32px 0 rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(var(--dasktop-box-blur, 20px)) saturate(1.8);
-  -webkit-backdrop-filter: blur(var(--dasktop-box-blur, 20px)) saturate(1.8);
 }
 
 /**

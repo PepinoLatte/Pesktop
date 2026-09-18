@@ -87,8 +87,9 @@ export function useBoxCollapsePreview(options: {
         "--dasktop-box-blur": `${options.getBoxBlurStrength ? options.getBoxBlurStrength() : 16}px`,
         borderRadius: "var(--dasktop-box-radius)",
         clipPath: "inset(0 round var(--dasktop-box-radius))",
-        height: boxSurfaceVisualHeight.value === null ? "100%" : `${boxSurfaceVisualHeight.value}px`,
+        height: "100%",
         position: "relative",
+        transition: "opacity 160ms cubic-bezier(0.16, 1, 0.3, 1)",
       }) as CSSProperties,
   );
   const boxTitleAreaStyle = computed(
@@ -99,16 +100,13 @@ export function useBoxCollapsePreview(options: {
   );
   const boxBodyStyle = computed(
     () => {
-      const animatedHeight = boxSurfaceVisualHeight.value;
       const isCollapsingBottomTitle = isBottomTitleMovingDuringCollapse.value;
-      const bodyHeight =
-        !isCollapsingBottomTitle
-          ? undefined
-          : Math.max(
-              (animatedHeight ?? collapsedWindowHeight.value) -
-                BOX_TITLE_VISIBILITY.expandedHeight,
-              0,
-            );
+      const bodyHeight = !isCollapsingBottomTitle
+        ? undefined
+        : Math.max(
+            (options.box.value?.height ?? 320) - BOX_TITLE_VISIBILITY.expandedHeight,
+            0,
+          );
       const verticalPadding =
         bodyHeight === undefined
           ? undefined
@@ -122,7 +120,7 @@ export function useBoxCollapsePreview(options: {
         paddingBottom: verticalPadding === undefined ? undefined : `${verticalPadding}px`,
         paddingTop: verticalPadding === undefined ? undefined : `${verticalPadding}px`,
         pointerEvents: isBoxCollapsedToTitle.value ? "none" : "auto",
-        transform: isBoxCollapsedToTitle.value ? "translateY(-6px)" : "translateY(0)",
+        transition: "opacity 120ms ease-out",
       } as CSSProperties;
     },
   );
@@ -143,7 +141,6 @@ export function useBoxCollapsePreview(options: {
   let boxOpacityTween: ReturnType<typeof animate> | null = null;
   let collapsePreviewCloseTimer: ReturnType<typeof window.setTimeout> | null = null;
   let collapseSizeApplyLockTimer: ReturnType<typeof window.setTimeout> | null = null;
-  let lastAppliedWindowHeight: number | null = null;
 
   /**
    * 自动收起关闭后必须释放临时展开状态，否则旧的预览入口会持续把闲置透明度覆盖为完全可见
@@ -162,6 +159,10 @@ export function useBoxCollapsePreview(options: {
   /**
    * 根据收缩展示状态调整真实窗口高度，避免透明空白窗口挡住桌面点击
    */
+  /**
+   * 根据收缩展示状态调整真实窗口尺寸，直接写入目标尺寸并通过 CSS opacity 纯 GPU 淡入淡出，
+   * 彻底根除因 frame-by-frame 频繁修改 DOM 高度导致的 Windows DWM 毛玻璃撕裂和刷新延迟。
+   */
   async function applyCollapseWindowSize(shouldAnimate: boolean): Promise<void> {
     if (!options.box.value) {
       return;
@@ -169,7 +170,6 @@ export function useBoxCollapsePreview(options: {
 
     cancelCollapseAnimationTween();
     collapseAnimationVersion += 1;
-    const activeCollapseAnimationVersion = collapseAnimationVersion;
 
     const targetHeight = isBoxCollapsedToTitle.value
       ? collapsedWindowHeight.value
@@ -177,151 +177,26 @@ export function useBoxCollapsePreview(options: {
     const targetWidth = options.box.value.width;
     const targetFrame = resolveCollapseWindowFrame(targetWidth, targetHeight);
     const animationMs = shouldAnimate ? options.getBoxCollapseAnimationMs() : 0;
-    const canAnimate = shouldAnimate && !shouldReduceMotion();
 
     setCollapseSizeApplyLock(animationMs);
-
-    if (!canAnimate) {
-      boxSurfaceVisualHeight.value = null;
-      isCollapseAnimating.value = false;
-      await applyCollapseFrame(targetFrame);
-      return;
-    }
-
-    boxSurfaceVisualHeight.value = resolveOptimisticAnimationStartHeight();
-    isCollapseAnimating.value = true;
-    const currentWindowHeight = await options.resolveCurrentWindowHeight();
-    const startHeight = boxSurfaceVisualHeight.value ?? currentWindowHeight;
-    const heightDistance = targetHeight - startHeight;
-
-    if (Math.abs(heightDistance) < 1) {
-      boxSurfaceVisualHeight.value = null;
-      isCollapseAnimating.value = false;
-      await applyCollapseFrame(targetFrame);
-      return;
-    }
-
-    boxSurfaceVisualHeight.value = startHeight;
-    if (targetHeight > currentWindowHeight) {
-      await applyCollapseFrame(targetFrame);
-    }
-
-    const tweenState = {
-      height: startHeight,
-    };
-    collapseAnimationTween = animate(
-      tweenState,
-      {
-        height: targetHeight,
-      },
-      {
-        duration: animationMs / 1000,
-        ease: [0.22, 1, 0.36, 1],
-        onComplete: () => {
-          collapseAnimationTween = null;
-          finishCollapseWindowResize(activeCollapseAnimationVersion, targetFrame);
-        },
-        onUpdate: () => {
-          boxSurfaceVisualHeight.value = Math.round(tweenState.height);
-        },
-      },
-    );
+    boxSurfaceVisualHeight.value = null;
+    isCollapseAnimating.value = false;
+    await applyCollapseFrame(targetFrame);
   }
 
   /**
-   * motion 驱动 Box 闲置可见度，hover 进入时即使配置为 0 也能平滑恢复到完全可见
+   * Box 闲置可见度切换：通过 CSS opacity 过渡平滑恢复，避免 JS 逐帧动画导致 CPU 波动与微抽动
    */
-  function animateBoxIdleOpacity(shouldAnimate: boolean): void {
+  function animateBoxIdleOpacity(_shouldAnimate: boolean): void {
     const surfaceElement = options.boxSurfaceRef.value;
     if (!surfaceElement) {
       return;
     }
 
-    boxOpacityTween?.stop();
-    boxOpacityTween = null;
-
-    if (!shouldAnimate || shouldReduceMotion()) {
-      surfaceElement.style.opacity = String(boxIdleOpacity.value);
-      return;
-    }
-
-    boxOpacityTween = animate(
-      surfaceElement,
-      {
-        opacity: boxIdleOpacity.value,
-      },
-      {
-        delay: resolveBoxIdleOpacityAnimationDelay(),
-        duration: resolveBoxIdleOpacityAnimationDuration(),
-        ease: [0.16, 1, 0.3, 1],
-        onComplete: () => {
-          boxOpacityTween = null;
-        },
-      },
-    );
+    surfaceElement.style.opacity = String(boxIdleOpacity.value);
   }
 
-  /**
-   * 减少动态效果时直接应用终态，遵守系统辅助功能设置
-   */
-  function shouldReduceMotion(): boolean {
-    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  }
 
-  /**
-   * 收缩触发闲置透明时延后淡出，让用户先感知 Box 收回动作，再看到透明度过渡
-   */
-  function resolveBoxIdleOpacityAnimationDelay(): number {
-    if (boxIdleOpacity.value >= 1 || !isBoxCollapsedToTitle.value) {
-      return 0;
-    }
-
-    return Math.min(options.getBoxCollapseAnimationMs() * 0.2, 140) / 1000;
-  }
-
-  /**
-   * 闲置隐藏比 hover 显示略慢，保留柔和淡出；显示仍保持短时长以确保指针进入后立即可操作
-   */
-  function resolveBoxIdleOpacityAnimationDuration(): number {
-    const durationMs =
-      boxIdleOpacity.value >= 1
-        ? options.getBoxIdleOpacityShowAnimationMs()
-        : options.getBoxIdleOpacityHideAnimationMs();
-
-    return durationMs / 1000;
-  }
-
-  /**
-   * 状态切换到“只保留标题”后，Vue 会先计算一次布局；提前给出动画起点可避免底部标题先塌到顶部再弹回
-   */
-  function resolveOptimisticAnimationStartHeight(): number {
-    const currentBox = options.box.value;
-
-    if (!currentBox) {
-      return collapsedWindowHeight.value;
-    }
-
-    if (boxSurfaceVisualHeight.value !== null) {
-      return boxSurfaceVisualHeight.value;
-    }
-
-    if (isBoxCollapsedToTitle.value) {
-      return lastAppliedWindowHeight !== null &&
-        lastAppliedWindowHeight <= collapsedWindowHeight.value + 1
-        ? lastAppliedWindowHeight
-        : currentBox.height;
-    }
-
-    if (
-      currentBox.collapsed &&
-      lastAppliedWindowHeight !== null &&
-      lastAppliedWindowHeight <= collapsedWindowHeight.value + 1
-    ) {
-      return lastAppliedWindowHeight;
-    }
-
-    return currentBox.height;
-  }
 
   /**
    * 收缩态统一保留 Box 顶部标题入口，底部标题通过内部布局从下往上移动到这个入口
@@ -349,26 +224,9 @@ export function useBoxCollapsePreview(options: {
    */
   async function applyCollapseFrame(frame: LogicalWindowFrame): Promise<void> {
     await options.applyWindowFrame(frame);
-    lastAppliedWindowHeight = frame.height;
   }
 
-  /**
-   * 收缩动画完成后一次性同步真实窗口高度，避免动画过程中暴露 Windows 原生直角边界
-   */
-  function finishCollapseWindowResize(
-    activeCollapseAnimationVersion: number,
-    targetFrame: LogicalWindowFrame,
-  ): void {
-    boxSurfaceVisualHeight.value = targetFrame.height;
-    void applyCollapseFrame(targetFrame).finally(() => {
-      if (activeCollapseAnimationVersion !== collapseAnimationVersion) {
-        return;
-      }
 
-      boxSurfaceVisualHeight.value = null;
-      isCollapseAnimating.value = false;
-    });
-  }
 
   /**
    * 收缩动画期间屏蔽 resize 落库，最终同步真实窗口高度时也不能覆盖用户保存的 Box 尺寸

@@ -58,7 +58,7 @@ function resolveItemSortInsertionPlacement(
 <template>
   <div
     :ref="setGridRef"
-    class="dasktop-scrollarea dasktop-box-scrollarea relative grid min-h-0 flex-1 p-2.5 transition-[opacity,transform] duration-180 ease-out outline-none"
+    class="dasktop-scrollarea dasktop-box-scrollarea relative grid min-h-0 flex-1 p-2.5 outline-none"
     :class="[
       boxGridOverflowClass,
       boxItems.length === 0
