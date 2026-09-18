@@ -54,6 +54,7 @@ export const APP_SETTING_KEYS = {
   boxIconGapY: "boxIconGapY",
   boxIconSize: "boxIconSize",
   boxLabelTextSize: "boxLabelTextSize",
+  boxTitleTextSize: "boxTitleTextSize",
   boxResizeGridEnabled: "boxResizeGridEnabled",
   boxTheme: "boxTheme",
   collectionRootPath: "collectionRootPath",
@@ -93,6 +94,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   boxIdleOpacityShowAnimationMs: 420,
   boxIconSize: 48,
   boxLabelTextSize: 12,
+  boxTitleTextSize: 13,
   boxIconGapX: 6,
   boxIconGapY: 4,
   boxFilenameWidth: 82,
@@ -114,6 +116,7 @@ export const APP_SETTING_NUMBER_LIMITS = {
   boxIconGapY: { min: 0, max: 32, step: 1, unit: "px" },
   boxIconSize: { min: 28, max: 96, step: 1, unit: "px" },
   boxLabelTextSize: { min: 9, max: 16, step: 0.5, unit: "px" },
+  boxTitleTextSize: { min: 9, max: 20, step: 0.5, unit: "px" },
   snapThreshold: { min: 8, max: 64, step: 1, unit: "px" },
 } as const satisfies Record<
   AppSettingNumberKey,

@@ -44,6 +44,8 @@ pub mod keys {
     pub const BOX_ICON_SIZE: &str = "boxIconSize";
     /// Box 文件名标签字号。
     pub const BOX_LABEL_TEXT_SIZE: &str = "boxLabelTextSize";
+    /// Box 标题栏字号。
+    pub const BOX_TITLE_TEXT_SIZE: &str = "boxTitleTextSize";
     /// Box 手动 resize 是否按图标网格吸附。
     pub const BOX_RESIZE_GRID_ENABLED: &str = "boxResizeGridEnabled";
     /// Box 传输遇到同名文件时的处理策略，必须与前端 `BoxConflictPolicy` 保持同名语义。

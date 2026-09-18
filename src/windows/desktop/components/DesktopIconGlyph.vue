@@ -50,6 +50,8 @@ const iconFrameStyle = computed(
 const iconImageStyle = computed(
   () =>
     ({
+      // 图标位图本体随全局圆角设置裁剪，接近 Win11 原生图标的圆角观感
+      borderRadius: `${props.radiusSize}px`,
       height: `${props.iconSize}px`,
       width: `${props.iconSize}px`,
     }) as CSSProperties,

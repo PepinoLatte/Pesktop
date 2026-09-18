@@ -111,6 +111,10 @@ export interface AppSettings {
    */
   boxLabelTextSize: number;
   /**
+   * Box 标题栏的字号，与文件名标签字号独立配置，保持标题栏视觉层级可控
+   */
+  boxTitleTextSize: number;
+  /**
    * Box 图标列之间的横向间距，控制整理面板的信息密度
    */
   boxIconGapX: number;

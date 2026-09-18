@@ -219,6 +219,12 @@ export const BOX_VISUAL_SETTING_CONTROLS: Array<{
     ...APP_SETTING_NUMBER_LIMITS.boxLabelTextSize,
   },
   {
+    key: "boxTitleTextSize",
+    label: "标题字号",
+    description: "调整 Box 标题栏的文字大小",
+    ...APP_SETTING_NUMBER_LIMITS.boxTitleTextSize,
+  },
+  {
     key: "boxIconGapX",
     label: "横向间距",
     description: "调整图标列之间的水平距离",

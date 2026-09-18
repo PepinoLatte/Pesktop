@@ -573,6 +573,7 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         :box-title-order-class="boxTitleOrderClass"
         :is-editing-title="isEditingTitle"
         :set-title-input-ref="setTitleInputRef"
+        :title-text-size="desktopStore.settings.boxTitleTextSize"
         @cancel-title-editing="cancelTitleEditing"
         @commit-title-editing="commitTitleEditing"
         @start-dragging="startDragging"

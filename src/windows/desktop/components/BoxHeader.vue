@@ -13,6 +13,7 @@ defineProps<{
   isEditingTitle: boolean;
   setTitleInputRef: (element: Element | ComponentPublicInstance | null) => void;
   titleDraft: string;
+  titleTextSize: number;
 }>();
 
 defineEmits<{
@@ -29,7 +30,7 @@ defineEmits<{
 
 <template>
   <header
-    class="relative z-30 flex h-10 shrink-0 select-none items-center justify-center px-3 transition-opacity duration-150 ease-out"
+    class="group/header relative z-30 flex h-10 shrink-0 select-none items-center justify-center px-3 transition-opacity duration-150 ease-out"
     :class="boxTitleOrderClass"
     :style="boxTitleAreaStyle"
     @mousedown.left="$emit('startDragging', $event)"
@@ -42,7 +43,8 @@ defineEmits<{
       :ref="setTitleInputRef"
       :value="titleDraft"
       aria-label="编辑 Box 名称"
-      class="h-7 w-[68%] max-w-[220px] rounded-[6px] bg-white/60 px-2 text-center text-[13px] font-semibold text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:bg-white/85 dark:bg-white/10 dark:text-white dark:focus:bg-white/15"
+      class="h-7 w-[68%] max-w-[220px] rounded-[6px] bg-white/60 px-2 text-center font-semibold text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:bg-white/85 dark:bg-white/10 dark:text-white dark:focus:bg-white/15"
+      :style="{ fontSize: `${titleTextSize}px` }"
       maxlength="32"
       type="text"
       @blur="$emit('commitTitleEditing')"
@@ -54,16 +56,21 @@ defineEmits<{
     />
     <span
       v-else
-      class="h-7 min-w-12 max-w-[68%] truncate text-center text-[13px] font-semibold leading-7 text-slate-900 dark:text-white"
+      class="min-h-7 min-w-12 max-w-[68%] truncate text-center font-semibold text-slate-900 dark:text-white"
+      :style="{ fontSize: `${titleTextSize}px`, lineHeight: '28px' }"
       title="双击编辑 Box 名称"
       @dblclick="$emit('startTitleEditing', $event)"
       @mousedown.stop
     >
       {{ box.title }}
     </span>
+    <!--
+      更多按钮平时隐藏，悬停标题栏时浮现：减少静态视觉噪音，
+      键盘聚焦时同样保持可见以满足可访问性
+    -->
     <button
       aria-label="打开 Box 菜单"
-      class="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-[6px] text-slate-600 transition-colors hover:bg-white/50 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
+      class="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-[6px] text-slate-600 opacity-0 transition-[background-color,color,opacity] duration-150 hover:bg-white/50 hover:text-slate-950 focus-visible:opacity-100 group-hover/header:opacity-100 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
       type="button"
       @click.stop="$emit('toggleContextMenu')"
       @mousedown.stop
