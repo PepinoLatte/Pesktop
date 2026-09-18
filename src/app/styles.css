@@ -133,13 +133,30 @@ select:focus-visible {
 }
 
 /**
- * 拖动期间暂停毛玻璃：半透明无边框窗口每次位移都会触发 DWM 对窗口后内容
- * 重新做整面高斯模糊，是拖动掉帧的合成层大头；拖动中保留半透明底色、关闭
- * 模糊与饱和度提升，松手立即恢复，视觉差异仅在移动过程短暂出现
+ * 拖动与收缩动画期间暂停毛玻璃：半透明无边框窗口每次位移/变形都会触发
+ * DWM 对窗口后内容重新做整面高斯模糊，是掉帧的合成层大头；保留半透明
+ * 底色、关闭模糊与饱和度提升，结束后立即恢复
  */
-.dasktop-box-surface--dragging {
+.dasktop-box-surface--dragging,
+.dasktop-box-surface--animating {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+}
+
+/**
+ * 图标态入口在收缩动画完成后切入，淡入出现避免与内容切换产生硬跳
+ */
+@keyframes dasktop-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.dasktop-icon-state-button {
+  animation: dasktop-fade-in 180ms ease-out;
 }
 
 /**

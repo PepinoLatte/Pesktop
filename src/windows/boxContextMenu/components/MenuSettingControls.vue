@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import SegmentedControl from "@/shared/ui/SegmentedControl.vue";
-import type { DesktopBox, DesktopBoxTitlePosition } from "@/entities/desktopBox/types";
+import type { BoxCollapseMode, DesktopBox, DesktopBoxTitlePosition } from "@/entities/desktopBox/types";
 import {
   BOX_AUTO_COLLAPSE_OPTIONS,
+  BOX_COLLAPSE_MODE_OPTIONS,
   BOX_MENU_SEGMENT_WIDTH,
   BOX_TITLE_POSITION_OPTIONS,
   type BoxAutoCollapseMode,
@@ -18,6 +19,7 @@ defineProps<{
 
 defineEmits<{
   updateAutoCollapse: [mode: BoxAutoCollapseMode];
+  updateCollapseMode: [mode: BoxCollapseMode];
   updateTitlePosition: [position: DesktopBoxTitlePosition];
 }>();
 </script>
@@ -41,6 +43,16 @@ defineEmits<{
       :option-width-px="BOX_MENU_SEGMENT_WIDTH.collapse"
       :options="BOX_AUTO_COLLAPSE_OPTIONS"
       @change="$emit('updateAutoCollapse', $event)"
+    />
+  </div>
+  <div class="grid grid-cols-[58px_1fr] items-center gap-2 px-1 py-0.5">
+    <span class="text-[11px] font-medium text-slate-500 dark:text-slate-400">收缩为</span>
+    <SegmentedControl
+      density="compact"
+      :model-value="box.collapseMode"
+      :option-width-px="BOX_MENU_SEGMENT_WIDTH.collapse"
+      :options="BOX_COLLAPSE_MODE_OPTIONS"
+      @change="$emit('updateCollapseMode', $event)"
     />
   </div>
 </template>

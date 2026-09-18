@@ -17,10 +17,16 @@ export const BOX_WINDOW_SIZE = {
  */
 export const BOX_DEFAULT_STATE = {
   collapsed: false,
+  collapseMode: "icon",
   locked: false,
   titleOpacity: 100,
   titlePosition: "top",
 } as const;
+
+/**
+ * 闲置收缩形态的可选值；菜单分段控件和数据库校验共用同一组
+ */
+export const BOX_COLLAPSE_MODES = ["window", "icon"] as const;
 
 /**
  * Box 闲置可见度使用百分比表达；0 表示鼠标未进入 Box 区域时整体不可见

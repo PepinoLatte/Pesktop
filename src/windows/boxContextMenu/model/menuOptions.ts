@@ -1,9 +1,20 @@
-import type { DesktopBoxTitlePosition } from "@/entities/desktopBox/types";
+import type { BoxCollapseMode, DesktopBoxTitlePosition } from "@/entities/desktopBox/types";
 
 /**
  * 菜单中自动收起分段控件的 UI 值，落库时再转换为 Box 的 collapsed 布尔字段。
  */
 export type BoxAutoCollapseMode = "always" | "rollup";
+
+/**
+ * 收缩形态分段控件的选项：窗口模式保留标题条，图标模式缩成单图标方块。
+ */
+export const BOX_COLLAPSE_MODE_OPTIONS: Array<{
+  label: string;
+  value: BoxCollapseMode;
+}> = [
+  { label: "窗口", value: "window" },
+  { label: "图标", value: "icon" },
+];
 
 /**
  * Box 菜单里的标题位置使用紧凑分段控件，选项属于单个 Box 的窗口偏好。

@@ -3,7 +3,7 @@ import type { ComputedRef } from "vue";
 import { openBoxFolder } from "@/entities/desktopBox/api";
 import type { DesktopBoxDeleteConfirmationController } from "@/entities/desktopBox/deleteConfirmation";
 import { useDesktopStore } from "@/entities/desktopBox/store";
-import type { DesktopBox, DesktopBoxTitlePosition } from "@/entities/desktopBox/types";
+import type { BoxCollapseMode, DesktopBox, DesktopBoxTitlePosition } from "@/entities/desktopBox/types";
 import { closeBoxWindow, openBoxWindow, openSettingsWindow } from "@/entities/desktopBox/windows";
 import type { BoxAutoCollapseMode } from "@/windows/boxContextMenu/model/menuOptions";
 
@@ -29,6 +29,7 @@ export interface BoxContextMenuActions {
   refreshDesktopFromMenu: () => Promise<void>;
   toggleBoxLockedFromMenu: () => Promise<void>;
   updateBoxAutoCollapseFromMenu: (mode: BoxAutoCollapseMode) => Promise<void>;
+  updateBoxCollapseModeFromMenu: (mode: BoxCollapseMode) => Promise<void>;
   updateIdleOpacityFromMenu: (nextOpacity: number) => Promise<void>;
   updateTitlePositionFromMenu: (position: DesktopBoxTitlePosition) => Promise<void>;
 }
@@ -117,6 +118,18 @@ export function useBoxContextMenuActions(
   }
 
   /**
+   * 收缩形态决定闲置时保留标题条还是缩成图标，切换后由对应 Box 窗口自行重适配。
+   */
+  async function updateBoxCollapseModeFromMenu(mode: BoxCollapseMode): Promise<void> {
+    if (!options.box.value) {
+      return;
+    }
+
+    options.clearBoxDeleteConfirmation();
+    await desktopStore.updateBox({ ...options.box.value, collapseMode: mode });
+  }
+
+  /**
    * 锁定只冻结当前 Box 的几何操作，不影响内部图标打开、排序和右键。
    */
   async function toggleBoxLockedFromMenu(): Promise<void> {
@@ -171,6 +184,7 @@ export function useBoxContextMenuActions(
     refreshDesktopFromMenu,
     toggleBoxLockedFromMenu,
     updateBoxAutoCollapseFromMenu,
+    updateBoxCollapseModeFromMenu,
     updateIdleOpacityFromMenu,
     updateTitlePositionFromMenu,
   };

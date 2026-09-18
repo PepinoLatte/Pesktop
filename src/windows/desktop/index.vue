@@ -98,6 +98,8 @@ const {
   handleBoxTitleMouseLeave,
   isApplyingCollapseWindowSize,
   isBoxCollapsedToTitle,
+  isBoxInIconState,
+  isCollapseAnimating,
   openCollapsedPreviewForActiveInteraction,
   refreshCollapsedPreviewCloseSchedule,
   setDragHoveringBox,
@@ -109,6 +111,7 @@ const {
   getBoxBackgroundOpacity: () => desktopStore.settings.boxBackgroundOpacity,
   getBoxCollapseAnimationMs: () => desktopStore.getBoxCollapseAnimationMs(),
   getBoxCollapseDelayMs: () => desktopStore.getBoxCollapseDelayMs(),
+  getBoxCollapseMode: () => box.value?.collapseMode ?? "icon",
   getBoxCornerRadius: () => desktopStore.settings.boxCornerRadius,
   getBoxIdleOpacityHideAnimationMs: () => desktopStore.getBoxIdleOpacityHideAnimationMs(),
   getBoxIdleOpacityShowAnimationMs: () => desktopStore.getBoxIdleOpacityShowAnimationMs(),
@@ -567,20 +570,25 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
       v-if="box"
       ref="boxSurfaceRef"
       class="dasktop-box-surface relative flex h-full w-full flex-col overflow-hidden text-slate-950 dark:text-white"
-      :class="{ 'dasktop-box-surface--dragging': isManualDraggingBox }"
+      :class="{
+        'dasktop-box-surface--dragging': isManualDraggingBox,
+        'dasktop-box-surface--animating': isCollapseAnimating,
+      }"
       :style="boxSurfaceStyle"
       @mouseenter="handleBoxMouseEnter"
       @mouseleave="handleBoxMouseLeave"
     >
       <!--
-        图标态：Box 闲置收缩后的形态，整面只渲染一个图标入口。
+        图标态：图标模式收缩闲置的形态，整面只渲染一个图标入口。
         悬停/点击交给现有展开调度回到完整态，右键直接唤出 Box 菜单，
         按下即可拖动（原生拖动循环），与完整态标题栏的手感一致。
+        收缩动画进行中仍渲染完整内容（已淡出），完成后才切入图标，
+        避免窗口还在缩小时内容形态提前跳变。
       -->
       <button
-        v-if="isBoxCollapsedToTitle"
+        v-if="isBoxInIconState && !isCollapseAnimating"
         aria-label="展开 Box"
-        class="grid h-full w-full place-items-center"
+        class="dasktop-icon-state-button grid h-full w-full place-items-center"
         type="button"
         @click="openCollapsedPreviewForActiveInteraction()"
         @contextmenu.prevent.stop="toggleContextMenu"

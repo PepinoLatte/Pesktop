@@ -1,7 +1,7 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 import type { CSSProperties } from "vue";
 import { animate } from "motion";
-import type { DesktopBox } from "@/entities/desktopBox/types";
+import type { BoxCollapseMode, DesktopBox } from "@/entities/desktopBox/types";
 import {
   BOX_COLLAPSE_INTERACTION,
   BOX_GRID_LAYOUT,
@@ -37,6 +37,7 @@ export function useBoxCollapsePreview(options: {
   getBoxBackgroundOpacity: () => number;
   getBoxCollapseAnimationMs: () => number;
   getBoxCollapseDelayMs: () => number;
+  getBoxCollapseMode: () => BoxCollapseMode;
   getBoxCornerRadius: () => number;
   getBoxIdleOpacityHideAnimationMs: () => number;
   getBoxIdleOpacityShowAnimationMs: () => number;
@@ -56,16 +57,35 @@ export function useBoxCollapsePreview(options: {
   const isNativeItemContextMenuOpen = ref(false);
   const isTitleHovered = ref(false);
   const isCollapseAnimating = ref(false);
+  /**
+   * 收缩或展开动画期间隐藏标题与内容，动画只呈现面板缩放本身；
+   * 完成后内容统一淡入，避免网格重排和形态切换暴露在中途帧里
+   */
+  const isCollapseContentFaded = ref(false);
   const boxSurfaceVisualHeight = ref<number | null>(null);
   const boxSurfaceVisualWidth = ref<number | null>(null);
   const isBoxCollapsedToTitle = computed(() =>
     Boolean(options.box.value?.collapsed && !isCollapsedPreviewOpen.value),
   );
   /**
-   * 收缩闲置形态是图标态小方块：宽高都收敛到固定边长，内容区渲染单个图标入口
+   * 图标态是收缩闲置形态中的图标模式：窗口收敛到单图标方块并渲染图标入口
    */
-  const collapsedWindowHeight = computed(() => BOX_ICON_STATE_SIZE);
-  const collapsedWindowWidth = computed(() => BOX_ICON_STATE_SIZE);
+  const isBoxInIconState = computed(
+    () => isBoxCollapsedToTitle.value && options.getBoxCollapseMode() === "icon",
+  );
+  /**
+   * 窗口模式的闲置形态保留标题条入口（40px），图标模式收敛到单图标方块边长
+   */
+  const collapsedWindowHeight = computed(() =>
+    options.getBoxCollapseMode() === "icon"
+      ? BOX_ICON_STATE_SIZE
+      : BOX_TITLE_VISIBILITY.expandedHeight,
+  );
+  const collapsedWindowWidth = computed(() =>
+    options.getBoxCollapseMode() === "icon"
+      ? BOX_ICON_STATE_SIZE
+      : options.box.value?.width ?? BOX_ICON_STATE_SIZE,
+  );
   /**
    * 标题在下方时，内容区高度跟随可视高度变化，让标题自身从下往上收到顶部入口
    */
@@ -104,6 +124,8 @@ export function useBoxCollapsePreview(options: {
     () =>
       ({
         height: `${BOX_TITLE_VISIBILITY.expandedHeight}px`,
+        opacity: isCollapseContentFaded.value ? "0" : "1",
+        transition: "opacity 160ms ease-out",
       }) as CSSProperties,
   );
   const boxBodyStyle = computed(
@@ -127,11 +149,12 @@ export function useBoxCollapsePreview(options: {
         flex: isCollapsingBottomTitle ? "0 0 auto" : undefined,
         height: bodyHeight === undefined ? undefined : `${bodyHeight}px`,
         minHeight: isCollapsingBottomTitle ? "0px" : undefined,
-        opacity: isBoxCollapsedToTitle.value ? "0" : "1",
+        opacity: isCollapseContentFaded.value || isBoxCollapsedToTitle.value ? "0" : "1",
         paddingBottom: verticalPadding === undefined ? undefined : `${verticalPadding}px`,
         paddingTop: verticalPadding === undefined ? undefined : `${verticalPadding}px`,
         pointerEvents: isBoxCollapsedToTitle.value ? "none" : "auto",
         transform: isBoxCollapsedToTitle.value ? "translateY(-6px)" : "translateY(0)",
+        transition: "opacity 160ms ease-out",
       } as CSSProperties;
     },
   );
@@ -170,6 +193,18 @@ export function useBoxCollapsePreview(options: {
   );
 
   /**
+   * 菜单里切换收缩形态后，已处于收缩闲置的 Box 需要立即按新模式重新适配窗口尺寸
+   */
+  watch(
+    () => options.box.value?.collapseMode,
+    () => {
+      if (options.box.value?.collapsed && !isCollapsedPreviewOpen.value) {
+        void applyCollapseWindowSize(true);
+      }
+    },
+  );
+
+  /**
    * 根据收缩展示状态调整真实窗口高度，避免透明空白窗口挡住桌面点击
    */
   async function applyCollapseWindowSize(shouldAnimate: boolean): Promise<void> {
@@ -197,10 +232,13 @@ export function useBoxCollapsePreview(options: {
       boxSurfaceVisualHeight.value = null;
       boxSurfaceVisualWidth.value = null;
       isCollapseAnimating.value = false;
+      isCollapseContentFaded.value = false;
       await applyCollapseFrame(targetFrame);
       return;
     }
 
+    // 动画期间先淡出标题和内容，只呈现面板缩放本身；完成后统一淡入，掩盖中途重排
+    isCollapseContentFaded.value = true;
     boxSurfaceVisualHeight.value = resolveOptimisticAnimationStartHeight();
     isCollapseAnimating.value = true;
     const [currentWindowHeight, currentWindowWidth] = await Promise.all([
@@ -216,6 +254,7 @@ export function useBoxCollapsePreview(options: {
       boxSurfaceVisualHeight.value = null;
       boxSurfaceVisualWidth.value = null;
       isCollapseAnimating.value = false;
+      isCollapseContentFaded.value = false;
       await applyCollapseFrame(targetFrame);
       return;
     }
@@ -425,6 +464,8 @@ export function useBoxCollapsePreview(options: {
       boxSurfaceVisualHeight.value = null;
       boxSurfaceVisualWidth.value = null;
       isCollapseAnimating.value = false;
+      // 窗口就位后再淡入内容，淡出与淡入夹住缩放段，视觉上只看到面板平滑变形
+      isCollapseContentFaded.value = false;
     });
   }
 
@@ -649,6 +690,7 @@ export function useBoxCollapsePreview(options: {
     handleBoxTitleMouseLeave,
     isApplyingCollapseWindowSize: () => isApplyingCollapseWindowSize,
     isBoxCollapsedToTitle,
+    isBoxInIconState,
     isCollapseAnimating,
     openCollapsedPreviewForActiveInteraction,
     refreshCollapsedPreviewCloseSchedule,

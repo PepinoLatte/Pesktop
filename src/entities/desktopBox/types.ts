@@ -4,13 +4,22 @@
 export type DesktopBoxTitlePosition = "top" | "bottom";
 
 /**
+ * Box 闲置收缩后的呈现形态：窗口模式保留标题条入口，图标模式缩成单图标方块
+ */
+export type BoxCollapseMode = "window" | "icon";
+
+/**
  * Box 是一个真实收纳文件夹的桌面窗口，标题只用于展示，不参与真实文件夹命名
  */
 export interface DesktopBox {
   /**
-   * 收缩模式开启后，鼠标离开 Box 会折叠到只剩标题栏，hover 标题时临时展开
+   * 收缩模式开启后，鼠标离开 Box 会折叠到收缩形态，hover 或点击时临时展开
    */
   collapsed: boolean;
+  /**
+   * 闲置收缩的呈现形态；图标模式使用 Box 内首个文件图标或默认图标作为入口
+   */
+  collapseMode: BoxCollapseMode;
   /**
    * 业务 ID 同时用于窗口 label 和默认物理目录名的稳定片段
    */

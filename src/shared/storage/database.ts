@@ -19,7 +19,8 @@ import {
   sanitizeNumberAppSetting,
   type AppSettingNumberKey,
 } from "@/entities/appSettings/defaults";
-import { BOX_DEFAULT_STATE, BOX_TITLE_OPACITY } from "@/entities/desktopBox/layout";
+import { BOX_COLLAPSE_MODES, BOX_DEFAULT_STATE, BOX_TITLE_OPACITY } from "@/entities/desktopBox/layout";
+import type { BoxCollapseMode } from "@/entities/desktopBox/types";
 
 let databasePromise: Promise<Database> | null = null;
 /**
@@ -27,6 +28,7 @@ let databasePromise: Promise<Database> | null = null;
  */
 const numericSettingKeys = Object.keys(APP_SETTING_NUMBER_LIMITS) as AppSettingNumberKey[];
 const DESKTOP_BOX_TITLE_POSITIONS = ["top", "bottom"] as const;
+const DESKTOP_BOX_COLLAPSE_MODES: ReadonlyArray<BoxCollapseMode> = BOX_COLLAPSE_MODES;
 
 /**
  * Dasktop 自动接管过的系统桌面图标记录，用于恢复时区分用户原本隐藏和应用主动隐藏。
@@ -63,6 +65,7 @@ export async function initializeStorage(): Promise<void> {
       title TEXT NOT NULL,
       folder_path TEXT NOT NULL,
       collapsed INTEGER NOT NULL DEFAULT 0,
+      collapse_mode TEXT NOT NULL DEFAULT 'icon',
       locked INTEGER NOT NULL DEFAULT 0,
       title_opacity INTEGER NOT NULL DEFAULT 100,
       title_position TEXT NOT NULL DEFAULT 'top',
@@ -73,6 +76,7 @@ export async function initializeStorage(): Promise<void> {
       updated_at INTEGER NOT NULL
     )
   `);
+  await ensureBoxCollapseModeColumn(database);
 
   await database.execute(`
     CREATE TABLE IF NOT EXISTS ${APP_SETTINGS_STORAGE.tables.appSettings} (
@@ -151,18 +155,36 @@ async function resetIncompatibleBoxesTable(database: Database): Promise<void> {
 }
 
 /**
+ * 早期版本的 boxes 表没有收缩形态列；SQLite 支持直接补列，避免为单一字段重建用户数据
+ */
+async function ensureBoxCollapseModeColumn(database: Database): Promise<void> {
+  const rows = await database.select<Array<Record<string, unknown>>>(`
+    PRAGMA table_info(${APP_SETTINGS_STORAGE.tables.boxes})
+  `);
+  const columnNames = new Set(rows.map((row) => String(row.name)));
+  if (columnNames.has("collapse_mode")) {
+    return;
+  }
+
+  await database.execute(
+    `ALTER TABLE ${APP_SETTINGS_STORAGE.tables.boxes} ADD COLUMN collapse_mode TEXT NOT NULL DEFAULT 'icon'`,
+  );
+}
+
+/**
  * 读取所有 Box 布局和真实文件夹路径；Box 内容由 Explorer 原生视图按 folderPath 展示
  */
 export async function loadBoxes(): Promise<DesktopBox[]> {
   const database = await getDatabase();
   const rows = await database.select<Array<Record<string, unknown>>>(`
-    SELECT id, title, folder_path, collapsed, locked, title_opacity, title_position, x, y, width, height
+    SELECT id, title, folder_path, collapsed, collapse_mode, locked, title_opacity, title_position, x, y, width, height
     FROM ${APP_SETTINGS_STORAGE.tables.boxes}
     ORDER BY updated_at ASC
   `);
 
   return rows.map((row) => ({
     collapsed: sanitizeDesktopBoxBoolean(row.collapsed),
+    collapseMode: sanitizeDesktopBoxCollapseMode(row.collapse_mode),
     folderPath: String(row.folder_path),
     id: String(row.id),
     locked: sanitizeDesktopBoxBoolean(row.locked),
@@ -184,12 +206,13 @@ export async function saveBox(box: DesktopBox): Promise<void> {
 
   await database.execute(
     `
-      INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxes} (id, title, folder_path, collapsed, locked, title_opacity, title_position, x, y, width, height, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxes} (id, title, folder_path, collapsed, collapse_mode, locked, title_opacity, title_position, x, y, width, height, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         folder_path = excluded.folder_path,
         collapsed = excluded.collapsed,
+        collapse_mode = excluded.collapse_mode,
         locked = excluded.locked,
         title_opacity = excluded.title_opacity,
         title_position = excluded.title_position,
@@ -204,6 +227,7 @@ export async function saveBox(box: DesktopBox): Promise<void> {
       box.title,
       box.folderPath,
       box.collapsed ? 1 : 0,
+      box.collapseMode,
       box.locked ? 1 : 0,
       sanitizeDesktopBoxTitleOpacity(box.titleOpacity),
       box.titlePosition,
@@ -590,6 +614,15 @@ function sanitizeDesktopBoxBoolean(value: unknown): boolean {
  */
 function sanitizeDesktopBoxTitlePosition(value: unknown): DesktopBoxTitlePosition {
   return isDesktopBoxTitlePosition(value) ? value : BOX_DEFAULT_STATE.titlePosition;
+}
+
+/**
+ * 收缩形态只接受菜单暴露的窗口/图标两种值，脏值回退图标模式保持新版观感
+ */
+function sanitizeDesktopBoxCollapseMode(value: unknown): BoxCollapseMode {
+  return DESKTOP_BOX_COLLAPSE_MODES.some((mode) => mode === value)
+    ? (value as BoxCollapseMode)
+    : BOX_DEFAULT_STATE.collapseMode;
 }
 
 /**
