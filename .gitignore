@@ -1,0 +1,55 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Claude Code & AI local data
+.claude/
+.gemini/
+.cursor/
+
+# Local Dev & Test Environment (Keep local only, do not upload)
+*.bat
+src/shared/mock/
+src/windows/sandbox/
+.dev-desktop/
+docs/superpowers/
+
+# Local SQLite databases
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+dasktop.db
+dasktop.dev.db
+
+# Cargo build targets
+/src-tauri/target/
+/target/
+
+# Windows OS thumbnails & caches
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+

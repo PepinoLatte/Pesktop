@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Dasktop 的 MSI 本地化只覆盖应用相关文案；Windows Installer 标准按钮和页面标题继续使用 WiX 的 zh-CN 语言包 -->
+<WixLocalization Culture="zh-cn" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+  <String Id="TauriLanguage">2052</String>
+  <String Id="TauriCodepage">936</String>
+  <String Id="LaunchApp">启动 Dasktop</String>
+  <String Id="DowngradeErrorMessage">已安装更新版本的 Dasktop，请先卸载当前版本后再安装</String>
+  <String Id="PathEnvVarFeature">将 Dasktop 可执行文件所在目录添加到 PATH 环境变量，方便从任意位置启动</String>
+  <String Id="InstallAppFeature">安装 Dasktop 桌面 Box 整理工具</String>
+</WixLocalization>

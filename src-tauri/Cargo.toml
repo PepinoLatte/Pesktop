@@ -1,0 +1,50 @@
+[package]
+name = "Dasktop"
+version = "0.2.6"
+description = "Dasktop - 面向 Windows 桌面的轻量整理工具"
+authors = ["Aug_Sakura"]
+homepage = "https://github.com/AugSakura/Dasktop"
+repository = "https://github.com/AugSakura/Dasktop"
+edition = "2021"
+license = "MIT"
+
+[lib]
+# Tauri 模板要求库名避开二进制同名冲突，Windows 下尤其需要保持独立 crate 名称
+name = "dasktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.2", features = [] }
+
+[dependencies]
+base64 = "0.22.1"
+png = "0.18.1"
+serde = { version = "1.0.228", features = ["derive"] }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
+tauri = { version = "2.11.2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-sql = { version = "2.4.0", features = ["sqlite"] }
+windows = { version = "0.61.3", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
+  "Win32_Security",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
+  "Win32_System_Registry",
+  "Win32_System_SystemServices",
+  "Win32_System_Threading",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
+  "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.61.2"
+
+[profile.dev]
+opt-level = 0
+debug = 1
+incremental = true

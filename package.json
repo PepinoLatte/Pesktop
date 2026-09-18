@@ -1,0 +1,40 @@
+{
+  "name": "dasktop",
+  "private": true,
+  "version": "0.2.6",
+  "author": "Aug_Sakura",
+  "homepage": "https://github.com/AugSakura/Dasktop",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AugSakura/Dasktop.git"
+  },
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@11.5.3",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@lucide/vue": "1.18.0",
+    "@tauri-apps/api": "2.11.0",
+    "@tauri-apps/plugin-sql": "2.4.0",
+    "motion": "^12.40.0",
+    "pinia": "3.0.4",
+    "tailwindcss": "4.3.1",
+    "vue": "3.5.38"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.1",
+    "@tauri-apps/cli": "2.11.2",
+    "@vitejs/plugin-vue": "6.0.7",
+    "typescript": "6.0.3",
+    "vite": "8.0.16",
+    "vue-tsc": "3.3.5"
+  }
+}

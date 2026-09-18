@@ -1,0 +1,164 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --font-sans: "Segoe UI Variable", "Segoe UI", Inter, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, sans-serif;
+  --accent: #2f6bff;
+  --accent-soft: rgba(47, 107, 255, 0.14);
+  color: #0f172a;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+/**
+ * Box 文件图标按钮承担 Explorer 式选中、框选和拖拽手感，不使用链接/按钮式手型光标。
+ */
+.dasktop-icon-button,
+.dasktop-icon-button img,
+.dasktop-icon-button svg,
+.dasktop-icon-button span {
+  cursor: default;
+}
+
+.dasktop-icon-button input {
+  cursor: text;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/**
+ * 主题切换只过渡颜色、边框和阴影，避免布局尺寸参与动画导致窗口内容抖动
+ */
+:root.theme-transition,
+:root.theme-transition * {
+  transition-duration: 220ms;
+  transition-property: background-color, border-color, box-shadow, color, fill, opacity, stroke,
+    text-shadow;
+  transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/**
+ * 主题切换时保留分段控件滑块的位移动画，避免全局颜色过渡覆盖 transform
+ */
+:root.theme-transition .dasktop-segment-indicator {
+  transition-property: background-color, box-shadow, transform;
+}
+
+/**
+ * 设置页滚动区域使用细滚动条，避免 Windows 原生宽滚动条破坏桌面应用质感
+ */
+.dasktop-scrollarea {
+  scrollbar-color: rgba(116, 124, 138, 0.52) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.dasktop-scrollarea::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.dasktop-scrollarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dasktop-scrollarea::-webkit-scrollbar-thumb {
+  background-clip: content-box;
+  background-color: rgba(116, 124, 138, 0.52);
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+
+.dasktop-scrollarea::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(88, 96, 110, 0.78);
+}
+
+.dark .dasktop-scrollarea {
+  scrollbar-color: rgba(92, 99, 113, 0.62) transparent;
+}
+
+.dark .dasktop-scrollarea::-webkit-scrollbar-thumb {
+  background-color: rgba(92, 99, 113, 0.62);
+}
+
+.dark .dasktop-scrollarea::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(121, 128, 142, 0.78);
+}
+
+/**
+ * Box 背景只保留半透明底色和毛玻璃滤镜，不叠加渐变或阴影，避免桌面组件显得过重
+ */
+.dasktop-box-surface {
+  background: rgb(246 248 252 / var(--dasktop-box-background-opacity, 0.7));
+  backdrop-filter: blur(24px) saturate(1.65);
+  -webkit-backdrop-filter: blur(24px) saturate(1.65);
+}
+
+.dark .dasktop-box-surface {
+  background: rgb(18 20 24 / var(--dasktop-box-background-opacity, 0.7));
+}
+
+/**
+ * Box 内保留滚轮滚动但隐藏视觉滚动条，避免滚动条出现时挤压网格列宽导致换行。
+ */
+.dasktop-box-scrollarea {
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+}
+
+.dasktop-box-scrollarea::-webkit-scrollbar {
+  display: none;
+}
+
+/**
+ * Box 更多菜单只允许透明度过渡；单例窗口会动态调整尺寸，任何 transform 都容易被误看成缩放动画。
+ */
+.dasktop-box-menu {
+  transform: none !important;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}

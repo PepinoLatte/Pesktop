@@ -1,0 +1,66 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Dasktop",
+  "version": "0.2.6",
+  "identifier": "cn.syand.dasktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Dasktop 设置",
+        "width": 1080,
+        "height": 720,
+        "minWidth": 920,
+        "minHeight": 620,
+        "center": true,
+        "decorations": false,
+        "transparent": true,
+        "shadow": true,
+        "resizable": true,
+        "skipTaskbar": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "publisher": "Aug_Sakura",
+    "homepage": "https://github.com/AugSakura/Dasktop",
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "allowDowngrades": false,
+      "wix": {
+        "upgradeCode": "254aa95b-a941-57f9-a27a-9fca09b603ee",
+        "language": {
+          "zh-CN": {
+            "localePath": "bundle/wix/languages/zh-CN.wxl"
+          }
+        }
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "installMode": "currentUser",
+        "languages": ["SimpChinese"],
+        "customLanguageFiles": {
+          "SimpChinese": "bundle/nsis/languages/SimpChinese.nsh"
+        }
+      }
+    }
+  }
+}
