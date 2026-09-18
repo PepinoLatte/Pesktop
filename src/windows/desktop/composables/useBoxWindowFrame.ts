@@ -46,18 +46,12 @@ interface PhysicalWorkArea {
 }
 
 /**
- * 手写拖动状态保存鼠标与窗口左上角的偏移，实时移动时复用窗口尺寸和缩放系数
+ * 原生拖动期间只需记住窗口尺寸与工作区，供松手后的吸附校正使用；
+ * 拖动过程本身由操作系统移动循环驱动，JS 不参与每一帧定位
  */
-interface ManualDragState {
-  cursorStartX: number;
-  cursorStartY: number;
+interface NativeDragState {
   height: number;
-  lastPosition: PhysicalWindowPoint;
-  offsetX: number;
-  offsetY: number;
   scaleFactor: number;
-  screenStartX: number;
-  screenStartY: number;
   width: number;
   workArea?: PhysicalWorkArea;
 }
@@ -102,6 +96,12 @@ const resizeHandles: Array<{
 ];
 
 /**
+ * 原生拖动的释放探测间隔：模态移动循环内 WebView 收不到 mouseup，
+ * 只能轮询全局左键状态判断松手，32ms 足够跟手且开销可忽略
+ */
+const NATIVE_DRAG_RELEASE_PROBE_MS = 32;
+
+/**
  * 只声明当前桌面窗口用到的 Tauri 能力，降低组合式逻辑对具体窗口类的类型耦合
  */
 interface DesktopWindowHandle {
@@ -111,6 +111,7 @@ interface DesktopWindowHandle {
   setPosition: (position: LogicalPosition | PhysicalPosition) => Promise<void>;
   setResizable: (resizable: boolean) => Promise<void>;
   setSize: (size: LogicalSize) => Promise<void>;
+  startDragging: () => Promise<void>;
 }
 
 /**
@@ -147,10 +148,8 @@ export function useBoxWindowFrame(options: {
   let windowPositionApplyVersion = 0;
   let windowResizableApplyVersion = 0;
   let programmaticResizeApplyVersion = 0;
-  let manualDragState: ManualDragState | null = null;
-  let manualDragCleanup: (() => void) | null = null;
-  let manualDragApplyPending = false;
-  let pendingManualDragPosition: PhysicalWindowPoint | null = null;
+  let nativeDragState: NativeDragState | null = null;
+  let nativeDragReleaseProbeTimer: ReturnType<typeof window.setInterval> | null = null;
   let manualResizeState: ManualResizeState | null = null;
   let manualResizeFrameTimer: ReturnType<typeof window.setInterval> | null = null;
   let manualResizeApplyPending = false;
@@ -214,10 +213,11 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 外部窗口移动只负责持久化，手写拖动期间的位置由拖动循环统一保存
+   * 外部窗口移动只负责持久化；原生拖动期间的位置由操作系统驱动，JS 不记录不落库，
+   * 松手时统一取真实位置做吸附校正
    */
   async function handleWindowMoved(x: number, y: number): Promise<void> {
-    if (isApplyingWindowPosition || manualDragState) {
+    if (nativeDragState || isApplyingWindowPosition) {
       return;
     }
 
@@ -254,7 +254,7 @@ export function useBoxWindowFrame(options: {
     }
 
     options.closeContextMenu();
-    void startManualDragging(event);
+    void startNativeDragging();
   }
 
   /**
@@ -809,32 +809,23 @@ export function useBoxWindowFrame(options: {
   /**
    * 手写拖动从全局鼠标坐标开始，避免 Tauri 原生拖动在松手时回写旧位置
    */
-  async function startManualDragging(event: MouseEvent): Promise<void> {
-    if (!options.box.value || manualDragState) {
+  async function startNativeDragging(): Promise<void> {
+    if (!options.box.value || nativeDragState) {
       return;
     }
 
     isManualDraggingBox.value = true;
     options.openCollapsedPreviewForActiveInteraction();
-    const [windowPosition, windowSize, cursor, scaleFactor, monitor] = await Promise.all([
-      options.currentWindow.outerPosition(),
+    const [windowSize, scaleFactor, monitor] = await Promise.all([
       options.currentWindow.outerSize(),
-      cursorPosition(),
       options.currentWindow.scaleFactor(),
       currentMonitor(),
     ]);
     const activeMonitor = monitor ?? (await primaryMonitor());
 
-    manualDragState = {
-      cursorStartX: cursor.x,
-      cursorStartY: cursor.y,
+    nativeDragState = {
       height: windowSize.height,
-      lastPosition: { x: windowPosition.x, y: windowPosition.y },
-      offsetX: cursor.x - windowPosition.x,
-      offsetY: cursor.y - windowPosition.y,
       scaleFactor,
-      screenStartX: event.screenX,
-      screenStartY: event.screenY,
       width: windowSize.width,
       workArea: activeMonitor
         ? {
@@ -846,117 +837,68 @@ export function useBoxWindowFrame(options: {
         : undefined,
     };
 
-    bindManualDragReleaseEvents();
-  }
+    bindNativeDragReleaseProbe();
 
-  /**
-   * 鼠标释放时停止拖动循环，并把最终物理坐标转换成逻辑坐标写入数据库；
-   * 待应用队列一并清空，落库路径的带锁 apply 会负责最后一次精确定位
-   */
-  function stopManualDragging(shouldPersist: boolean): void {
-    const dragState = manualDragState;
-
-    manualDragState = null;
-    isManualDraggingBox.value = false;
-    pendingManualDragPosition = null;
-    manualDragCleanup?.();
-    manualDragCleanup = null;
-    options.refreshCollapsedPreviewCloseSchedule();
-
-    if (shouldPersist && dragState) {
-      void persistManualDragPosition(dragState.lastPosition);
+    try {
+      // 原生拖动：窗口进入操作系统的模态移动循环，跟手度等同系统原生窗口；
+      // JS/IPC 不参与每一帧定位，彻底移除 mousemove→setPosition 的 IPC 管线
+      await options.currentWindow.startDragging();
+    } catch (error) {
+      stopManualDragging(false).catch(() => undefined);
+      options.setLastError(error instanceof Error ? error.message : String(error));
     }
   }
 
   /**
-   * 松手时用最后一次计算出的吸附坐标落库，移动过程中只改变窗口位置不写 SQLite
+   * 原生移动循环内 WebView 收不到 mouseup，短轮询左键状态作为结束信号；
+   * 32ms 间隔的一次轻量状态查询远低于旧管线每 mousemove 一次 setPosition 的开销
    */
-  async function persistManualDragPosition(position: PhysicalWindowPoint): Promise<void> {
-    await applyWindowPhysicalPosition(position.x, position.y, false);
-    await persistWindowPositionFromPhysical(position.x, position.y);
+  function bindNativeDragReleaseProbe(): void {
+    clearNativeDragReleaseProbe();
+    nativeDragReleaseProbeTimer = window.setInterval(() => {
+      void isPrimaryMouseButtonPressed()
+        .then((isPressed) => {
+          if (!isPressed && nativeDragState) {
+            void stopManualDragging(true).catch(() => undefined);
+          }
+        })
+        .catch(() => undefined);
+    }, NATIVE_DRAG_RELEASE_PROBE_MS);
   }
 
   /**
-   * 释放与移动监听只挂 document capture 一套：window 和 document 处于同一 WebView
-   * 事件流，双挂会让每次 mousemove 触发两次位置计算，属于纯粹的重复开销
+   * 清理原生拖动的释放探测，窗口卸载或松手后不再读取全局鼠标状态
    */
-  function bindManualDragReleaseEvents(): void {
-    manualDragCleanup?.();
+  function clearNativeDragReleaseProbe(): void {
+    if (!nativeDragReleaseProbeTimer) {
+      return;
+    }
 
-    const stopDragging = (): void => {
-      stopManualDragging(true);
-    };
-    const updateDragging = (event: MouseEvent): void => {
-      updateManualDragCursor(event);
-    };
-
-    document.addEventListener("mousemove", updateDragging, { capture: true });
-    document.addEventListener("mouseup", stopDragging, { capture: true, once: true });
-    document.addEventListener("pointerup", stopDragging, { capture: true, once: true });
-    manualDragCleanup = () => {
-      document.removeEventListener("mousemove", updateDragging, { capture: true });
-      document.removeEventListener("mouseup", stopDragging, { capture: true });
-      document.removeEventListener("pointerup", stopDragging, { capture: true });
-    };
+    window.clearInterval(nativeDragReleaseProbeTimer);
+    nativeDragReleaseProbeTimer = null;
   }
 
   /**
-   * 鼠标移动时按用户给出的 DOM 示例实时计算位置，只移动窗口不持久化数据库；
-   * 实际 setPosition 交给合并队列，鼠标事件率再高也只保留最新目标位置
+   * 结束拖动：shouldPersist 时取真实最终位置，过一遍吸附后由带锁 apply
+   * 一次性校正定位并写入数据库；顺带覆盖原生循环可能的旧位置回写
    */
-  function updateManualDragCursor(event: MouseEvent): void {
-    const dragState = manualDragState;
+  async function stopManualDragging(shouldPersist: boolean): Promise<void> {
+    const dragState = nativeDragState;
     if (!dragState) {
       return;
     }
 
-    const cursor = {
-      x: dragState.cursorStartX + (event.screenX - dragState.screenStartX) * dragState.scaleFactor,
-      y: dragState.cursorStartY + (event.screenY - dragState.screenStartY) * dragState.scaleFactor,
-    };
-    const rawPosition = {
-      x: cursor.x - dragState.offsetX,
-      y: cursor.y - dragState.offsetY,
-    };
-    const nextPosition = resolveManualDragPosition(rawPosition, dragState);
-
-    dragState.lastPosition = nextPosition;
-    requestManualDragPositionApply(nextPosition);
-  }
-
-  /**
-   * 拖动期间跳过 onMoved 锁：拖动循环本身由 manualDragState 短路移动事件持久化，
-   * 高频 setPosition 不再排布 positionApplyLockMs 定时器，避免计时器风暴
-   */
-  function requestManualDragPositionApply(position: PhysicalWindowPoint): void {
-    pendingManualDragPosition = position;
-    if (manualDragApplyPending) {
+    nativeDragState = null;
+    isManualDraggingBox.value = false;
+    clearNativeDragReleaseProbe();
+    options.refreshCollapsedPreviewCloseSchedule();
+    if (!shouldPersist) {
       return;
     }
 
-    manualDragApplyPending = true;
-    void flushManualDragPositionApply();
-  }
-
-  /**
-   * 原生窗口移动可能慢于鼠标事件，始终只保留最新一帧位置串行应用，避免并发 IPC 洪泛
-   */
-  async function flushManualDragPositionApply(): Promise<void> {
-    try {
-      while (pendingManualDragPosition) {
-        const position = pendingManualDragPosition;
-
-        pendingManualDragPosition = null;
-        await options.currentWindow.setPosition(new PhysicalPosition(position.x, position.y));
-      }
-    } catch (error) {
-      options.setLastError(error instanceof Error ? error.message : String(error));
-    } finally {
-      manualDragApplyPending = false;
-      if (pendingManualDragPosition) {
-        requestManualDragPositionApply(pendingManualDragPosition);
-      }
-    }
+    const finalPosition = await options.currentWindow.outerPosition();
+    const snappedPosition = resolveManualDragPosition(finalPosition, dragState);
+    await applyWindowPhysicalPosition(snappedPosition.x, snappedPosition.y);
   }
 
   /**
@@ -990,7 +932,7 @@ export function useBoxWindowFrame(options: {
    */
   function resolveManualDragPosition(
     rawPosition: PhysicalWindowPoint,
-    dragState: ManualDragState,
+    dragState: NativeDragState,
   ): PhysicalWindowPoint {
     const threshold = options.getSnapThreshold();
     let nextX = rawPosition.x;
