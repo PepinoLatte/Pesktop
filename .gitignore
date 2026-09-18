@@ -25,3 +25,17 @@ dist-ssr
 
 # Claude Code local data (sessions, memory)
 .claude/
+
+# AI 协作工作痕迹（本地保留，不进开源远端）
+HANDOFF.md
+TASK_LOG.md
+
+# 密钥与环境变量（防开源泄漏）
+*.env
+*.env.*
+secret*
+*.key
+*.pem
+
+# 开发过程文档（含计划、竞品分析，本地存档）
+docs/superpowers/
