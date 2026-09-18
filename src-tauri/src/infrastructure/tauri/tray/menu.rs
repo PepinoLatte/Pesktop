@@ -1,6 +1,7 @@
 //! 托盘菜单定义和菜单事件分发。
 
 use crate::domain::app::contract::{SETTINGS_WINDOW_LABEL, TRAY_CREATE_BOX_EVENT};
+use crate::infrastructure::tauri::frontend_dev;
 use tauri::menu::{CheckMenuItem, Menu, MenuBuilder, MenuEvent};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::{App, AppHandle, Emitter, Wry};
@@ -12,6 +13,7 @@ use super::window;
 pub(super) const TRAY_ID: &str = "dasktop-tray";
 const MENU_ID_SETTINGS: &str = "settings";
 const MENU_ID_CREATE_BOX: &str = "create-box";
+const MENU_ID_RELOAD_FRONTEND: &str = "reload-frontend";
 const MENU_ID_AUTOSTART: &str = "autostart";
 const MENU_ID_QUIT: &str = "quit";
 
@@ -28,10 +30,15 @@ pub(super) fn build_tray_menu(
         autostart_enabled,
         None::<&str>,
     )?;
-    let tray_menu = MenuBuilder::new(app)
+    // 重载入口只在热更模式（exe 旁挂 dist）下出现，正常安装版不暴露开发动作
+    let mut menu_builder = MenuBuilder::new(app)
         .text(MENU_ID_SETTINGS, "设置")
         .text(MENU_ID_CREATE_BOX, "新增 Box")
-        .separator()
+        .separator();
+    if frontend_dev::is_external_frontend_enabled() {
+        menu_builder = menu_builder.text(MENU_ID_RELOAD_FRONTEND, "重载界面");
+    }
+    let tray_menu = menu_builder
         .item(&autostart_item)
         .separator()
         .text(MENU_ID_QUIT, "关闭")
@@ -49,6 +56,7 @@ pub(super) fn handle_tray_menu_event(
     match event.id().as_ref() {
         MENU_ID_SETTINGS => window::show_settings_window(app_handle),
         MENU_ID_CREATE_BOX => request_create_box(app_handle),
+        MENU_ID_RELOAD_FRONTEND => frontend_dev::reload_all_webviews(app_handle),
         MENU_ID_AUTOSTART => autostart::toggle_autostart_from_tray(app_handle, autostart_item),
         MENU_ID_QUIT => window::request_graceful_exit(app_handle),
         _ => {}

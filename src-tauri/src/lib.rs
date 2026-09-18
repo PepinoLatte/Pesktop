@@ -21,12 +21,24 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_sql::Builder::default().build())
+        // 外置前端资源协议：exe 旁存在 dist 时，窗口改走磁盘实时读取支撑热更链路
+        .register_uri_scheme_protocol(
+            infrastructure::tauri::frontend_dev::EXTERNAL_FRONTEND_SCHEME,
+            |_context, request| {
+                infrastructure::tauri::frontend_dev::handle_external_frontend_request(request)
+            },
+        )
         .setup(move |app| {
             app.manage(single_instance_guard);
             infrastructure::windows::single_instance::start_show_settings_listener(
                 app.handle().clone(),
             )
             .map_err(std::io::Error::other)?;
+            infrastructure::windows::single_instance::start_reload_frontend_listener(
+                app.handle().clone(),
+            )
+            .map_err(std::io::Error::other)?;
+            infrastructure::tauri::frontend_dev::navigate_main_window_to_external_frontend(app);
             infrastructure::tauri::tray::setup_app_tray(app)?;
 
             Ok(())
@@ -57,6 +69,7 @@ pub fn run() {
             commands::native_drop::register_box_native_drop_target,
             commands::native_drop::unregister_box_native_drop_target,
             commands::app::is_autostart_enabled,
+            commands::app::is_external_frontend,
             commands::app::is_primary_mouse_button_pressed,
             commands::app::set_autostart_enabled,
         ])

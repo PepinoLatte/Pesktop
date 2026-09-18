@@ -4,6 +4,9 @@
   "description": "Capability for the settings window and runtime Box windows",
   "windows": ["main", "box_*", "box_menu", "drag_preview"],
   "webviews": ["main", "box_*", "box_menu", "drag_preview"],
+  "remote": {
+    "urls": ["http://daskhot.localhost/*"]
+  },
   "permissions": [
     "core:default",
     "core:event:allow-emit",

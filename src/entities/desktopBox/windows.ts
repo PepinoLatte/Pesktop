@@ -10,6 +10,7 @@ import {
 } from "@tauri-apps/api/window";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 import { BOX_CONTEXT_MENU_LAYOUT, BOX_WINDOW_SIZE } from "@/entities/desktopBox/layout";
+import { resolveAppWindowUrl } from "@/shared/ipc/frontendDev";
 import {
   clearBoxContextMenuReady,
   type BoxContextMenuPreparedPayload,
@@ -111,9 +112,13 @@ export async function openBoxWindow(
     return;
   }
 
+  const boxWindowUrl = await resolveAppWindowUrl(
+    resolveBoxWindowUrl(box.id, options.startupSnapshotToken),
+  );
+
   await new Promise<void>((resolve, reject) => {
     const window = new WebviewWindow(label, {
-      url: resolveBoxWindowUrl(box.id, options.startupSnapshotToken),
+      url: boxWindowUrl,
       title: box.title || UNTITLED_BOX_WINDOW_TITLE,
       x: box.x,
       y: box.y,
@@ -270,6 +275,7 @@ export async function toggleBoxContextMenuWindow(
 async function createBoxContextMenuWindow(): Promise<WebviewWindow> {
   clearBoxContextMenuReady();
 
+  const menuWindowUrl = await resolveAppWindowUrl("/?boxMenu=1");
   const menuWindow = await new Promise<WebviewWindow>((resolve, reject) => {
     const createdWindow = new WebviewWindow(BOX_CONTEXT_MENU_WINDOW_LABEL, {
       alwaysOnTop: true,
@@ -282,7 +288,7 @@ async function createBoxContextMenuWindow(): Promise<WebviewWindow> {
       skipTaskbar: true,
       title: "Dasktop Box Menu",
       transparent: true,
-      url: "/?boxMenu=1",
+      url: menuWindowUrl,
       visible: false,
       width: BOX_CONTEXT_MENU_LAYOUT.width,
       x: 0,

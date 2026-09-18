@@ -1,5 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { resolveAppWindowUrl } from "@/shared/ipc/frontendDev";
 
 /**
  * 拖影窗口只负责跟随鼠标显示当前拖动图标，不参与真实 Drop 命中和数据提交。
@@ -28,6 +29,8 @@ export async function openDragPreviewWindow(): Promise<WebviewWindow> {
     await prepareDragPreviewWindow(existingWindow);
     return existingWindow;
   }
+
+  const previewWindowUrl = await resolveAppWindowUrl("/?dragPreview=1");
 
   return new Promise<WebviewWindow>((resolve, reject) => {
     let previewWindow: WebviewWindow | null = null;
@@ -59,7 +62,7 @@ export async function openDragPreviewWindow(): Promise<WebviewWindow> {
           skipTaskbar: true,
           title: "Dasktop Drag Preview",
           transparent: true,
-          url: "/?dragPreview=1",
+          url: previewWindowUrl,
           visible: false,
           width: DRAG_PREVIEW_INITIAL_WINDOW_SIZE.width,
           x: 0,
