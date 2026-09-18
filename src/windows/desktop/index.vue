@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref } from "vue";
 import type { ComponentPublicInstance, CSSProperties } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Folder } from "@lucide/vue";
 import BoxFileGrid from "@/windows/desktop/components/BoxFileGrid.vue";
 import BoxHeader from "@/windows/desktop/components/BoxHeader.vue";
 import BoxResizeHandles from "@/windows/desktop/components/BoxResizeHandles.vue";
@@ -124,6 +125,14 @@ const {
 
     return windowSize.height / scaleFactor;
   },
+  resolveCurrentWindowWidth: async () => {
+    const [windowSize, scaleFactor] = await Promise.all([
+      currentWindow.outerSize(),
+      currentWindow.scaleFactor(),
+    ]);
+
+    return windowSize.width / scaleFactor;
+  },
   resolvePointerLocalPoint: async () => ({ inside: false }),
   resizePersistSettleMs: BOX_WINDOW_INTERACTION_TIMING.resizePersistSettleMs,
 });
@@ -142,6 +151,11 @@ const boxItemWidth = computed(() =>
 const boxTitleOrderClass = computed(() =>
   box.value?.titlePosition === "bottom" ? "order-2" : "order-0",
 );
+/**
+ * 图标态封面按既定优先级取图：Box 内第一个文件的 Shell 图标优先，
+ * 没有文件时回落到默认文件夹图标；自定义封面由后续设置能力接入同一出口
+ */
+const iconStateImageSrc = computed(() => boxItems.value[0]?.iconDataUrl ?? null);
 const boxGridStyle = computed(
   () =>
     ({
@@ -558,56 +572,82 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
       @mouseenter="handleBoxMouseEnter"
       @mouseleave="handleBoxMouseLeave"
     >
-      <BoxResizeHandles
-        :can-resize-box="canResizeBox"
-        :resize-handles="resizeHandles"
-        @resize-handle-mouse-enter="handleResizeHandleMouseEnter"
-        @resize-handle-mouse-leave="handleResizeHandleMouseLeave"
-        @start-resizing="startResizing"
-      />
+      <!--
+        图标态：Box 闲置收缩后的形态，整面只渲染一个图标入口。
+        悬停/点击交给现有展开调度回到完整态，右键直接唤出 Box 菜单，
+        按下即可拖动（原生拖动循环），与完整态标题栏的手感一致。
+      -->
+      <button
+        v-if="isBoxCollapsedToTitle"
+        aria-label="展开 Box"
+        class="grid h-full w-full place-items-center"
+        type="button"
+        @click="openCollapsedPreviewForActiveInteraction()"
+        @contextmenu.prevent.stop="toggleContextMenu"
+        @mousedown.left.stop="startDragging($event)"
+      >
+        <img
+          v-if="iconStateImageSrc"
+          :alt="box.title"
+          class="h-10 w-10 rounded-[var(--dasktop-box-radius)] object-contain"
+          draggable="false"
+          :src="iconStateImageSrc"
+        />
+        <Folder v-else aria-hidden="true" class="text-slate-400 dark:text-slate-500" :size="32" />
+      </button>
 
-      <BoxHeader
-        v-model:title-draft="titleDraft"
-        :box="box"
-        :box-title-area-style="boxTitleAreaStyle"
-        :box-title-order-class="boxTitleOrderClass"
-        :is-editing-title="isEditingTitle"
-        :set-title-input-ref="setTitleInputRef"
-        :title-text-size="desktopStore.settings.boxTitleTextSize"
-        @cancel-title-editing="cancelTitleEditing"
-        @commit-title-editing="commitTitleEditing"
-        @start-dragging="startDragging"
-        @start-title-editing="startTitleEditing"
-        @title-mouse-enter="handleBoxTitleMouseEnter"
-        @title-mouse-leave="handleBoxTitleMouseLeave"
-        @toggle-context-menu="toggleContextMenu"
-      />
+      <template v-else>
+        <BoxResizeHandles
+          :can-resize-box="canResizeBox"
+          :resize-handles="resizeHandles"
+          @resize-handle-mouse-enter="handleResizeHandleMouseEnter"
+          @resize-handle-mouse-leave="handleResizeHandleMouseLeave"
+          @start-resizing="startResizing"
+        />
 
-      <BoxFileGrid
-        :box-body-style="boxBodyStyle"
-        :box-grid-overflow-class="boxGridOverflowClass"
-        :box-grid-style="boxGridStyle"
-        :box-items="boxItems"
-        :editing-path="editingPath"
-        :is-box-file-drag-active="isBoxFileDragActive"
-        :is-item-dragging="isItemDragging"
-        :is-item-selected="isItemSelected"
-        :is-selecting="isSelecting"
-        :rename-draft="renameDraft"
-        :selection-rect-style="selectionRectStyle"
-        :set-grid-ref="setBoxGridRef"
-        :sort-insertion-preview="boxSortInsertionPreview"
-        :settings="desktopStore.settings"
-        @cancel-rename="cancelRename"
-        @commit-rename="commitRename"
-        @file-view-keydown="handleFileViewKeydown"
-        @grid-pointer-down="handleGridPointerDown"
-        @item-click="handleItemClick"
-        @item-context-menu="handleItemContextMenu"
-        @item-double-click="handleItemDoubleClick"
-        @item-pointer-down="handleItemPointerDown"
-        @rename-draft-change="renameDraft = $event"
-      />
+        <BoxHeader
+          v-model:title-draft="titleDraft"
+          :box="box"
+          :box-title-area-style="boxTitleAreaStyle"
+          :box-title-order-class="boxTitleOrderClass"
+          :is-editing-title="isEditingTitle"
+          :set-title-input-ref="setTitleInputRef"
+          :title-text-size="desktopStore.settings.boxTitleTextSize"
+          @cancel-title-editing="cancelTitleEditing"
+          @commit-title-editing="commitTitleEditing"
+          @start-dragging="startDragging"
+          @start-title-editing="startTitleEditing"
+          @title-mouse-enter="handleBoxTitleMouseEnter"
+          @title-mouse-leave="handleBoxTitleMouseLeave"
+          @toggle-context-menu="toggleContextMenu"
+        />
+
+        <BoxFileGrid
+          :box-body-style="boxBodyStyle"
+          :box-grid-overflow-class="boxGridOverflowClass"
+          :box-grid-style="boxGridStyle"
+          :box-items="boxItems"
+          :editing-path="editingPath"
+          :is-box-file-drag-active="isBoxFileDragActive"
+          :is-item-dragging="isItemDragging"
+          :is-item-selected="isItemSelected"
+          :is-selecting="isSelecting"
+          :rename-draft="renameDraft"
+          :selection-rect-style="selectionRectStyle"
+          :set-grid-ref="setBoxGridRef"
+          :sort-insertion-preview="boxSortInsertionPreview"
+          :settings="desktopStore.settings"
+          @cancel-rename="cancelRename"
+          @commit-rename="commitRename"
+          @file-view-keydown="handleFileViewKeydown"
+          @grid-pointer-down="handleGridPointerDown"
+          @item-click="handleItemClick"
+          @item-context-menu="handleItemContextMenu"
+          @item-double-click="handleItemDoubleClick"
+          @item-pointer-down="handleItemPointerDown"
+          @rename-draft-change="renameDraft = $event"
+        />
+      </template>
     </article>
   </main>
 </template>

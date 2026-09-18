@@ -46,6 +46,12 @@ export const BOX_TITLE_VISIBILITY = {
 } as const;
 
 /**
+ * 图标态收缩形态的窗口边长（逻辑 px）：Box 闲置时缩成一个小图标方块，
+ * 边长略大于最大图标尺寸保证点击热区友好，内容按居中排布渲染
+ */
+export const BOX_ICON_STATE_SIZE = 56;
+
+/**
  * Box 图标网格使用 Tailwind p-2.5，对应 10px；resize 吸附和收缩动画都依赖这个内容留白
  */
 export const BOX_GRID_LAYOUT = {

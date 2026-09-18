@@ -79,20 +79,21 @@ export type ResizeDirection =
   | "West";
 
 /**
- * 无边框 Box 需要显式提供缩放热区，否则透明窗口在 Windows 上不一定有稳定边缘命中
+ * 无边框 Box 需要显式提供缩放热区：热区比视觉边界更宽便于命中，
+ * 平时完全透明，悬停时显示圆角高亮提示边界可抓取（边界判定提示）
  */
 const resizeHandles: Array<{
   direction: ResizeDirection;
   className: string;
 }> = [
-  { direction: "North", className: "left-4 right-4 top-0 h-2 cursor-ns-resize" },
-  { direction: "South", className: "bottom-0 left-4 right-4 h-2 cursor-ns-resize" },
-  { direction: "West", className: "bottom-4 left-0 top-4 w-2 cursor-ew-resize" },
-  { direction: "East", className: "bottom-4 right-0 top-4 w-2 cursor-ew-resize" },
-  { direction: "NorthWest", className: "left-0 top-0 size-4 cursor-nwse-resize" },
-  { direction: "NorthEast", className: "right-0 top-0 size-4 cursor-nesw-resize" },
-  { direction: "SouthWest", className: "bottom-0 left-0 size-4 cursor-nesw-resize" },
-  { direction: "SouthEast", className: "bottom-0 right-0 size-4 cursor-nwse-resize" },
+  { direction: "North", className: "left-3 right-3 top-0 h-3 cursor-ns-resize hover:bg-white/35 dark:hover:bg-white/20" },
+  { direction: "South", className: "bottom-0 left-3 right-3 h-3 cursor-ns-resize hover:bg-white/35 dark:hover:bg-white/20" },
+  { direction: "West", className: "bottom-3 left-0 top-3 w-3 cursor-ew-resize hover:bg-white/35 dark:hover:bg-white/20" },
+  { direction: "East", className: "bottom-3 right-0 top-3 w-3 cursor-ew-resize hover:bg-white/35 dark:hover:bg-white/20" },
+  { direction: "NorthWest", className: "left-0 top-0 size-5 cursor-nwse-resize hover:bg-white/35 dark:hover:bg-white/20" },
+  { direction: "NorthEast", className: "right-0 top-0 size-5 cursor-nesw-resize hover:bg-white/35 dark:hover:bg-white/20" },
+  { direction: "SouthWest", className: "bottom-0 left-0 size-5 cursor-nesw-resize hover:bg-white/35 dark:hover:bg-white/20" },
+  { direction: "SouthEast", className: "bottom-0 right-0 size-5 cursor-nwse-resize hover:bg-white/35 dark:hover:bg-white/20" },
 ];
 
 /**
