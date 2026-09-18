@@ -67,16 +67,23 @@ pub(crate) fn handle_external_frontend_request(request: Request<Vec<u8>>) -> Res
         return not_found_response();
     };
 
-    // 只取 path；窗口携带的 boxId 等 query 由前端路由消费，静态伺服不关心
-    let relative_path = request.uri().path().trim_start_matches('/');
+    // 只取 path；窗口携带的 boxId 等 query 由前端路由消费，静态伺服不关心。
+    // 根路径（如 /?boxId=...）必须伺服入口页，不能当 404
+    let raw_path = request.uri().path();
     // 静态伺服不允许逃出 dist 目录，含 .. 段的路径一律拒绝
-    if relative_path.is_empty() || relative_path.split('/').any(|segment| segment == "..") {
+    if raw_path.split('/').any(|segment| segment == "..") {
         return not_found_response();
     }
 
-    let mut file_path = dist_dir.join(relative_path);
-    // SPA 兜底：无扩展名的路径统一回退 index.html，保证刷新或深链接不落 404
-    if file_path.is_dir() || Path::new(relative_path).extension().is_none() {
+    let trimmed_path = raw_path.trim_start_matches('/');
+    let mut file_path = if trimmed_path.is_empty() {
+        dist_dir.join("index.html")
+    } else {
+        dist_dir.join(trimmed_path)
+    };
+    // SPA 兜底：无扩展名的非根路径统一回退 index.html，目录请求同样回退入口
+    if file_path.is_dir() || (!trimmed_path.is_empty() && Path::new(trimmed_path).extension().is_none())
+    {
         file_path = dist_dir.join("index.html");
     }
 
