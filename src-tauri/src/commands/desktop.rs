@@ -91,3 +91,16 @@ pub fn paste_desktop_items_from_clipboard(
         conflict_policy.parse::<BoxConflictPolicy>()?,
     )
 }
+
+/// 为 Box 窗口挂载 Windows 原生毛玻璃背景虚化与非顶层 Z 序。
+#[tauri::command]
+pub fn setup_box_window_native(window: tauri::WebviewWindow) -> Result<(), String> {
+    crate::infrastructure::windows::box_window::setup_box_window_native(&window)
+}
+
+/// 将 Box 窗口放置到底部桌面层级，确保切换其他前台程序时绝不遮挡。
+#[tauri::command]
+pub fn send_box_window_to_bottom(window: tauri::WebviewWindow) -> Result<(), String> {
+    crate::infrastructure::windows::box_window::send_box_window_to_bottom(&window)
+}
+

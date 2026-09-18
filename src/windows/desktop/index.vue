@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from "vue";
 import type { ComponentPublicInstance, CSSProperties } from "vue";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import BoxFileGrid from "@/windows/desktop/components/BoxFileGrid.vue";
 import BoxHeader from "@/windows/desktop/components/BoxHeader.vue";
 import BoxIconGlyph from "@/windows/desktop/components/BoxIconGlyph.vue";
@@ -153,6 +153,91 @@ function openBoxFolder(): void {
   }
 }
 
+/**
+ * 小图标模式下鼠标悬停临时展开为大面板的展示状态
+ */
+const isCompactHoverExpanded = ref(false);
+let compactHoverExpandTimer: ReturnType<typeof window.setTimeout> | null = null;
+let compactHoverCloseTimer: ReturnType<typeof window.setTimeout> | null = null;
+let originalCompactBounds: { height: number; width: number } | null = null;
+
+const EXPANDED_PANEL_WIDTH = 320;
+const EXPANDED_PANEL_HEIGHT = 360;
+
+/**
+ * 小图标模式下鼠标移入，延时 100ms 平滑展开为完整大面板供用户直接浏览与交互
+ */
+function handleCompactMouseEnter(): void {
+  clearCompactCloseTimer();
+  if (!isCompactIconMode.value || isCompactHoverExpanded.value) {
+    return;
+  }
+
+  if (compactHoverExpandTimer) {
+    window.clearTimeout(compactHoverExpandTimer);
+  }
+  compactHoverExpandTimer = window.setTimeout(async () => {
+    compactHoverExpandTimer = null;
+    if (!box.value) {
+      return;
+    }
+
+    originalCompactBounds = {
+      height: box.value.height,
+      width: box.value.width,
+    };
+
+    await currentWindow.setSize(new LogicalSize(EXPANDED_PANEL_WIDTH, EXPANDED_PANEL_HEIGHT));
+    isCompactHoverExpanded.value = true;
+    openCollapsedPreviewForActiveInteractionHandler();
+  }, 100);
+}
+
+/**
+ * 鼠标离开面板后延时收起恢复为小图标尺寸
+ */
+function handleCompactMouseLeave(): void {
+  if (compactHoverExpandTimer) {
+    window.clearTimeout(compactHoverExpandTimer);
+    compactHoverExpandTimer = null;
+  }
+
+  if (!isCompactHoverExpanded.value) {
+    return;
+  }
+
+  clearCompactCloseTimer();
+  compactHoverCloseTimer = window.setTimeout(async () => {
+    compactHoverCloseTimer = null;
+    if (
+      readContextMenuOpen() ||
+      readEditingTitle() ||
+      Boolean(editingPath.value) ||
+      isResizingBox.value
+    ) {
+      return;
+    }
+
+    if (originalCompactBounds && box.value) {
+      await currentWindow.setSize(
+        new LogicalSize(originalCompactBounds.width, originalCompactBounds.height),
+      );
+    }
+    isCompactHoverExpanded.value = false;
+    originalCompactBounds = null;
+  }, desktopStore.getBoxCollapseDelayMs());
+}
+
+/**
+ * 取消小图标收回计时器，鼠标重新移入大面板时保持展开
+ */
+function clearCompactCloseTimer(): void {
+  if (compactHoverCloseTimer) {
+    window.clearTimeout(compactHoverCloseTimer);
+    compactHoverCloseTimer = null;
+  }
+}
+
 const boxItemWidth = computed(() =>
   Math.max(
     desktopStore.settings.boxFilenameWidth,
@@ -205,6 +290,11 @@ function clearSortInsertionPreviewExpireTimer(): void {
 
 onUnmounted(() => {
   clearSortInsertionPreviewExpireTimer();
+  if (compactHoverExpandTimer) {
+    window.clearTimeout(compactHoverExpandTimer);
+    compactHoverExpandTimer = null;
+  }
+  clearCompactCloseTimer();
 });
 
 const {
@@ -575,8 +665,8 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
       class="dasktop-box-surface group/box relative flex h-full w-full flex-col overflow-hidden text-slate-950 dark:text-white"
       :style="boxSurfaceStyle"
       @click="confirmBoxActiveState"
-      @mouseenter="handleBoxMouseEnter"
-      @mouseleave="handleBoxMouseLeave"
+      @mouseenter="() => { clearCompactCloseTimer(); handleBoxMouseEnter(); }"
+      @mouseleave="() => { handleBoxMouseLeave(); handleCompactMouseLeave(); }"
     >
       <BoxResizeHandles
         :can-resize-box="canResizeBox"
@@ -586,27 +676,17 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         @start-resizing="startResizing"
       />
 
-      <!-- 边界判定拖动按钮：静默状态下鼠标不移入自动隐藏，hover 时浮现，抓取更方便 -->
-      <button
-        v-if="!isCompactIconMode && !box.locked"
-        aria-label="边界拖拽移动"
-        class="group/boundary pointer-events-auto absolute top-0.5 left-1/2 z-40 -translate-x-1/2 flex h-3 w-16 cursor-grab active:cursor-grabbing items-center justify-center rounded-full bg-transparent opacity-0 transition-all duration-200 group-hover/box:opacity-100 hover:w-24"
-        title="拖拽移动 Box"
-        type="button"
-        @mousedown.left.stop.prevent="startDragging($event)"
-      >
-        <span class="h-1 w-8 rounded-full bg-slate-400/50 shadow-sm transition-all duration-200 group-hover/boundary:h-1.5 group-hover/boundary:w-14 group-hover/boundary:bg-[#2f6bff] dark:bg-white/40" />
-      </button>
-
-      <!-- 小图标简约模式：当 Box 缩放至图标尺寸（宽或高 <= 110px）时展示 -->
+      <!-- 小图标简约模式：当处于小图标模式且未 hover 展开时展示，移入自动展开大面板 -->
       <div
-        v-if="isCompactIconMode"
-        class="flex h-full w-full flex-col items-center justify-center p-1.5 text-center select-none cursor-default"
-        title="双击打开文件夹，右键打开菜单，拖拽边缘恢复大小"
+        v-if="isCompactIconMode && !isCompactHoverExpanded"
+        class="flex h-full w-full flex-col items-center justify-center p-1.5 text-center select-none cursor-default transition-all duration-200"
+        title="鼠标悬停自动展开大面板，双击打开文件夹，右键打开菜单"
         @click="confirmBoxActiveState"
         @contextmenu.prevent.stop="toggleContextMenu"
         @dblclick.stop="openBoxFolder"
         @mousedown.left="startDragging($event)"
+        @mouseenter="handleCompactMouseEnter"
+        @mouseleave="handleCompactMouseLeave"
       >
         <div class="relative grid place-items-center size-10 rounded-[12px] bg-[#2f6bff]/15 text-[#2f6bff] shadow-sm transition-transform duration-150 hover:scale-105 active:scale-95 dark:bg-[#2f6bff]/25 dark:text-white">
           <BoxIconGlyph :icon="box.icon" :size="24" />

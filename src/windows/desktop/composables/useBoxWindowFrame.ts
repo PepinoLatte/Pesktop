@@ -35,32 +35,6 @@ export interface LogicalWindowFrame {
   y: number;
 }
 
-/**
- * 屏幕工作区使用物理坐标保存，拖动时可直接和窗口物理坐标比较，避免高 DPI 下贴边偏移
- */
-interface PhysicalWorkArea {
-  height: number;
-  width: number;
-  x: number;
-  y: number;
-}
-
-/**
- * 手写拖动状态保存鼠标与窗口左上角的偏移，实时移动时复用窗口尺寸和缩放系数
- */
-interface ManualDragState {
-  cursorStartX: number;
-  cursorStartY: number;
-  height: number;
-  lastPosition: PhysicalWindowPoint;
-  offsetX: number;
-  offsetY: number;
-  scaleFactor: number;
-  screenStartX: number;
-  screenStartY: number;
-  width: number;
-  workArea?: PhysicalWorkArea;
-}
 
 /**
  * 手动 resize 用逻辑坐标保存起始窗口边界，鼠标轮询使用物理坐标再按 DPI 换算
@@ -85,20 +59,20 @@ export type ResizeDirection =
   | "West";
 
 /**
- * 无边框 Box 需要显式提供缩放热区，否则透明窗口在 Windows 上不一定有稳定边缘命中
+ * 无边框 Box 需要显式提供缩放热区，四周及拐角保留足够抓取面积，静默时隐藏指示条
  */
 const resizeHandles: Array<{
   direction: ResizeDirection;
   className: string;
 }> = [
-  { direction: "North", className: "left-4 right-4 top-0 h-2 cursor-ns-resize" },
-  { direction: "South", className: "bottom-0 left-4 right-4 h-2 cursor-ns-resize" },
-  { direction: "West", className: "bottom-4 left-0 top-4 w-2 cursor-ew-resize" },
-  { direction: "East", className: "bottom-4 right-0 top-4 w-2 cursor-ew-resize" },
-  { direction: "NorthWest", className: "left-0 top-0 size-4 cursor-nwse-resize" },
-  { direction: "NorthEast", className: "right-0 top-0 size-4 cursor-nesw-resize" },
-  { direction: "SouthWest", className: "bottom-0 left-0 size-4 cursor-nesw-resize" },
-  { direction: "SouthEast", className: "bottom-0 right-0 size-4 cursor-nwse-resize" },
+  { direction: "North", className: "left-6 right-6 top-0 h-3 cursor-ns-resize" },
+  { direction: "South", className: "bottom-0 left-6 right-6 h-3 cursor-ns-resize" },
+  { direction: "West", className: "bottom-6 left-0 top-6 w-3 cursor-ew-resize" },
+  { direction: "East", className: "bottom-6 right-0 top-6 w-3 cursor-ew-resize" },
+  { direction: "NorthWest", className: "left-0 top-0 size-6 cursor-nwse-resize" },
+  { direction: "NorthEast", className: "right-0 top-0 size-6 cursor-nesw-resize" },
+  { direction: "SouthWest", className: "bottom-0 left-0 size-6 cursor-nesw-resize" },
+  { direction: "SouthEast", className: "bottom-0 right-0 size-6 cursor-nwse-resize" },
 ];
 
 /**
@@ -111,6 +85,7 @@ interface DesktopWindowHandle {
   setPosition: (position: LogicalPosition | PhysicalPosition) => Promise<void>;
   setResizable: (resizable: boolean) => Promise<void>;
   setSize: (size: LogicalSize) => Promise<void>;
+  startDragging: () => Promise<void>;
 }
 
 /**
@@ -147,10 +122,7 @@ export function useBoxWindowFrame(options: {
   let windowPositionApplyVersion = 0;
   let windowResizableApplyVersion = 0;
   let programmaticResizeApplyVersion = 0;
-  let manualDragState: ManualDragState | null = null;
-  let manualDragCleanup: (() => void) | null = null;
-  let manualDragRafId: number | null = null;
-  let pendingManualDragPosition: PhysicalWindowPoint | null = null;
+  let movePersistTimer: ReturnType<typeof window.setTimeout> | null = null;
   let manualResizeState: ManualResizeState | null = null;
   let manualResizeFrameTimer: ReturnType<typeof window.setInterval> | null = null;
   let manualResizeApplyPending = false;
@@ -214,14 +186,20 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 外部窗口移动只负责持久化，手写拖动期间的位置由拖动循环统一保存
+   * 外部窗口移动事件用于持久化位置，通过防抖避免原生拖拽过程中高频写入 SQLite 造成磁盘 I/O 抖动
    */
   async function handleWindowMoved(x: number, y: number): Promise<void> {
-    if (isApplyingWindowPosition || manualDragState) {
+    if (isApplyingWindowPosition) {
       return;
     }
 
-    await persistWindowPositionFromPhysical(x, y);
+    if (movePersistTimer) {
+      window.clearTimeout(movePersistTimer);
+    }
+    movePersistTimer = window.setTimeout(() => {
+      movePersistTimer = null;
+      void persistWindowPositionFromPhysical(x, y);
+    }, 150);
   }
 
   /**
@@ -241,7 +219,8 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 拖动只从标题栏触发，避免图标区域的拖拽和窗口移动互相抢事件
+   * 窗口拖动由 Windows 原生系统消息循环（currentWindow.startDragging）接管，
+   * 彻底消除 JS mousemove 监听和跨进程 IPC 瓶颈，实现与系统资源管理器相同的 100% 硬件刷新率丝滑体验。
    */
   function startDragging(event: MouseEvent): void {
     if (
@@ -254,7 +233,17 @@ export function useBoxWindowFrame(options: {
     }
 
     options.closeContextMenu();
-    void startManualDragging(event);
+    options.openCollapsedPreviewForActiveInteraction();
+    isManualDraggingBox.value = true;
+    void options.currentWindow
+      .startDragging()
+      .catch((error) => {
+        options.setLastError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        isManualDraggingBox.value = false;
+        options.refreshCollapsedPreviewCloseSchedule();
+      });
   }
 
   /**
@@ -739,6 +728,10 @@ export function useBoxWindowFrame(options: {
    * 同时清理缩放相关的监听和计时器，用于窗口卸载时释放异步回调
    */
   function clearResizePersistState(): void {
+    if (movePersistTimer) {
+      window.clearTimeout(movePersistTimer);
+      movePersistTimer = null;
+    }
     clearResizeReleaseEvents();
     clearResizePersistTimer();
     clearResizeInteractionReleaseProbe();
@@ -808,148 +801,12 @@ export function useBoxWindowFrame(options: {
 
   /**
    * 手写拖动从全局鼠标坐标开始，避免 Tauri 原生拖动在松手时回写旧位置
-   */
-  async function startManualDragging(event: MouseEvent): Promise<void> {
-    if (!options.box.value || manualDragState) {
-      return;
-    }
-
-    isManualDraggingBox.value = true;
-    options.openCollapsedPreviewForActiveInteraction();
-    const [windowPosition, windowSize, cursor, scaleFactor, monitor] = await Promise.all([
-      options.currentWindow.outerPosition(),
-      options.currentWindow.outerSize(),
-      cursorPosition(),
-      options.currentWindow.scaleFactor(),
-      currentMonitor(),
-    ]);
-    const activeMonitor = monitor ?? (await primaryMonitor());
-
-    manualDragState = {
-      cursorStartX: cursor.x,
-      cursorStartY: cursor.y,
-      height: windowSize.height,
-      lastPosition: { x: windowPosition.x, y: windowPosition.y },
-      offsetX: cursor.x - windowPosition.x,
-      offsetY: cursor.y - windowPosition.y,
-      scaleFactor,
-      screenStartX: event.screenX,
-      screenStartY: event.screenY,
-      width: windowSize.width,
-      workArea: activeMonitor
-        ? {
-            height: activeMonitor.workArea.size.height,
-            width: activeMonitor.workArea.size.width,
-            x: activeMonitor.workArea.position.x,
-            y: activeMonitor.workArea.position.y,
-          }
-        : undefined,
-    };
-
-    bindManualDragReleaseEvents();
-  }
-
   /**
-   * 鼠标释放时停止拖动循环，并把最终物理坐标转换成逻辑坐标写入数据库
+   * 停止拖动状态记录并刷新收缩调度
    */
-  function stopManualDragging(shouldPersist: boolean): void {
-    if (manualDragRafId !== null) {
-      window.cancelAnimationFrame(manualDragRafId);
-      manualDragRafId = null;
-    }
-    pendingManualDragPosition = null;
-
-    const dragState = manualDragState;
-
-    manualDragState = null;
+  function stopManualDragging(_shouldPersist = false): void {
     isManualDraggingBox.value = false;
-    manualDragCleanup?.();
-    manualDragCleanup = null;
     options.refreshCollapsedPreviewCloseSchedule();
-
-    if (shouldPersist && dragState) {
-      void persistManualDragPosition(dragState.lastPosition);
-    }
-  }
-
-  /**
-   * 松手时用最后一次计算出的吸附坐标落库，移动过程中只改变窗口位置不写 SQLite
-   */
-  async function persistManualDragPosition(position: PhysicalWindowPoint): Promise<void> {
-    await applyWindowPhysicalPosition(position.x, position.y, false);
-    await persistWindowPositionFromPhysical(position.x, position.y);
-  }
-
-  /**
-   * 释放监听同时挂在 window 和 document，确保窗口跟随鼠标移动时仍能收到 mouseup
-   */
-  function bindManualDragReleaseEvents(): void {
-    manualDragCleanup?.();
-
-    const stopDragging = (): void => {
-      stopManualDragging(true);
-    };
-    const updateDragging = (event: MouseEvent): void => {
-      updateManualDragCursor(event);
-    };
-
-    window.addEventListener("mousemove", updateDragging, { capture: true });
-    window.addEventListener("mouseup", stopDragging, { capture: true, once: true });
-    window.addEventListener("pointerup", stopDragging, { capture: true, once: true });
-    document.addEventListener("mousemove", updateDragging, { capture: true });
-    document.addEventListener("mouseup", stopDragging, { capture: true, once: true });
-    document.addEventListener("pointerup", stopDragging, { capture: true, once: true });
-    manualDragCleanup = () => {
-      window.removeEventListener("mousemove", updateDragging, { capture: true });
-      window.removeEventListener("mouseup", stopDragging, { capture: true });
-      window.removeEventListener("pointerup", stopDragging, { capture: true });
-      document.removeEventListener("mousemove", updateDragging, { capture: true });
-      document.removeEventListener("mouseup", stopDragging, { capture: true });
-      document.removeEventListener("pointerup", stopDragging, { capture: true });
-    };
-  }
-
-  /**
-   * 鼠标移动时利用 requestAnimationFrame 节流批处理并与屏幕物理刷新率对齐，彻底根除跨进程 IPC 堵塞掉帧
-   */
-  function updateManualDragCursor(event: MouseEvent): void {
-    const dragState = manualDragState;
-    if (!dragState) {
-      return;
-    }
-
-    const cursor = {
-      x: dragState.cursorStartX + (event.screenX - dragState.screenStartX) * dragState.scaleFactor,
-      y: dragState.cursorStartY + (event.screenY - dragState.screenStartY) * dragState.scaleFactor,
-    };
-    const rawPosition = {
-      x: cursor.x - dragState.offsetX,
-      y: cursor.y - dragState.offsetY,
-    };
-    const nextPosition = resolveManualDragPosition(rawPosition, dragState);
-
-    // 整数像素微量移动且坐标未变时不触发多余重绘
-    if (
-      dragState.lastPosition &&
-      Math.round(dragState.lastPosition.x) === Math.round(nextPosition.x) &&
-      Math.round(dragState.lastPosition.y) === Math.round(nextPosition.y)
-    ) {
-      return;
-    }
-
-    dragState.lastPosition = nextPosition;
-    pendingManualDragPosition = nextPosition;
-
-    if (manualDragRafId === null) {
-      manualDragRafId = window.requestAnimationFrame(async () => {
-        manualDragRafId = null;
-        if (pendingManualDragPosition) {
-          const target = pendingManualDragPosition;
-          pendingManualDragPosition = null;
-          await applyWindowPhysicalPosition(target.x, target.y, false);
-        }
-      });
-    }
   }
 
   /**
@@ -976,71 +833,6 @@ export function useBoxWindowFrame(options: {
         }
       }, shouldPersist ? BOX_WINDOW_INTERACTION_TIMING.positionApplyLockMs : 16);
     }
-  }
-
-  /**
-   * 拖动吸附实时参考其他 Box 的相邻边和屏幕工作区边缘，不做延迟二次定位
-   */
-  function resolveManualDragPosition(
-    rawPosition: PhysicalWindowPoint,
-    dragState: ManualDragState,
-  ): PhysicalWindowPoint {
-    const threshold = options.getSnapThreshold();
-    let nextX = rawPosition.x;
-    let nextY = rawPosition.y;
-
-    if (options.getSnapToEdges()) {
-      for (const otherBox of options.getBoxes()) {
-        if (otherBox.id === options.box.value?.id) {
-          continue;
-        }
-
-        const otherX = Math.round(otherBox.x * dragState.scaleFactor);
-        const otherY = Math.round(otherBox.y * dragState.scaleFactor);
-        const otherWidth = Math.round(otherBox.width * dragState.scaleFactor);
-        const otherHeight = Math.round(otherBox.height * dragState.scaleFactor);
-        const otherRight = otherX + otherWidth;
-        const otherBottom = otherY + otherHeight;
-
-        if (Math.abs(nextX - otherRight) < threshold) {
-          nextX = otherRight;
-        }
-        if (Math.abs(nextX + dragState.width - otherX) < threshold) {
-          nextX = otherX - dragState.width;
-        }
-        if (Math.abs(nextY - otherBottom) < threshold) {
-          nextY = otherBottom;
-        }
-        if (Math.abs(nextY + dragState.height - otherY) < threshold) {
-          nextY = otherY - dragState.height;
-        }
-      }
-
-      if (dragState.workArea) {
-        const workX = dragState.workArea.x;
-        const workY = dragState.workArea.y;
-        const workRight = workX + dragState.workArea.width;
-        const workBottom = workY + dragState.workArea.height;
-
-        if (Math.abs(nextX - workX) < threshold) {
-          nextX = workX;
-        }
-        if (Math.abs(nextX + dragState.width - workRight) < threshold) {
-          nextX = workRight - dragState.width;
-        }
-        if (Math.abs(nextY - workY) < threshold) {
-          nextY = workY;
-        }
-        if (Math.abs(nextY + dragState.height - workBottom) < threshold) {
-          nextY = workBottom - dragState.height;
-        }
-      }
-    }
-
-    return {
-      x: nextX,
-      y: nextY,
-    };
   }
 
   return {

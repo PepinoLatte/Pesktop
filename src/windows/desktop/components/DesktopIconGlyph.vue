@@ -39,22 +39,14 @@ const resolvedFallbackIconSize = computed(() =>
 const shortcutBadgeScale = computed(
   () => props.iconSize / WINDOWS_SHORTCUT_BADGE.referenceIconSize,
 );
-const iconFrameStyle = computed(
+const iconInnerContainerStyle = computed(
   () =>
     ({
       borderRadius: `${props.radiusSize}px`,
-      height: `${props.iconSize}px`,
-      width: `${props.iconSize}px`,
-    }) as CSSProperties,
-);
-const iconImageStyle = computed(
-  () =>
-    ({
-      borderRadius: `${props.radiusSize}px`,
+      clipPath: props.radiusSize > 0 ? `inset(0 round ${props.radiusSize}px)` : undefined,
       height: `${props.iconSize}px`,
       maxHeight: `${props.iconSize}px`,
       maxWidth: `${props.iconSize}px`,
-      objectFit: "contain",
       width: `${props.iconSize}px`,
     }) as CSSProperties,
 );
@@ -91,26 +83,36 @@ function scaleShortcutBadgeValue(value: number): number {
 </script>
 
 <template>
-  <span
-    class="relative grid place-items-center text-slate-700 dark:text-slate-100"
-    :style="iconFrameStyle"
+  <div
+    class="relative grid shrink-0 place-items-center select-none text-slate-700 dark:text-slate-100"
+    :style="{
+      height: `${iconSize}px`,
+      width: `${iconSize}px`,
+    }"
   >
-    <img
-      v-if="item.iconDataUrl"
-      :alt="item.name"
-      class="object-contain drop-shadow-[0_4px_8px_rgba(15,23,42,0.16)] transition-all duration-150 overflow-hidden"
-      draggable="false"
-      :src="item.iconDataUrl"
-      :style="iconImageStyle"
-    />
-    <Folder v-else-if="item.kind === 'folder'" :size="resolvedFallbackIconSize" />
-    <Monitor v-else-if="item.kind === 'shell'" :size="resolvedFallbackIconSize" />
-    <Link v-else-if="item.kind === 'shortcut'" :size="resolvedFallbackIconSize" />
-    <FileText v-else-if="item.extension" :size="resolvedFallbackIconSize" />
-    <File v-else :size="resolvedFallbackIconSize" />
+    <!-- 图标主体容器：严格统一宽高、居中定位并通过 clipPath 和 overflow 实现像素级圆角裁切 -->
+    <div
+      class="relative flex items-center justify-center overflow-hidden transition-all duration-150"
+      :style="iconInnerContainerStyle"
+    >
+      <img
+        v-if="item.iconDataUrl"
+        :alt="item.name"
+        class="h-full w-full object-contain pointer-events-none select-none transition-transform duration-150 drop-shadow-[0_2px_4px_rgba(15,23,42,0.12)]"
+        draggable="false"
+        :src="item.iconDataUrl"
+      />
+      <Folder v-else-if="item.kind === 'folder'" :size="resolvedFallbackIconSize" />
+      <Monitor v-else-if="item.kind === 'shell'" :size="resolvedFallbackIconSize" />
+      <Link v-else-if="item.kind === 'shortcut'" :size="resolvedFallbackIconSize" />
+      <FileText v-else-if="item.extension" :size="resolvedFallbackIconSize" />
+      <File v-else :size="resolvedFallbackIconSize" />
+    </div>
+
+    <!-- 快捷方式小角标：贴在图标外层左下，不受内部圆角裁切影响 -->
     <span
       v-if="item.kind === 'shortcut' && showShortcutArrow !== false"
-      class="absolute grid place-items-center"
+      class="pointer-events-none absolute z-20 grid place-items-center"
       :style="shortcutBadgeStyle"
     >
       <svg
@@ -130,5 +132,5 @@ function scaleShortcutBadgeValue(value: number): number {
         />
       </svg>
     </span>
-  </span>
+  </div>
 </template>

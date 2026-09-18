@@ -91,3 +91,25 @@ export function handleBoxDraggedPathsToDesktop(
     conflictPolicy,
   });
 }
+
+/**
+ * 为当前 Box 窗口挂载 Windows 原生亚克力/毛玻璃效果并重置为普通桌面窗口层级。
+ *
+ * @description 调用 Rust 后端 Win32 DWM API 开启系统级亚克力（Acrylic）与背景虚化，
+ * 同时清除 WS_EX_TOPMOST 置顶属性，防止遮挡其他前台应用。
+ * @returns {Promise<void>} 异步调用结果
+ */
+export function setupBoxWindowNative(): Promise<void> {
+  return invoke("setup_box_window_native");
+}
+
+/**
+ * 将当前 Box 窗口沉至 Windows 桌面 Z 序最底层（HWND_BOTTOM）。
+ *
+ * @description 当用户切换至浏览器、编辑器等其它活动窗口时调用，确保 Box 窗口绝对不会悬浮遮挡前台软件。
+ * @returns {Promise<void>} 异步调用结果
+ */
+export function sendBoxWindowToBottom(): Promise<void> {
+  return invoke("send_box_window_to_bottom");
+}
+

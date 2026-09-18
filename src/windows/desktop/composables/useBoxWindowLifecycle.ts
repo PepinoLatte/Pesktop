@@ -3,6 +3,7 @@ import type { ComputedRef } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { DragDropEvent, Window } from "@tauri-apps/api/window";
 import { registerBoxNativeDropTarget, unregisterBoxNativeDropTarget } from "@/entities/desktopItem/api";
+import { setupBoxWindowNative, sendBoxWindowToBottom } from "@/entities/desktopBox/api";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 import { preloadBoxContextMenuWindow } from "@/entities/desktopBox/windows";
 import { listenBoxContextMenuState } from "@/shared/ipc/boxContextMenu";
@@ -158,10 +159,23 @@ export function useBoxWindowLifecycle(options: BoxWindowLifecycleOptions): void 
     await registerBoxNativeDropTarget(options.currentWindow.label).catch(reportError);
     window.addEventListener("keydown", options.handleGlobalFileViewKeydown);
 
+    // 挂载 Windows 原生毛玻璃虚化并沉至桌面层级，避免悬浮在其他前台窗口上方
+    void setupBoxWindowNative()
+      .then(() => sendBoxWindowToBottom())
+      .catch(reportError);
+
+    // 窗口失焦时自动沉底，确保切换到浏览器、文本编辑器等软件时 Box 绝不遮挡前台工作区
+    window.addEventListener("blur", handleWindowBlur);
+
     void notifyBoxWindowReady(options.boxId).catch(reportError);
   });
 
+  function handleWindowBlur(): void {
+    void sendBoxWindowToBottom().catch(() => undefined);
+  }
+
   onUnmounted(() => {
+    window.removeEventListener("blur", handleWindowBlur);
     options.stopFolderRefreshPolling();
     options.stopSelectionRectangle();
     options.cancelFileDragSession();

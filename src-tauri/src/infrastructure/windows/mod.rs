@@ -11,3 +11,5 @@ pub(crate) mod shell_file;
 pub(crate) mod shell_icon;
 pub(crate) mod shell_virtual_item;
 pub(crate) mod single_instance;
+pub(crate) mod box_window;
+

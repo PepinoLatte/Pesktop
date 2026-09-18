@@ -52,7 +52,7 @@ const renameTextareaHeight = ref(0);
 const iconButtonStyle = computed(
   () =>
     ({
-      borderRadius: `${props.radiusSize}px`,
+      borderRadius: "8px",
       gap: props.showLabel === false ? "0px" : `${DESKTOP_ICON_VIEW.labelGap}px`,
       padding: `${DESKTOP_ICON_VIEW.itemBlockPadding}px ${DESKTOP_ICON_VIEW.itemInlinePadding}px`,
       width: `${resolvedItemWidth.value}px`,

@@ -2,7 +2,6 @@
 import type { ComponentPublicInstance, CSSProperties } from "vue";
 import { MoreHorizontal } from "@lucide/vue";
 import type { DesktopBox } from "@/entities/desktopBox/types";
-import BoxIconGlyph from "./BoxIconGlyph.vue";
 
 /**
  * Box 标题栏负责展示名称、进入标题编辑、打开更多菜单和派发窗口拖动事件。
@@ -55,25 +54,16 @@ defineEmits<{
       @mousedown.stop
       @dblclick.stop
     />
-    <div
+    <span
       v-else
-      class="flex h-7 min-w-12 max-w-[68%] items-center justify-center gap-1.5 truncate text-center select-none"
+      class="h-7 min-w-12 max-w-[68%] truncate text-center font-semibold leading-7 text-slate-900 dark:text-white"
+      :style="{ fontSize: `${titleFontSize || 13}px` }"
       title="双击编辑 Box 名称"
       @dblclick="$emit('startTitleEditing', $event)"
       @mousedown.stop
     >
-      <BoxIconGlyph
-        :icon="box.icon"
-        :size="Math.max(14, (titleFontSize || 13) + 1)"
-        class="shrink-0 text-slate-600 dark:text-slate-300"
-      />
-      <span
-        class="truncate font-semibold leading-7 text-slate-900 dark:text-white"
-        :style="{ fontSize: `${titleFontSize || 13}px` }"
-      >
-        {{ box.title }}
-      </span>
-    </div>
+      {{ box.title }}
+    </span>
     <button
       aria-label="打开 Box 菜单"
       class="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-[6px] text-slate-600 transition-all duration-200 hover:bg-white/50 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white opacity-0 group-hover/header:opacity-100 focus-visible:opacity-100"
