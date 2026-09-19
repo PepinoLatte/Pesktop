@@ -34,6 +34,8 @@ pub mod keys {
     pub const BOX_FILENAME_WIDTH: &str = "boxFilenameWidth";
     /// Box 整体和图标命中区域圆角。
     pub const BOX_CORNER_RADIUS: &str = "boxCornerRadius";
+    /// Box 图标自身的圆角。
+    pub const BOX_ICON_CORNER_RADIUS: &str = "boxIconCornerRadius";
     /// Box 闲置透明度淡出动画持续时间。
     pub const BOX_IDLE_OPACITY_HIDE_ANIMATION_MS: &str = "boxIdleOpacityHideAnimationMs";
     /// Box 闲置透明度淡入动画持续时间。

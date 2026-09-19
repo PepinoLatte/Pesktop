@@ -24,11 +24,14 @@ const WINDOWS_SHORTCUT_BADGE = {
 } as const;
 
 const props = defineProps<{
+  iconRadiusSize?: number;
   iconSize: number;
   item: DesktopItem;
   radiusSize: number;
   showShortcutArrow?: boolean;
 }>();
+
+const effectiveIconRadius = computed(() => props.iconRadiusSize ?? props.radiusSize ?? 8);
 
 const resolvedFallbackIconSize = computed(() =>
   Math.max(
@@ -42,15 +45,26 @@ const shortcutBadgeScale = computed(
 const iconFrameStyle = computed(
   () =>
     ({
-      borderRadius: `${props.radiusSize}px`,
       height: `${props.iconSize}px`,
+      position: "relative",
+      width: `${props.iconSize}px`,
+    }) as CSSProperties,
+);
+const iconContainerStyle = computed(
+  () =>
+    ({
+      borderRadius: `${effectiveIconRadius.value}px`,
+      height: `${props.iconSize}px`,
+      overflow: "hidden",
       width: `${props.iconSize}px`,
     }) as CSSProperties,
 );
 const iconImageStyle = computed(
   () =>
     ({
+      borderRadius: `${effectiveIconRadius.value}px`,
       height: `${props.iconSize}px`,
+      objectFit: "contain",
       width: `${props.iconSize}px`,
     }) as CSSProperties,
 );
@@ -89,22 +103,27 @@ function scaleShortcutBadgeValue(value: number): number {
     class="relative grid place-items-center text-slate-700 dark:text-slate-100"
     :style="iconFrameStyle"
   >
-    <img
-      v-if="item.iconDataUrl"
-      :alt="item.name"
-      class="object-contain"
-      draggable="false"
-      :src="item.iconDataUrl"
-      :style="iconImageStyle"
-    />
-    <Folder v-else-if="item.kind === 'folder'" :size="resolvedFallbackIconSize" />
-    <Monitor v-else-if="item.kind === 'shell'" :size="resolvedFallbackIconSize" />
-    <Link v-else-if="item.kind === 'shortcut'" :size="resolvedFallbackIconSize" />
-    <FileText v-else-if="item.extension" :size="resolvedFallbackIconSize" />
-    <File v-else :size="resolvedFallbackIconSize" />
+    <div
+      class="grid h-full w-full place-items-center overflow-hidden"
+      :style="iconContainerStyle"
+    >
+      <img
+        v-if="item.iconDataUrl"
+        :alt="item.name"
+        class="h-full w-full object-contain"
+        draggable="false"
+        :src="item.iconDataUrl"
+        :style="iconImageStyle"
+      />
+      <Folder v-else-if="item.kind === 'folder'" :size="resolvedFallbackIconSize" />
+      <Monitor v-else-if="item.kind === 'shell'" :size="resolvedFallbackIconSize" />
+      <Link v-else-if="item.kind === 'shortcut'" :size="resolvedFallbackIconSize" />
+      <FileText v-else-if="item.extension" :size="resolvedFallbackIconSize" />
+      <File v-else :size="resolvedFallbackIconSize" />
+    </div>
     <span
       v-if="item.kind === 'shortcut' && showShortcutArrow !== false"
-      class="absolute grid place-items-center"
+      class="pointer-events-none absolute grid place-items-center"
       :style="shortcutBadgeStyle"
     >
       <svg

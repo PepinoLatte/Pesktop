@@ -220,9 +220,15 @@ export const BOX_VISUAL_SETTING_CONTROLS: Array<{
   },
   {
     key: "boxCornerRadius",
-    label: "圆角大小",
+    label: "面板圆角",
     description: "调整 Box 面板和文件图标悬停区域的圆角",
     ...APP_SETTING_NUMBER_LIMITS.boxCornerRadius,
+  },
+  {
+    key: "boxIconCornerRadius",
+    label: "图标圆角",
+    description: "拖动调节 Box 内图标自身的圆角弧度（支持方角至大圆角）",
+    ...APP_SETTING_NUMBER_LIMITS.boxIconCornerRadius,
   },
   {
     key: "boxIconSize",

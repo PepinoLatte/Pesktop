@@ -54,6 +54,7 @@ export const APP_SETTING_KEYS = {
   boxIconGapX: "boxIconGapX",
   boxIconGapY: "boxIconGapY",
   boxIconSize: "boxIconSize",
+  boxIconCornerRadius: "boxIconCornerRadius",
   boxLabelTextSize: "boxLabelTextSize",
   boxTitleTextSize: "boxTitleTextSize",
   boxIconFadeInMs: "boxIconFadeInMs",
@@ -109,6 +110,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   boxIconGapY: 4,
   boxFilenameWidth: 82,
   boxCornerRadius: 8,
+  boxIconCornerRadius: 8,
 };
 
 /**
@@ -120,6 +122,7 @@ export const APP_SETTING_NUMBER_LIMITS = {
   boxCollapseAnimationMs: { min: 120, max: 600, step: 10, unit: "ms" },
   boxCollapseDelayMs: { min: 0, max: 2000, step: 20, unit: "ms" },
   boxCornerRadius: { min: 0, max: 24, step: 1, unit: "px" },
+  boxIconCornerRadius: { min: 0, max: 32, step: 1, unit: "px" },
   boxFilenameWidth: { min: 56, max: 180, step: 1, unit: "px" },
   boxIdleOpacityHideAnimationMs: { min: 0, max: 1200, step: 20, unit: "ms" },
   boxIdleOpacityShowAnimationMs: { min: 0, max: 1200, step: 20, unit: "ms" },

@@ -77,6 +77,7 @@ function resolveItemSortInsertionPlacement(
       :dragging="isItemDragging(item)"
       :editing="editingPath === item.path"
       :icon-size="settings.boxIconSize"
+      :icon-radius-size="settings.boxIconCornerRadius"
       :item="item"
       :label-text-size="settings.boxLabelTextSize"
       :label-width="settings.boxFilenameWidth"

@@ -151,5 +151,9 @@ export interface AppSettings {
    * Box 面板和图标命中区域的圆角，保持桌面组件视觉一致
    */
   boxCornerRadius: number;
+  /**
+   * Box 内项目图标自身的圆角大小
+   */
+  boxIconCornerRadius: number;
 }
 import type { DesktopNameDisplayMode } from "@/entities/desktopItem/types";

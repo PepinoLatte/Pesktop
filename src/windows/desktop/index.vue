@@ -308,13 +308,20 @@ onMounted(() => {
 });
 
 /**
- * 系统毛玻璃（DWM Acrylic）按设置应用或清除：开启后背景模糊由系统合成，
- * 前端 surface 只保留色调层；拖动期间的效果暂停由窗口框架逻辑单独管理
+ * 系统毛玻璃 / 模糊（DWM Acrylic 或 Blur）按设置应用或清除：开启后背景模糊由系统合成，
+ * 前端 surface 呈现半透明磨砂质感；图标态（收缩为单个图标）时清除效果避免图标背后出现模糊方块
  */
 async function applyWindowEffectsFromSettings(): Promise<void> {
   try {
+    if (isBoxInIconState.value) {
+      await currentWindow.setEffects({ effects: [] });
+      return;
+    }
+
     if (desktopStore.settings.boxAcrylicEnabled) {
       await currentWindow.setEffects({ effects: [Effect.Acrylic] });
+    } else if (desktopStore.settings.boxBlur > 0) {
+      await currentWindow.setEffects({ effects: [Effect.Blur] });
     } else {
       await currentWindow.setEffects({ effects: [] });
     }
@@ -324,7 +331,11 @@ async function applyWindowEffectsFromSettings(): Promise<void> {
 }
 
 watch(
-  () => desktopStore.settings.boxAcrylicEnabled,
+  [
+    () => desktopStore.settings.boxAcrylicEnabled,
+    () => desktopStore.settings.boxBlur,
+    () => isBoxInIconState.value,
+  ],
   () => {
     void applyWindowEffectsFromSettings();
   },
@@ -779,7 +790,8 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         <img
           v-if="iconStateImageSrc"
           :alt="box.title"
-          class="h-10 w-10 object-contain rounded-[10px] bg-transparent"
+          class="h-10 w-10 object-contain bg-transparent overflow-hidden"
+          :style="{ borderRadius: `${desktopStore.settings.boxIconCornerRadius}px` }"
           draggable="false"
           :src="iconStateImageSrc"
         />

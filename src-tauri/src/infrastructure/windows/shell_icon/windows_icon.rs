@@ -45,10 +45,30 @@ pub fn resolve_shell_image_data_url(path: &Path) -> io::Result<Option<String>> {
     resolve_shell_image_data_url_for_parsing_name(&path.to_string_lossy())
 }
 
+/// 判断路径是否属于具备实际画面缩略图的媒体类文件（照片、视频等）
+fn is_media_file_parsing_name(parsing_name: &str) -> bool {
+    let path = Path::new(parsing_name);
+    path.extension().is_some_and(|ext| {
+        let s = ext.to_string_lossy().to_ascii_lowercase();
+        matches!(
+            s.as_str(),
+            "jpg" | "jpeg" | "png" | "bmp" | "webp" | "gif" | "mp4" | "mkv" | "avi" | "mov" | "wmv"
+        )
+    })
+}
+
 /// Shell 虚拟项与真实路径共用图像工厂，保证系统图标、缩略图和透明边缘一致。
 pub fn resolve_shell_image_data_url_for_parsing_name(
     parsing_name: &str,
 ) -> io::Result<Option<String>> {
+    // 媒体文件走缩略图，普通文件/应用/快捷方式一律优先纯图标（ICONONLY | SCALEUP），
+    // 彻底切断 Windows Shell 在生成缩略图时给图标画的白色衬板或带灰边的外框
+    if !is_media_file_parsing_name(parsing_name) {
+        if let Ok(Some(icon)) = resolve_shell_icon_only_image_data_url(parsing_name) {
+            return Ok(Some(icon));
+        }
+    }
+
     if let Ok(Some(thumbnail)) = resolve_shell_thumbnail_data_url(parsing_name) {
         return Ok(Some(thumbnail));
     }
@@ -56,8 +76,30 @@ pub fn resolve_shell_image_data_url_for_parsing_name(
     resolve_shell_icon_data_url(parsing_name)
 }
 
-/// 读取 `.lnk` 内部目标；Store/AppX 快捷方式没有普通文件目标，需要从 AUMID 或 PIDL 解析真实图标。
+/// 读取 `.url` 网络快捷方式（如 Steam 游戏桌面图标），直接解析其中指定的 IconFile 原生图标
+fn resolve_url_shortcut_icon_data_url(path: &Path) -> io::Result<Option<String>> {
+    let bytes = std::fs::read(path).map_err(error::io_other)?;
+    let content = String::from_utf8_lossy(&bytes);
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(icon_path) = trimmed.strip_prefix("IconFile=") {
+            let icon_path = icon_path.trim().trim_matches('"');
+            if !icon_path.is_empty() && Path::new(icon_path).exists() {
+                if let Ok(Some(icon)) = resolve_shell_image_data_url_for_parsing_name(icon_path) {
+                    return Ok(Some(icon));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// 读取 `.lnk` 和 `.url` 内部目标；Store/AppX 快捷方式没有普通文件目标，需要从 AUMID 或 PIDL 解析真实图标。
 fn resolve_shortcut_icon_data_url(path: &Path) -> io::Result<Option<String>> {
+    if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("url")) {
+        return resolve_url_shortcut_icon_data_url(path);
+    }
+
     // Store 快捷方式命中 AUMID 后不需要加载 ShellLink，先走轻量二进制扫描可以减少普通扫描时的 COM 成本。
     if let Some(app_user_model_id) = app_user_model_id::extract_from_shortcut_file(path)? {
         if let Ok(Some(icon)) = resolve_apps_folder_icon_data_url(&app_user_model_id) {
@@ -246,10 +288,12 @@ unsafe fn resolve_pidl_icon_data_url(pidl: *mut ITEMIDLIST) -> io::Result<Option
     pixels.map(|png| Some(png_data_url(&png)))
 }
 
-/// 只对 Windows 快捷方式启用 ShellLink 解析，避免普通文件扫描付出额外 COM 成本。
+/// 对 Windows 快捷方式（.lnk 和 .url）启用解析，避免普通文件扫描付出额外 COM 成本。
 fn is_shortcut_path(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case(WINDOWS_SHORTCUT_EXTENSION))
+    path.extension().is_some_and(|extension| {
+        extension.eq_ignore_ascii_case(WINDOWS_SHORTCUT_EXTENSION)
+            || extension.eq_ignore_ascii_case("url")
+    })
 }
 
 /// 将 PNG 字节包装成浏览器 `<img>` 可以直接消费的 data URL。

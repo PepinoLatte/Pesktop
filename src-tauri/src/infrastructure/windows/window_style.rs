@@ -5,14 +5,15 @@
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SC_MINIMIZE, SWP_FRAMECHANGED,
-    SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-    WINDOWPOS, WM_SYSCOMMAND, WM_WINDOWPOSCHANGING, WS_EX_TOOLWINDOW,
+    GetWindowLongPtrW, IsWindowVisible, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE,
+    SC_MINIMIZE, SWP_FRAMECHANGED, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, SWP_SHOWWINDOW, SW_RESTORE, SW_SHOWNOACTIVATE, WINDOWPOS, WM_SHOWWINDOW,
+    WM_SIZE, WM_SYSCOMMAND, WM_WINDOWPOSCHANGED, WM_WINDOWPOSCHANGING, WS_EX_TOOLWINDOW,
 };
 
 const BOX_WINDOW_SUBCLASS_ID: usize = 0xD45B;
 
-/// 子类化回调：拦截 Win+D 等系统级最小化与隐藏命令
+/// 子类化回调：全方位拦截 Win+D 等系统级最小化与隐藏命令，确保 Box 常驻桌面
 unsafe extern "system" fn box_window_subclass_proc(
     hwnd: HWND,
     msg: u32,
@@ -28,10 +29,24 @@ unsafe extern "system" fn box_window_subclass_proc(
                 return LRESULT(0);
             }
         }
+        WM_SHOWWINDOW => {
+            // 当外部（如 Win+D ToggleDesktop）试图隐藏窗口时，wparam.0 为 FALSE (0)
+            // 直接拦截并返回 0，阻止系统默认隐藏
+            if wparam.0 == 0 {
+                return LRESULT(0);
+            }
+        }
+        WM_SIZE => {
+            // 阻止系统将窗口尺寸置为最小化 (SIZE_MINIMIZED = 1)
+            if wparam.0 == 1 {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+                return LRESULT(0);
+            }
+        }
         WM_WINDOWPOSCHANGING => {
             if lparam.0 != 0 {
                 let pos = &mut *(lparam.0 as *mut WINDOWPOS);
-                // 当 Win+D（ToggleDesktop）触发时，系统会尝试将窗口移至屏幕外坐标（-32000, -32000）或标记 SWP_HIDEWINDOW
+                // 当 Win+D 触发时，系统会尝试将窗口移至屏幕外坐标（-32000, -32000）或标记 SWP_HIDEWINDOW
                 if pos.x <= -30000 || pos.y <= -30000 {
                     pos.flags |= SWP_NOMOVE | SWP_NOSIZE;
                     pos.flags &= !SWP_HIDEWINDOW;
@@ -40,6 +55,12 @@ unsafe extern "system" fn box_window_subclass_proc(
                     pos.flags &= !SWP_HIDEWINDOW;
                     pos.flags |= SWP_SHOWWINDOW;
                 }
+            }
+        }
+        WM_WINDOWPOSCHANGED => {
+            // 若位置改变后被系统意外置为不可见，立刻恢复为不抢焦点的原位显示
+            if !IsWindowVisible(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             }
         }
         _ => {}

@@ -21,8 +21,8 @@ const BITMAP_COLOR_PLANES: u16 = 1;
 const ICON_MASK_ALPHA_THRESHOLD: u8 = 127;
 /// 内容像素的 Alpha 判定阈值，大于该值视为有效内容（0 表示保留任何非零半透明过渡边缘）。
 const CONTENT_ALPHA_THRESHOLD: u8 = 0;
-/// 裁剪后保留的相对边距比例，避免内容紧贴画布边缘产生压迫感。
-const CONTENT_MARGIN_RATIO: f64 = 0.04;
+/// 裁剪后保留的相对边距比例，0 表示完全贴边填满 1:1 画布，实现统一缩放。
+const CONTENT_MARGIN_RATIO: f64 = 0.0;
 /// 完全透明 Alpha 值。
 const TRANSPARENT_ALPHA: u8 = 0;
 /// 完全不透明 Alpha 值。
@@ -107,22 +107,15 @@ fn has_smooth_alpha_channel(rgba: &[u8]) -> bool {
         .any(|pixel| pixel[3] > TRANSPARENT_ALPHA && pixel[3] < OPAQUE_ALPHA)
 }
 
-/// 若位图缺乏透明度（全部 alpha == 255）且四周被纯白底衬包围，执行边缘连通漫水消除白框底板
+/// 若位图四周被纯白/浅白底衬包围，执行边缘连通漫水消除白框底板
 fn remove_solid_background_if_opaque(rgba: &mut [u8], width: usize, height: usize) {
     if width == 0 || height == 0 {
         return;
     }
 
-    let is_all_opaque = rgba
-        .chunks_exact(BYTES_PER_PIXEL as usize)
-        .all(|p| p[3] == OPAQUE_ALPHA);
-    if !is_all_opaque {
-        return;
-    }
-
     let stride = width * BYTES_PER_PIXEL as usize;
     let is_white_pixel = |p: &[u8]| -> bool {
-        p[0] >= 246 && p[1] >= 246 && p[2] >= 246
+        p[3] >= 180 && p[0] >= 235 && p[1] >= 235 && p[2] >= 235
     };
 
     let top_left = &rgba[0..4];
@@ -130,7 +123,13 @@ fn remove_solid_background_if_opaque(rgba: &mut [u8], width: usize, height: usiz
     let bottom_left = &rgba[(height - 1) * stride..(height - 1) * stride + 4];
     let bottom_right = &rgba[(height - 1) * stride + (width - 1) * 4..(height - 1) * stride + width * 4];
 
-    if !(is_white_pixel(top_left) && is_white_pixel(top_right) && is_white_pixel(bottom_left) && is_white_pixel(bottom_right)) {
+    // 只要四角存在实心白底（或四周边界为白色底板），就执行边缘连通漫水消除
+    let corners_white = (is_white_pixel(top_left) as u8)
+        + (is_white_pixel(top_right) as u8)
+        + (is_white_pixel(bottom_left) as u8)
+        + (is_white_pixel(bottom_right) as u8);
+
+    if corners_white < 3 {
         return;
     }
 

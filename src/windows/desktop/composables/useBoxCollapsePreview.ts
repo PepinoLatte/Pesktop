@@ -124,7 +124,7 @@ export function useBoxCollapsePreview(options: {
   const boxSurfaceStyle = computed(
     () =>
       ({
-        "--dasktop-box-background-opacity": `${options.getBoxBackgroundOpacity() / 100}`,
+        "--dasktop-box-background-opacity": `${Math.min(options.getBoxBackgroundOpacity() / 100, 0.85)}`,
         "--dasktop-box-blur": `${options.getBoxBlur()}px`,
         "--dasktop-box-radius": `${options.getBoxCornerRadius()}px`,
         borderRadius: "var(--dasktop-box-radius)",

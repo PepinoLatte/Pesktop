@@ -10,6 +10,7 @@ const props = defineProps<{
   editing?: boolean;
   dragging?: boolean;
   dragInteractionDisabled?: boolean;
+  iconRadiusSize?: number;
   iconSize: number;
   item: DesktopItem;
   labelTextSize: number;
@@ -172,6 +173,7 @@ function updateRenameDraft(event: Event): void {
       :class="sortInsertionIndicatorClasses"
     />
     <DesktopIconGlyph
+      :icon-radius-size="iconRadiusSize"
       :icon-size="iconSize"
       :item="item"
       :radius-size="radiusSize"
