@@ -18,6 +18,7 @@ export const BOX_WINDOW_SIZE = {
 export const BOX_DEFAULT_STATE = {
   collapsed: false,
   collapseMode: "icon",
+  coverIcon: null,
   locked: false,
   titleOpacity: 100,
   titlePosition: "top",

@@ -66,6 +66,7 @@ export async function initializeStorage(): Promise<void> {
       folder_path TEXT NOT NULL,
       collapsed INTEGER NOT NULL DEFAULT 0,
       collapse_mode TEXT NOT NULL DEFAULT 'icon',
+      cover_icon TEXT,
       locked INTEGER NOT NULL DEFAULT 0,
       title_opacity INTEGER NOT NULL DEFAULT 100,
       title_position TEXT NOT NULL DEFAULT 'top',
@@ -77,6 +78,7 @@ export async function initializeStorage(): Promise<void> {
     )
   `);
   await ensureBoxCollapseModeColumn(database);
+  await ensureBoxCoverIconColumn(database);
 
   await database.execute(`
     CREATE TABLE IF NOT EXISTS ${APP_SETTINGS_STORAGE.tables.appSettings} (
@@ -172,12 +174,29 @@ async function ensureBoxCollapseModeColumn(database: Database): Promise<void> {
 }
 
 /**
+ * 封面列允许为空表示未自定义；同样用补列方式升级旧表，不重建用户数据
+ */
+async function ensureBoxCoverIconColumn(database: Database): Promise<void> {
+  const rows = await database.select<Array<Record<string, unknown>>>(`
+    PRAGMA table_info(${APP_SETTINGS_STORAGE.tables.boxes})
+  `);
+  const columnNames = new Set(rows.map((row) => String(row.name)));
+  if (columnNames.has("cover_icon")) {
+    return;
+  }
+
+  await database.execute(
+    `ALTER TABLE ${APP_SETTINGS_STORAGE.tables.boxes} ADD COLUMN cover_icon TEXT`,
+  );
+}
+
+/**
  * 读取所有 Box 布局和真实文件夹路径；Box 内容由 Explorer 原生视图按 folderPath 展示
  */
 export async function loadBoxes(): Promise<DesktopBox[]> {
   const database = await getDatabase();
   const rows = await database.select<Array<Record<string, unknown>>>(`
-    SELECT id, title, folder_path, collapsed, collapse_mode, locked, title_opacity, title_position, x, y, width, height
+    SELECT id, title, folder_path, collapsed, collapse_mode, cover_icon, locked, title_opacity, title_position, x, y, width, height
     FROM ${APP_SETTINGS_STORAGE.tables.boxes}
     ORDER BY updated_at ASC
   `);
@@ -185,6 +204,7 @@ export async function loadBoxes(): Promise<DesktopBox[]> {
   return rows.map((row) => ({
     collapsed: sanitizeDesktopBoxBoolean(row.collapsed),
     collapseMode: sanitizeDesktopBoxCollapseMode(row.collapse_mode),
+    coverIcon: row.cover_icon === null || row.cover_icon === undefined ? null : String(row.cover_icon),
     folderPath: String(row.folder_path),
     id: String(row.id),
     locked: sanitizeDesktopBoxBoolean(row.locked),
@@ -206,13 +226,14 @@ export async function saveBox(box: DesktopBox): Promise<void> {
 
   await database.execute(
     `
-      INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxes} (id, title, folder_path, collapsed, collapse_mode, locked, title_opacity, title_position, x, y, width, height, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      INSERT INTO ${APP_SETTINGS_STORAGE.tables.boxes} (id, title, folder_path, collapsed, collapse_mode, cover_icon, locked, title_opacity, title_position, x, y, width, height, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         folder_path = excluded.folder_path,
         collapsed = excluded.collapsed,
         collapse_mode = excluded.collapse_mode,
+        cover_icon = excluded.cover_icon,
         locked = excluded.locked,
         title_opacity = excluded.title_opacity,
         title_position = excluded.title_position,
@@ -228,6 +249,7 @@ export async function saveBox(box: DesktopBox): Promise<void> {
       box.folderPath,
       box.collapsed ? 1 : 0,
       box.collapseMode,
+      box.coverIcon,
       box.locked ? 1 : 0,
       sanitizeDesktopBoxTitleOpacity(box.titleOpacity),
       box.titlePosition,

@@ -17,9 +17,14 @@ export interface DesktopBox {
    */
   collapsed: boolean;
   /**
-   * 闲置收缩的呈现形态；图标模式使用 Box 内首个文件图标或默认图标作为入口
+   * 闲置收缩的呈现形态；图标模式使用封面图标作为入口
    */
   collapseMode: BoxCollapseMode;
+  /**
+   * 图标态封面；null 表示未自定义（回退首个文件图标，再回退默认文件夹图标）。
+   * 值为 `builtin:<名称>` 时渲染内置图标库，`data:image/...` 时渲染自定义图片
+   */
+  coverIcon: string | null;
   /**
    * 业务 ID 同时用于窗口 label 和默认物理目录名的稳定片段
    */

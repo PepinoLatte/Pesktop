@@ -30,6 +30,7 @@ export interface BoxContextMenuActions {
   toggleBoxLockedFromMenu: () => Promise<void>;
   updateBoxAutoCollapseFromMenu: (mode: BoxAutoCollapseMode) => Promise<void>;
   updateBoxCollapseModeFromMenu: (mode: BoxCollapseMode) => Promise<void>;
+  updateBoxCoverFromMenu: (coverIcon: string | null) => Promise<void>;
   updateIdleOpacityFromMenu: (nextOpacity: number) => Promise<void>;
   updateTitlePositionFromMenu: (position: DesktopBoxTitlePosition) => Promise<void>;
 }
@@ -130,6 +131,18 @@ export function useBoxContextMenuActions(
   }
 
   /**
+   * 封面写入后由对应 Box 窗口的图标态入口即时反映；null 表示清除自定义封面。
+   */
+  async function updateBoxCoverFromMenu(coverIcon: string | null): Promise<void> {
+    if (!options.box.value) {
+      return;
+    }
+
+    options.clearBoxDeleteConfirmation();
+    await desktopStore.updateBox({ ...options.box.value, coverIcon });
+  }
+
+  /**
    * 锁定只冻结当前 Box 的几何操作，不影响内部图标打开、排序和右键。
    */
   async function toggleBoxLockedFromMenu(): Promise<void> {
@@ -185,6 +198,7 @@ export function useBoxContextMenuActions(
     toggleBoxLockedFromMenu,
     updateBoxAutoCollapseFromMenu,
     updateBoxCollapseModeFromMenu,
+    updateBoxCoverFromMenu,
     updateIdleOpacityFromMenu,
     updateTitlePositionFromMenu,
   };

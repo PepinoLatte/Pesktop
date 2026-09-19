@@ -21,6 +21,7 @@ import { resolveBoxResizeGridRowHeight } from "@/windows/desktop/utils/boxResize
 import { useDesktopStore } from "@/entities/desktopBox/store";
 import { BOX_WINDOW_INTERACTION_TIMING } from "@/entities/desktopBox/layout";
 import { BOX_HOVER_HANDOFF_EVENT, type BoxHoverHandoffPayload } from "@/shared/ipc/desktop";
+import { BUILTIN_COVER_ICONS, parseBuiltinCoverId } from "@/windows/boxContextMenu/model/builtinCovers";
 import type { DesktopItem } from "@/entities/desktopItem/types";
 import type {
   BoxScreenPoint,
@@ -158,10 +159,25 @@ const boxTitleOrderClass = computed(() =>
   box.value?.titlePosition === "bottom" ? "order-2" : "order-0",
 );
 /**
- * 图标态封面按既定优先级取图：Box 内第一个文件的 Shell 图标优先，
- * 没有文件时回落到默认文件夹图标；自定义封面由后续设置能力接入同一出口
+ * 图标态入口按既定优先级取图：自定义图片封面 > 内置图标库 > Box 内第一个文件的
+ * Shell 图标 > 默认文件夹图标；封面由更多菜单「设置封面」维护
  */
-const iconStateImageSrc = computed(() => boxItems.value[0]?.iconDataUrl ?? null);
+const iconStateImageSrc = computed(() => {
+  const cover = box.value?.coverIcon ?? null;
+  if (cover?.startsWith("data:image/")) {
+    return cover;
+  }
+
+  return boxItems.value[0]?.iconDataUrl ?? null;
+});
+const iconStateBuiltinComponent = computed(() => {
+  const builtinId = parseBuiltinCoverId(box.value?.coverIcon ?? null);
+  if (!builtinId) {
+    return null;
+  }
+
+  return BUILTIN_COVER_ICONS.find((cover) => cover.id === builtinId)?.component ?? null;
+});
 
 /**
  * 过界判定容差：鼠标落点落在相邻 Box 逻辑边界向外扩展该值的范围内即视为越界进入
@@ -706,6 +722,13 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
           class="h-10 w-10 rounded-[var(--dasktop-box-radius)] object-contain"
           draggable="false"
           :src="iconStateImageSrc"
+        />
+        <component
+          :is="iconStateBuiltinComponent"
+          v-else-if="iconStateBuiltinComponent"
+          aria-hidden="true"
+          class="text-slate-400 dark:text-slate-500"
+          :size="36"
         />
         <Folder v-else aria-hidden="true" class="text-slate-400 dark:text-slate-500" :size="32" />
       </button>
