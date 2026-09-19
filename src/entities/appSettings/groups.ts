@@ -243,6 +243,12 @@ export const BOX_VISUAL_SETTING_CONTROLS: Array<{
     ...APP_SETTING_NUMBER_LIMITS.boxIconFadeInMs,
   },
   {
+    key: "boxIconFadeOutMs",
+    label: "悬停淡出时长",
+    description: "调整鼠标悬停图标模式收缩态时图标淡出的过渡快慢",
+    ...APP_SETTING_NUMBER_LIMITS.boxIconFadeOutMs,
+  },
+  {
     key: "boxIconGapX",
     label: "横向间距",
     description: "调整图标列之间的水平距离",

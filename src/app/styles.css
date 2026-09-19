@@ -120,20 +120,36 @@ select:focus-visible {
 }
 
 /**
- * Box 背景只保留半透明底色；背景模糊由系统 DWM Acrylic 合成（可开关），
- * 前端不再叠加 backdrop-filter，彻底消除位移/变形时的整面重合成开销
+ * Box 背景采用纯净半透明与平滑高斯模糊，营造优雅的半透明化磨砂玻璃质感；
+ * 透明度由设置变量控制，拖动与变形动画期间暂停滤镜以确保零掉帧跟手
  */
 .dasktop-box-surface {
-  background: rgb(246 248 252 / var(--dasktop-box-background-opacity, 0.7));
+  background: rgb(248 250 254 / var(--dasktop-box-background-opacity, 0.7));
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4), 0 8px 32px rgba(15, 23, 42, 0.08);
 }
 
 .dark .dasktop-box-surface {
-  background: rgb(18 20 24 / var(--dasktop-box-background-opacity, 0.7));
+  background: rgb(18 20 26 / var(--dasktop-box-background-opacity, 0.72));
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 32px rgba(0, 0, 0, 0.35);
 }
 
 /**
- * 图标态入口在收缩动画完成后切入，淡入出现避免与内容切换产生硬跳；
- * 时长由设置键 boxIconFadeInMs 通过 CSS 变量下发
+ * 拖动与收缩动画期间暂停毛玻璃：半透明无边框窗口位移时关闭模糊滤镜，
+ * 彻底消除位移时的重合成开销，松手即刻恢复柔和半透明磨砂质感
+ */
+.dasktop-box-surface--dragging,
+.dasktop-box-surface--animating {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/**
+ * 图标态入口在收缩完成后切入并淡入；悬停展开时平滑淡出，
+ * 淡入淡出时长分别由 boxIconFadeInMs 与 boxIconFadeOutMs 驱动
  */
 @keyframes dasktop-fade-in {
   from {
@@ -146,6 +162,12 @@ select:focus-visible {
 
 .dasktop-icon-state-button {
   animation: dasktop-fade-in var(--dasktop-icon-fade-ms, 160ms) ease-out;
+  transition: opacity var(--dasktop-icon-fade-out-ms, 160ms) ease-out;
+}
+
+.dasktop-icon-state-button--fading {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /**

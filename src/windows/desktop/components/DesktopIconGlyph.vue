@@ -50,8 +50,6 @@ const iconFrameStyle = computed(
 const iconImageStyle = computed(
   () =>
     ({
-      // 图标位图本体随全局圆角设置裁剪，接近 Win11 原生图标的圆角观感
-      borderRadius: `${props.radiusSize}px`,
       height: `${props.iconSize}px`,
       width: `${props.iconSize}px`,
     }) as CSSProperties,
@@ -95,7 +93,7 @@ function scaleShortcutBadgeValue(value: number): number {
     <img
       v-if="item.iconDataUrl"
       :alt="item.name"
-      class="object-contain drop-shadow-[0_4px_8px_rgba(15,23,42,0.16)]"
+      class="object-contain"
       draggable="false"
       :src="item.iconDataUrl"
       :style="iconImageStyle"

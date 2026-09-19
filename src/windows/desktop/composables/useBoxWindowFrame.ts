@@ -812,33 +812,8 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 系统毛玻璃在 Win10 的拖动场景存在合成滞后，原生拖动循环启动前临时清除效果，
-   * 松手恢复后由 DWM 重新应用，保证拖动全程跟手
-   */
-  async function suspendWindowEffects(): Promise<void> {
-    try {
-      await options.currentWindow.clearWindowEffects();
-    } catch (error) {
-      options.setLastError(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async function restoreWindowEffects(): Promise<void> {
-    if (!options.getBoxAcrylicEnabled()) {
-      return;
-    }
-
-    try {
-      await options.currentWindow.setEffects({ effects: ["acrylic"] });
-    } catch (error) {
-      options.setLastError(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  /**
    * 原生拖动：按下后立即向窗口线程发起模态移动循环请求——锚点取按下瞬间的光标，
-   * 零启动延迟跟手；吸附所需信息与毛玻璃暂停在拖动请求受理后并行补齐，
-   * 不阻塞拖动启动。快速点按时探测会在状态就绪后的下一个周期自然收尾。
+   * 零启动延迟绝对跟手；吸附所需信息在拖动请求发出后并行补齐，不阻塞拖动启动。
    */
   async function startNativeDragging(): Promise<void> {
     if (!options.box.value || nativeDragState) {
@@ -852,10 +827,8 @@ export function useBoxWindowFrame(options: {
     try {
       const dragStarted = options.currentWindow.startDragging();
       void prepareNativeDragResources();
-      void suspendWindowEffects();
       await dragStarted;
     } catch (error) {
-      await restoreWindowEffects();
       stopManualDragging(false).catch(() => undefined);
       options.setLastError(error instanceof Error ? error.message : String(error));
     }
@@ -931,7 +904,6 @@ export function useBoxWindowFrame(options: {
     isManualDraggingBox.value = false;
     clearNativeDragReleaseProbe();
     options.refreshCollapsedPreviewCloseSchedule();
-    await restoreWindowEffects();
     if (!shouldPersist) {
       return;
     }

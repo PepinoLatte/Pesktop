@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { ArrowLeft, Trash2 } from "@lucide/vue";
+import { ArrowLeft, Folder, ImagePlus, Trash2 } from "@lucide/vue";
 import type { DesktopBox } from "@/entities/desktopBox/types";
 import { BUILTIN_COVER_ICONS, builtinCoverValue, parseBuiltinCoverId } from "../model/builtinCovers";
 
@@ -106,24 +106,38 @@ function handleFileChange(event: Event): void {
         <component :is="cover.component" :size="17" />
       </button>
     </div>
-    <div class="grid grid-cols-2 gap-1">
+    <div class="grid grid-cols-2 gap-1.5">
       <button
-        class="rounded-[8px] bg-[#e9edf5] px-2 py-1.5 text-[11px] font-medium text-slate-700 transition-colors hover:bg-[#dfe4ee] dark:bg-[#30343e] dark:text-slate-200 dark:hover:bg-[#3a3f4a]"
-        type="button"
-        @click="openFilePicker"
-      >
-        本地图片
-      </button>
-      <button
-        v-if="box.coverIcon"
-        class="rounded-[8px] bg-[#fdeaea] px-2 py-1.5 text-[11px] font-medium text-red-600 transition-colors hover:bg-[#f9dcdc] dark:bg-[#3c2427] dark:text-red-300 dark:hover:bg-[#4a2b2f]"
+        :class="[
+          'flex items-center justify-center gap-1.5 rounded-[8px] px-2 py-1.5 text-[11px] font-medium transition-colors',
+          !box.coverIcon
+            ? 'bg-[#2f6bff]/15 text-[#2f6bff] ring-1 ring-[#2f6bff]/60 font-semibold'
+            : 'bg-[#e9edf5] text-slate-700 hover:bg-[#dfe4ee] dark:bg-[#30343e] dark:text-slate-200 dark:hover:bg-[#3a3f4a]',
+        ]"
+        title="使用盒子首个文件图标或默认文件夹"
         type="button"
         @click="clearCover"
       >
-        <span class="inline-flex items-center gap-1">
-          <Trash2 :size="12" />
-          清除封面
-        </span>
+        <Folder :size="13" />
+        默认图标
+      </button>
+      <button
+        class="flex items-center justify-center gap-1.5 rounded-[8px] bg-[#e9edf5] px-2 py-1.5 text-[11px] font-medium text-slate-700 transition-colors hover:bg-[#dfe4ee] dark:bg-[#30343e] dark:text-slate-200 dark:hover:bg-[#3a3f4a]"
+        type="button"
+        @click="openFilePicker"
+      >
+        <ImagePlus :size="13" />
+        本地图片
+      </button>
+    </div>
+    <div v-if="box.coverIcon" class="flex justify-end px-0.5">
+      <button
+        class="inline-flex items-center gap-1 text-[10px] text-slate-400 transition-colors hover:text-red-500 dark:hover:text-red-400"
+        type="button"
+        @click="clearCover"
+      >
+        <Trash2 :size="11" />
+        恢复为默认图标
       </button>
     </div>
     <input

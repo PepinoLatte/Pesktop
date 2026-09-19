@@ -109,8 +109,14 @@ function bindMenuRef(element: Element | ComponentPublicInstance | null): void {
           <span class="grid min-w-0 flex-1 gap-0.5">
             <span class="truncate text-[12px] font-semibold text-slate-800 dark:text-slate-100">设置封面</span>
             <span class="truncate text-[10px] leading-3 text-slate-500 dark:text-slate-400">
-              {{ box.coverIcon ? "更换或清除图标态封面" : "为图标模式挑选一个封面" }}
+              {{ box.coverIcon ? "已选自定义封面（点击更换或恢复）" : "当前使用默认图标" }}
             </span>
+          </span>
+          <span
+            class="rounded-[6px] px-1.5 py-0.5 text-[10px] font-medium"
+            :class="box.coverIcon ? 'bg-[#e0edff] text-[#1c64f2] dark:bg-[#1e2e4a] dark:text-[#60a5fa]' : 'bg-[#e9edf5] text-slate-500 dark:bg-[#2b2e37] dark:text-slate-400'"
+          >
+            {{ box.coverIcon ? "自定义" : "默认图标" }}
           </span>
         </button>
         <span class="my-0.5 h-px bg-[#e4e6eb] dark:bg-[#30333c]" />

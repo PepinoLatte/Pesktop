@@ -58,9 +58,8 @@ defineEmits<{
       v-else
       class="min-h-7 min-w-12 max-w-[68%] truncate text-center font-semibold text-slate-900 dark:text-white"
       :style="{ fontSize: `${titleTextSize}px`, lineHeight: '28px' }"
-      title="双击编辑 Box 名称"
+      title="双击编辑 Box 名称，按住可拖动"
       @dblclick="$emit('startTitleEditing', $event)"
-      @mousedown.stop
     >
       {{ box.title }}
     </span>

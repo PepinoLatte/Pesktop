@@ -66,10 +66,11 @@ pub(super) unsafe fn bitmap_to_png(bitmap: HBITMAP) -> io::Result<Vec<u8>> {
     encode_png(width, height, &pixels)
 }
 
-/// HICON 的透明度可能存放在传统 AND mask 中，AppX/快捷方式图标尤其依赖这条兜底。
+/// HICON 的透明度优先从 32 位 Alpha 通道读取；若无半透明过渡则由传统 AND mask 裁切透明边缘。
 unsafe fn icon_bitmaps_to_png(color_bitmap: HBITMAP, mask_bitmap: HBITMAP) -> io::Result<Vec<u8>> {
     let mut color = bitmap_to_rgba(color_bitmap)?;
-    if is_fully_transparent(&color.pixels) {
+    let has_smooth_alpha = has_smooth_alpha_channel(&color.pixels);
+    if !has_smooth_alpha && !mask_bitmap.is_invalid() {
         apply_icon_mask_alpha(&mut color, mask_bitmap)?;
     }
     if is_fully_transparent(&color.pixels) {
@@ -85,6 +86,12 @@ unsafe fn icon_bitmaps_to_png(color_bitmap: HBITMAP, mask_bitmap: HBITMAP) -> io
     let (width, height, pixels) =
         crop_transparent_padding(color.width as u32, color.height as u32, &color.pixels);
     encode_png(width, height, &pixels)
+}
+
+/// 判断位图是否包含真实平滑的 Alpha 通道（存在 0 < alpha < 255 的渐变像素）
+fn has_smooth_alpha_channel(rgba: &[u8]) -> bool {
+    rgba.chunks_exact(BYTES_PER_PIXEL as usize)
+        .any(|pixel| pixel[3] > TRANSPARENT_ALPHA && pixel[3] < OPAQUE_ALPHA)
 }
 
 /// 裁掉四周完全透明的背景，让不同来源的图标以一致的视觉密度铺满画布。

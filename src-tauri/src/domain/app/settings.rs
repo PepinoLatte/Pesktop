@@ -48,6 +48,8 @@ pub mod keys {
     pub const BOX_TITLE_TEXT_SIZE: &str = "boxTitleTextSize";
     /// 图标模式展开时内容淡入时长。
     pub const BOX_ICON_FADE_IN_MS: &str = "boxIconFadeInMs";
+    /// 鼠标悬停图标态时图标淡出时长。
+    pub const BOX_ICON_FADE_OUT_MS: &str = "boxIconFadeOutMs";
     /// 图标态悬停展开延迟。
     pub const BOX_EXPAND_HOVER_DELAY_MS: &str = "boxExpandHoverDelayMs";
     /// 是否启用系统级窗口模糊（DWM Acrylic）。

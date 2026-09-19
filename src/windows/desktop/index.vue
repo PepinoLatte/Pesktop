@@ -114,6 +114,7 @@ const {
   handleBoxTitleMouseLeave,
   isApplyingCollapseWindowSize,
   isBoxCollapsedToTitle,
+  isBoxExpandingFromIcon,
   isBoxInIconState,
   isCollapseAnimating,
   openCollapsedPreviewForActiveInteraction,
@@ -131,6 +132,7 @@ const {
   getBoxCornerRadius: () => desktopStore.settings.boxCornerRadius,
   getBoxExpandHoverDelayMs: () => desktopStore.settings.boxExpandHoverDelayMs,
   getBoxIconFadeInMs: () => desktopStore.settings.boxIconFadeInMs,
+  getBoxIconFadeOutMs: () => desktopStore.settings.boxIconFadeOutMs,
   getBoxIdleOpacityHideAnimationMs: () => desktopStore.getBoxIdleOpacityHideAnimationMs(),
   getBoxIdleOpacityShowAnimationMs: () => desktopStore.getBoxIdleOpacityShowAnimationMs(),
   isContextMenuOpen: () => readContextMenuOpen(),
@@ -741,6 +743,10 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
       v-if="box"
       ref="boxSurfaceRef"
       class="dasktop-box-surface relative flex h-full w-full flex-col overflow-hidden text-slate-950 dark:text-white"
+      :class="{
+        'dasktop-box-surface--dragging': isManualDraggingBox,
+        'dasktop-box-surface--animating': isCollapseAnimating,
+      }"
       :style="boxSurfaceStyle"
       @mouseenter="handleBoxMouseEnter"
       @mouseleave="handleBoxMouseLeaveWithHandoff"
@@ -749,14 +755,17 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         图标态：图标模式收缩闲置的形态，整面只渲染一个图标入口。
         悬停/点击交给现有展开调度回到完整态，右键直接唤出 Box 菜单，
         按下即可拖动（原生拖动循环），与完整态标题栏的手感一致。
-        收缩动画进行中仍渲染完整内容（已淡出），完成后才切入图标，
-        避免窗口还在缩小时内容形态提前跳变。
+        悬停展开时图标平滑淡出（fade-out），动画就绪后无缝接力完整内容淡入。
       -->
       <button
-        v-if="isBoxInIconState && !isCollapseAnimating"
+        v-if="isBoxInIconState || isBoxExpandingFromIcon"
         aria-label="展开 Box"
         class="dasktop-icon-state-button grid h-full w-full place-items-center"
-        :style="{ '--dasktop-icon-fade-ms': `${desktopStore.settings.boxIconFadeInMs}ms` }"
+        :class="{ 'dasktop-icon-state-button--fading': isBoxExpandingFromIcon }"
+        :style="{
+          '--dasktop-icon-fade-ms': `${desktopStore.settings.boxIconFadeInMs}ms`,
+          '--dasktop-icon-fade-out-ms': `${desktopStore.settings.boxIconFadeOutMs}ms`,
+        }"
         type="button"
         @click="openCollapsedPreviewForActiveInteraction()"
         @contextmenu.prevent.stop="toggleContextMenu"
@@ -765,7 +774,7 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         <img
           v-if="iconStateImageSrc"
           :alt="box.title"
-          class="h-10 w-10 rounded-[var(--dasktop-box-radius)] object-contain"
+          class="h-10 w-10 object-contain"
           draggable="false"
           :src="iconStateImageSrc"
         />

@@ -119,6 +119,10 @@ export interface AppSettings {
    */
   boxIconFadeInMs: number;
   /**
+   * 鼠标悬停图标态时图标淡出的过渡时长；控制图标向完整面板转换时的淡出快慢
+   */
+  boxIconFadeOutMs: number;
+  /**
    * 是否启用系统级窗口模糊（DWM Acrylic）：开启后模糊由系统合成，
    * Box 背景只保留色调层，透明度滑杆继续用于调节虚化程度
    */

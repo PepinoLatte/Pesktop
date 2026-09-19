@@ -41,6 +41,7 @@ export function useBoxCollapsePreview(options: {
   getBoxCornerRadius: () => number;
   getBoxExpandHoverDelayMs: () => number;
   getBoxIconFadeInMs: () => number;
+  getBoxIconFadeOutMs: () => number;
   getBoxIdleOpacityHideAnimationMs: () => number;
   getBoxIdleOpacityShowAnimationMs: () => number;
   isContextMenuOpen: () => boolean;
@@ -74,6 +75,15 @@ export function useBoxCollapsePreview(options: {
    */
   const isBoxInIconState = computed(
     () => isBoxCollapsedToTitle.value && options.getBoxCollapseMode() === "icon",
+  );
+  /**
+   * 正在从图标态向完整面板展开的过渡期：图标平滑淡出，面板同步平滑变形
+   */
+  const isBoxExpandingFromIcon = computed(
+    () =>
+      isCollapseAnimating.value &&
+      !isBoxCollapsedToTitle.value &&
+      options.getBoxCollapseMode() === "icon",
   );
   /**
    * 窗口模式的闲置形态保留标题条入口（40px），图标模式收敛到单图标方块边长
@@ -714,6 +724,7 @@ export function useBoxCollapsePreview(options: {
     handleBoxTitleMouseLeave,
     isApplyingCollapseWindowSize: () => isApplyingCollapseWindowSize,
     isBoxCollapsedToTitle,
+    isBoxExpandingFromIcon,
     isBoxInIconState,
     isCollapseAnimating,
     openCollapsedPreviewForActiveInteraction,

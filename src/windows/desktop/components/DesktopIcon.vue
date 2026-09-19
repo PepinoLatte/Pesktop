@@ -62,9 +62,9 @@ const iconButtonStyle = computed(
  * 重命名时只保留输入框自身的焦点样式，避免父级图标的选中态和按压态干扰 Windows 式重命名体验。
  */
 const iconStateClasses = computed(() => [
-  !props.editing ? "active:bg-white/75 dark:active:bg-white/20" : "",
+  !props.editing ? "active:bg-white/45 dark:active:bg-white/25" : "",
   props.selected && !props.editing
-    ? "z-30 bg-white/70 ring-1 ring-[#2f6bff]/70 dark:bg-white/15"
+    ? "z-30 bg-white/40 ring-1 ring-[#2f6bff]/70 dark:bg-white/20"
     : "",
   props.dragging ? "opacity-60" : "",
   props.dragInteractionDisabled ? "pointer-events-none" : "",
@@ -153,7 +153,7 @@ function updateRenameDraft(event: Event): void {
 
 <template>
   <div
-    class="dasktop-icon-button relative flex h-fit min-w-0 cursor-default select-none flex-col items-center justify-start self-start bg-transparent text-center text-slate-900 transition-colors hover:bg-white/55 dark:text-white dark:hover:bg-white/10"
+    class="dasktop-icon-button relative flex h-fit min-w-0 cursor-default select-none flex-col items-center justify-start self-start bg-transparent text-center text-slate-900 transition-colors hover:bg-white/30 dark:text-white dark:hover:bg-white/10"
     :class="iconStateClasses"
     :data-box-item-path="item.path"
     role="button"
