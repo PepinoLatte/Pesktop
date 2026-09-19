@@ -776,6 +776,7 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         'dasktop-box-surface--dragging': isManualDraggingBox,
         'dasktop-box-surface--animating': isCollapseAnimating,
         'dasktop-box-surface--icon-state': isBoxInIconState && !isCollapseAnimating,
+        'dasktop-box-surface--system-glass': desktopStore.settings.boxAcrylicEnabled,
       }"
       :style="boxSurfaceStyle"
       @mouseenter="handleBoxMouseEnter"

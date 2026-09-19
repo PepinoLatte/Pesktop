@@ -125,19 +125,46 @@ export function useBoxCollapsePreview(options: {
       ? 1
       : (options.box.value?.titleOpacity ?? BOX_TITLE_OPACITY.max) / 100,
   );
-  const boxSurfaceStyle = computed(
-    () =>
-      ({
-        "--dasktop-box-background-opacity": `${Math.max(0, Math.min(1, options.getBoxBackgroundOpacity() / 100))}`,
-        "--dasktop-box-blur": `${options.getBoxBlur()}px`,
-        "--dasktop-box-radius": `${options.getBoxCornerRadius()}px`,
-        borderRadius: "var(--dasktop-box-radius)",
-        clipPath: "inset(0 round var(--dasktop-box-radius))",
-        height: boxSurfaceVisualHeight.value === null ? "100%" : `${boxSurfaceVisualHeight.value}px`,
-        position: "relative",
-        width: boxSurfaceVisualWidth.value === null ? "100%" : `${boxSurfaceVisualWidth.value}px`,
-      }) as CSSProperties,
-  );
+  const boxSurfaceStyle = computed(() => {
+    const visualHeight = boxSurfaceVisualHeight.value;
+    const visualWidth = boxSurfaceVisualWidth.value;
+    // 四向自适应展开会让原生窗口在动画前先行移动/放大到目标框架，表面默认从窗口
+    // 左上角生长，右/底边缘锚定的 Box 在动画起点和收尾落位时都会整体位移。
+    // 动画期间把表面钉在图标所在的边（右/底），让面板朝远离图标的方向生长/收回，
+    // 图标视觉位置全程不动，动画收尾时表面与窗口几何完全重合、无强制位移
+    let anchorTransform: string | undefined;
+    if (
+      isCollapseAnimating.value &&
+      visualHeight !== null &&
+      visualWidth !== null &&
+      lastAppliedWindowHeight !== null &&
+      lastAppliedWindowWidth !== null
+    ) {
+      const offsetX =
+        expandAnchorHorizontal.value === "right"
+          ? lastAppliedWindowWidth - visualWidth
+          : 0;
+      const offsetY =
+        expandAnchorVertical.value === "bottom"
+          ? lastAppliedWindowHeight - visualHeight
+          : 0;
+      if (offsetX !== 0 || offsetY !== 0) {
+        anchorTransform = `translate(${Math.round(offsetX)}px, ${Math.round(offsetY)}px)`;
+      }
+    }
+
+    return {
+      "--dasktop-box-background-opacity": `${Math.max(0, Math.min(1, options.getBoxBackgroundOpacity() / 100))}`,
+      "--dasktop-box-blur": `${options.getBoxBlur()}px`,
+      "--dasktop-box-radius": `${options.getBoxCornerRadius()}px`,
+      borderRadius: "var(--dasktop-box-radius)",
+      clipPath: "inset(0 round var(--dasktop-box-radius))",
+      height: visualHeight === null ? "100%" : `${visualHeight}px`,
+      position: "relative",
+      transform: anchorTransform,
+      width: visualWidth === null ? "100%" : `${visualWidth}px`,
+    } as CSSProperties;
+  });
   const boxTitleAreaStyle = computed(
     () =>
       ({

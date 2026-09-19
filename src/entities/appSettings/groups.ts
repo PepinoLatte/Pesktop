@@ -121,7 +121,7 @@ export const WINDOW_BEHAVIOR_SETTING_CONTROLS: Array<{
   {
     key: APP_SETTING_KEYS.boxAcrylicEnabled,
     label: "系统毛玻璃",
-    description: "由系统合成背景模糊，关闭后 Box 背景只剩半透明色",
+    description: "由系统以固定强度合成磨砂；开启期间「模糊度」滑杆不生效",
   },
   {
     key: APP_SETTING_KEYS.boxIconHoverExpandEnabled,
@@ -220,7 +220,7 @@ export const BOX_VISUAL_SETTING_CONTROLS: Array<{
   {
     key: "boxBlur",
     label: "模糊度",
-    description: "调整 Box 面板自身磨砂质感强度（不会模糊桌面壁纸）",
+    description: "调节面板磨砂模糊强度；开启系统毛玻璃时由系统控制、此滑杆不生效",
     ...APP_SETTING_NUMBER_LIMITS.boxBlur,
   },
   {
