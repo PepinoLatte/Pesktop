@@ -130,6 +130,7 @@ interface UpdateBoxOptions {
  */
 export function useBoxWindowFrame(options: {
   box: ComputedRef<DesktopBox | undefined>;
+  clearExpandHoverTimer?: () => void;
   closeContextMenu: () => void;
   currentWindow: DesktopWindowHandle;
   getBoxes: () => DesktopBox[];
@@ -155,6 +156,7 @@ export function useBoxWindowFrame(options: {
   let programmaticResizeApplyVersion = 0;
   let nativeDragState: NativeDragState | null = null;
   let nativeDragReleaseProbeTimer: ReturnType<typeof window.setInterval> | null = null;
+  let dragStartPhysicalPosition: PhysicalWindowPoint = { x: 0, y: 0 };
   let manualResizeState: ManualResizeState | null = null;
   let manualResizeFrameTimer: ReturnType<typeof window.setInterval> | null = null;
   let manualResizeApplyPending = false;
@@ -218,11 +220,18 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 外部窗口移动只负责持久化；原生拖动期间的位置由操作系统驱动，JS 不记录不落库，
-   * 松手时统一取真实位置做吸附校正
+   * 外部窗口移动只负责持久化；原生拖动期间、收缩预览展开、动画或程序性位移期间绝对不覆盖数据库中的锚点坐标，
+   * 避免展开临时坐标污染数据库导致 Box 漂移走位
    */
   async function handleWindowMoved(x: number, y: number): Promise<void> {
-    if (nativeDragState || isApplyingWindowPosition) {
+    if (
+      nativeDragState ||
+      isApplyingWindowPosition ||
+      isApplyingProgrammaticResize ||
+      options.isCollapseWindowSizeApplying() ||
+      options.isBoxCollapsedToTitle() ||
+      options.box.value?.collapsed
+    ) {
       return;
     }
 
@@ -820,8 +829,17 @@ export function useBoxWindowFrame(options: {
       return;
     }
 
+    try {
+      dragStartPhysicalPosition = await options.currentWindow.outerPosition();
+    } catch {
+      dragStartPhysicalPosition = { x: 0, y: 0 };
+    }
+
     isManualDraggingBox.value = true;
-    options.openCollapsedPreviewForActiveInteraction();
+    options.clearExpandHoverTimer?.();
+    if (!options.isBoxCollapsedToTitle()) {
+      options.openCollapsedPreviewForActiveInteraction();
+    }
     bindNativeDragReleaseProbe();
 
     try {
@@ -892,7 +910,8 @@ export function useBoxWindowFrame(options: {
   /**
    * 结束拖动：shouldPersist 时取真实最终位置，过一遍吸附后由带锁 apply
    * 一次性校正定位并写入数据库；顺带覆盖原生循环可能的旧位置回写，
-   * 并恢复被拖动期暂停的系统毛玻璃
+   * 并恢复被拖动期暂停的系统毛玻璃。
+   * 若位移极小（< 4px）判定为单纯单击，折叠态下直接平滑展开
    */
   async function stopManualDragging(shouldPersist: boolean): Promise<void> {
     const dragState = nativeDragState;
@@ -912,6 +931,18 @@ export function useBoxWindowFrame(options: {
       options.currentWindow.outerPosition(),
       currentMonitor(),
     ]);
+
+    const dragDistance = Math.hypot(
+      finalPosition.x - dragStartPhysicalPosition.x,
+      finalPosition.y - dragStartPhysicalPosition.y,
+    );
+    if (dragDistance < 4) {
+      if (options.isBoxCollapsedToTitle()) {
+        options.openCollapsedPreviewForActiveInteraction();
+      }
+      return;
+    }
+
     const activeMonitor = monitor ?? (await primaryMonitor());
     if (activeMonitor) {
       dragState.workArea = {
@@ -924,7 +955,17 @@ export function useBoxWindowFrame(options: {
     }
 
     const snappedPosition = resolveManualDragPosition(finalPosition, dragState);
-    await applyWindowPhysicalPosition(snappedPosition.x, snappedPosition.y);
+    let persistY = snappedPosition.y;
+    if (
+      options.isBoxCollapsedToTitle() &&
+      options.box.value?.collapseMode === "window" &&
+      options.box.value?.titlePosition === "bottom"
+    ) {
+      const scaleFactor = dragState.scaleFactor;
+      persistY = snappedPosition.y - Math.round((options.box.value.height - 40) * scaleFactor);
+    }
+
+    await applyWindowPhysicalPosition(snappedPosition.x, snappedPosition.y, true, persistY);
   }
 
   /**
@@ -934,6 +975,7 @@ export function useBoxWindowFrame(options: {
     x: number,
     y: number,
     shouldPersist = true,
+    persistPhysicalY?: number,
   ): Promise<void> {
     const applyVersion = windowPositionApplyVersion + 1;
 
@@ -942,7 +984,7 @@ export function useBoxWindowFrame(options: {
     try {
       await options.currentWindow.setPosition(new PhysicalPosition(x, y));
       if (shouldPersist) {
-        await persistWindowPositionFromPhysical(x, y);
+        await persistWindowPositionFromPhysical(x, persistPhysicalY ?? y);
       }
     } finally {
       window.setTimeout(() => {

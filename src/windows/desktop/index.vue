@@ -44,6 +44,7 @@ let readEditingTitle = (): boolean => false;
 let readBoxCollapsedToTitle = (): boolean => false;
 let readCollapseWindowSizeApplying = (): boolean => false;
 let closeActiveContextMenu = (): void => undefined;
+let clearExpandHoverTimerHandler = (): void => undefined;
 let openCollapsedPreviewForActiveInteractionHandler = (): void => undefined;
 let refreshCollapsedPreviewCloseScheduleHandler = (): void => undefined;
 
@@ -69,6 +70,7 @@ const {
   syncWindowBoundsFromStore,
 } = useBoxWindowFrame({
   box,
+  clearExpandHoverTimer: () => clearExpandHoverTimerHandler(),
   closeContextMenu: () => closeActiveContextMenu(),
   currentWindow: {
     clearWindowEffects: () => currentWindow.setEffects({ effects: [] }),
@@ -108,11 +110,13 @@ const {
   boxSurfaceStyle,
   boxTitleAreaStyle,
   clearCollapseWindowAnimation,
+  clearExpandHoverTimer,
+  expandAnchorHorizontal,
+  expandAnchorVertical,
   handleBoxMouseEnter,
   handleBoxMouseLeave,
   handleBoxTitleMouseEnter,
   handleBoxTitleMouseLeave,
-  iconAnchorOffset,
   isApplyingCollapseWindowSize,
   isBoxCollapsedToTitle,
   isBoxExpandingFromIcon,
@@ -164,6 +168,7 @@ const {
 
 readBoxCollapsedToTitle = () => isBoxCollapsedToTitle.value;
 readCollapseWindowSizeApplying = () => isApplyingCollapseWindowSize();
+clearExpandHoverTimerHandler = clearExpandHoverTimer;
 openCollapsedPreviewForActiveInteractionHandler = openCollapsedPreviewForActiveInteraction;
 refreshCollapsedPreviewCloseScheduleHandler = refreshCollapsedPreviewCloseSchedule;
 
@@ -251,6 +256,9 @@ async function broadcastHoverHandoffOnLeave(): Promise<void> {
 }
 
 function handleBoxMouseLeaveWithHandoff(): void {
+  if (isCollapseAnimating.value) {
+    return;
+  }
   handleBoxMouseLeave();
   void broadcastHoverHandoffOnLeave().catch(() => undefined);
 }
@@ -310,11 +318,12 @@ onMounted(() => {
 
 /**
  * 系统毛玻璃 / 模糊（DWM Acrylic 或 Blur）按设置应用或清除：开启后背景模糊由系统合成，
- * 前端 surface 呈现半透明磨砂质感；图标态（收缩为单个图标）时清除效果避免图标背后出现模糊方块
+ * 前端 surface 呈现半透明磨砂质感；图标态静止时清除效果避免图标背后出现模糊方块，
+ * 展开/收缩过渡期保留效果使面板缩放质感完整连贯
  */
 async function applyWindowEffectsFromSettings(): Promise<void> {
   try {
-    if (isBoxInIconState.value) {
+    if (isBoxInIconState.value && !isCollapseAnimating.value) {
       await currentWindow.setEffects({ effects: [] });
       return;
     }
@@ -336,6 +345,7 @@ watch(
     () => desktopStore.settings.boxAcrylicEnabled,
     () => desktopStore.settings.boxBlur,
     () => isBoxInIconState.value,
+    () => isCollapseAnimating.value,
   ],
   () => {
     void applyWindowEffectsFromSettings();
@@ -751,8 +761,12 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
 
 <template>
   <main
-    class="h-screen w-screen overflow-hidden bg-transparent p-0"
-    :class="box?.locked ? 'cursor-default' : ''"
+    class="h-screen w-screen overflow-hidden bg-transparent p-0 flex flex-col"
+    :class="[
+      box?.locked ? 'cursor-default' : '',
+      expandAnchorHorizontal === 'right' ? 'items-end' : 'items-start',
+      expandAnchorVertical === 'bottom' ? 'justify-end' : 'justify-start',
+    ]"
     @click="closeContextMenu"
   >
     <article
@@ -762,7 +776,7 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
       :class="{
         'dasktop-box-surface--dragging': isManualDraggingBox,
         'dasktop-box-surface--animating': isCollapseAnimating,
-        'dasktop-box-surface--icon-state': isBoxInIconState,
+        'dasktop-box-surface--icon-state': isBoxInIconState && !isCollapseAnimating,
       }"
       :style="boxSurfaceStyle"
       @mouseenter="handleBoxMouseEnter"
@@ -772,7 +786,7 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         图标态：图标模式收缩闲置的形态，整面只渲染一个图标入口。
         悬停/点击交给现有展开调度回到完整态，右键直接唤出 Box 菜单，
         按下即可拖动（原生拖动循环），与完整态标题栏的手感一致。
-        悬停展开时图标平滑淡出（fade-out），动画就绪后无缝接力完整内容淡入。
+        展开/收缩时锚定在屏幕边缘原位，面板朝工作区内部平滑伸展，图标保持不动。
       -->
       <button
         v-if="isBoxInIconState || isBoxExpandingFromIcon"
@@ -782,8 +796,10 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         :style="{
           width: `${BOX_ICON_STATE_SIZE}px`,
           height: `${BOX_ICON_STATE_SIZE}px`,
-          left: `${iconAnchorOffset.x}px`,
-          top: `${iconAnchorOffset.y}px`,
+          left: expandAnchorHorizontal === 'left' ? '0px' : undefined,
+          right: expandAnchorHorizontal === 'right' ? '0px' : undefined,
+          top: expandAnchorVertical === 'top' ? '0px' : undefined,
+          bottom: expandAnchorVertical === 'bottom' ? '0px' : undefined,
           '--dasktop-icon-fade-ms': `${desktopStore.settings.boxIconFadeInMs}ms`,
           '--dasktop-icon-fade-out-ms': `${desktopStore.settings.boxIconFadeOutMs}ms`,
         }"

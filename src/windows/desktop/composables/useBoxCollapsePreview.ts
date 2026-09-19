@@ -69,7 +69,8 @@ export function useBoxCollapsePreview(options: {
   const isCollapseContentFaded = ref(false);
   const boxSurfaceVisualHeight = ref<number | null>(null);
   const boxSurfaceVisualWidth = ref<number | null>(null);
-  const iconAnchorOffset = ref<{ x: number; y: number }>({ x: 0, y: 0 });
+  const expandAnchorHorizontal = ref<"left" | "right">("left");
+  const expandAnchorVertical = ref<"top" | "bottom">("top");
   const isBoxCollapsedToTitle = computed(() =>
     Boolean(options.box.value?.collapsed && !isCollapsedPreviewOpen.value),
   );
@@ -435,8 +436,8 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 智能计算收缩与展开的几何框架：收缩时回归基准锚点，展开时按当前显示器边缘自动向内展开，
-   * 确保贴近屏幕边缘时不越界，并记录图标态的相对锚点偏移避免图标位移
+   * 智能计算收缩与展开的几何框架：收缩时回归基准锚点，展开时按当前显示器边缘自动确定朝向，
+   * 贴靠右/底边缘时自动向左/向上伸展，确保原位图标绝对不动且面板不越界
    */
   async function resolveCollapseWindowFrame(width: number, height: number): Promise<LogicalWindowFrame> {
     if (!options.box.value) {
@@ -452,13 +453,27 @@ export function useBoxCollapsePreview(options: {
     const isExpanding = !isBoxCollapsedToTitle.value;
     const isIconMode = options.getBoxCollapseMode() === "icon";
 
-    // 收缩时统一以配置的 (box.x, box.y) 为目标归位
+    // 收缩时统一归位到基准锚点
     if (!isExpanding) {
+      if (isIconMode) {
+        return {
+          height,
+          width,
+          x: currentBox.x,
+          y: currentBox.y,
+        };
+      }
+
+      const targetY =
+        currentBox.titlePosition === "bottom"
+          ? currentBox.y + currentBox.height - BOX_TITLE_VISIBILITY.expandedHeight
+          : currentBox.y;
+
       return {
         height,
         width,
         x: currentBox.x,
-        y: currentBox.y,
+        y: targetY,
       };
     }
 
@@ -475,44 +490,49 @@ export function useBoxCollapsePreview(options: {
         let targetY = currentBox.y;
         const collapsedSize = isIconMode ? BOX_ICON_STATE_SIZE : BOX_TITLE_VISIBILITY.expandedHeight;
 
-        // 右边缘检测：向右展开若超出屏幕右侧，则向左伸展，右侧对齐图标/面板
-        if (currentBox.x + width > workRight - 4) {
-          targetX = Math.max(workLeft + 4, currentBox.x + (isIconMode ? collapsedSize : currentBox.width) - width);
-        } else if (currentBox.x < workLeft + 4) {
-          targetX = workLeft + 4;
-        }
-
-        // 下边缘检测：向下展开若超出屏幕底部，则向上伸展，下侧对齐图标/面板
-        if (currentBox.y + height > workBottom - 4) {
-          targetY = Math.max(workTop + 4, currentBox.y + collapsedSize - height);
-        } else if (currentBox.y < workTop + 4) {
-          targetY = workTop + 4;
-        }
-
-        const roundedX = Math.round(targetX);
-        const roundedY = Math.round(targetY);
-
         if (isIconMode) {
-          iconAnchorOffset.value = {
-            x: Math.max(0, currentBox.x - roundedX),
-            y: Math.max(0, currentBox.y - roundedY),
-          };
+          // 右边缘检测：向右展开若超出屏幕右侧，则向左伸展，右侧对齐图标
+          if (currentBox.x + width > workRight - 4) {
+            expandAnchorHorizontal.value = "right";
+            targetX = Math.max(workLeft + 4, currentBox.x + collapsedSize - width);
+          } else {
+            expandAnchorHorizontal.value = "left";
+            targetX = Math.max(workLeft + 4, currentBox.x);
+          }
+
+          // 下边缘检测：向下展开若超出屏幕底部，则向上伸展，下侧对齐图标
+          if (currentBox.y + height > workBottom - 4) {
+            expandAnchorVertical.value = "bottom";
+            targetY = Math.max(workTop + 4, currentBox.y + collapsedSize - height);
+          } else {
+            expandAnchorVertical.value = "top";
+            targetY = Math.max(workTop + 4, currentBox.y);
+          }
         } else {
-          iconAnchorOffset.value = { x: 0, y: 0 };
+          // 窗口模式
+          expandAnchorHorizontal.value = "left";
+          if (currentBox.titlePosition === "bottom") {
+            expandAnchorVertical.value = "bottom";
+            targetY = Math.max(workTop + 4, currentBox.y);
+          } else {
+            expandAnchorVertical.value = "top";
+            targetY = Math.max(workTop + 4, currentBox.y);
+          }
         }
 
         return {
           height,
           width,
-          x: roundedX,
-          y: roundedY,
+          x: Math.round(targetX),
+          y: Math.round(targetY),
         };
       }
     } catch {
       // 容错回退
     }
 
-    iconAnchorOffset.value = { x: 0, y: 0 };
+    expandAnchorHorizontal.value = "left";
+    expandAnchorVertical.value = "top";
     return {
       height,
       width,
@@ -549,9 +569,6 @@ export function useBoxCollapsePreview(options: {
       isCollapseAnimating.value = false;
       // 窗口就位后再淡入内容，淡出与淡入夹住缩放段，视觉上只看到面板平滑变形
       isCollapseContentFaded.value = false;
-      if (isBoxCollapsedToTitle.value) {
-        iconAnchorOffset.value = { x: 0, y: 0 };
-      }
     });
   }
 
@@ -632,6 +649,7 @@ export function useBoxCollapsePreview(options: {
    */
   function openCollapsedPreviewForActiveInteraction(): void {
     clearCollapsedPreviewCloseTimer();
+    clearExpandHoverTimer();
     if (options.box.value?.collapsed) {
       isCollapsedPreviewOpen.value = true;
     }
@@ -656,10 +674,12 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 判断是否存在需要保持 Box 展开的交互，避免菜单、缩放、拖动过程中被 mouseleave 抢先收起
+   * 判断是否存在需要保持 Box 展开的交互，避免菜单、缩放、拖动过程中被 mouseleave 抢先收起；
+   * 动画进行中必须绝对保持展开，禁止逆向收起抢跑导致无限闪烁抖动
    */
   function shouldKeepCollapsedPreviewOpen(): boolean {
     return (
+      isCollapseAnimating.value ||
       isBoxHovered.value ||
       isDragHoveringBox.value ||
       isTitleHovered.value ||
@@ -731,9 +751,14 @@ export function useBoxCollapsePreview(options: {
 
   /**
    * Box 区域 hover 进入时取消延迟收起；图标态下按设置延迟展开（防误触），
-   * 其余形态保持立即展开的既有手感
+   * 其余形态保持立即展开的既有手感；动画期间只标记 hover 不重启定时器
    */
   function handleBoxMouseEnter(): void {
+    if (isCollapseAnimating.value) {
+      isBoxHovered.value = true;
+      return;
+    }
+
     isBoxHovered.value = true;
     if (isBoxInIconState.value && options.getBoxExpandHoverDelayMs() > 0) {
       clearExpandHoverTimer();
@@ -776,6 +801,10 @@ export function useBoxCollapsePreview(options: {
   }
 
   function handleBoxMouseLeave(): void {
+    if (isCollapseAnimating.value) {
+      return;
+    }
+
     isBoxHovered.value = false;
     isTitleHovered.value = false;
     clearExpandHoverTimer();
@@ -791,11 +820,13 @@ export function useBoxCollapsePreview(options: {
     boxSurfaceStyle,
     boxTitleAreaStyle,
     clearCollapseWindowAnimation,
+    clearExpandHoverTimer,
+    expandAnchorHorizontal,
+    expandAnchorVertical,
     handleBoxMouseEnter,
     handleBoxMouseLeave,
     handleBoxTitleMouseEnter,
     handleBoxTitleMouseLeave,
-    iconAnchorOffset,
     isApplyingCollapseWindowSize: () => isApplyingCollapseWindowSize,
     isBoxCollapsedToTitle,
     isBoxExpandingFromIcon,
