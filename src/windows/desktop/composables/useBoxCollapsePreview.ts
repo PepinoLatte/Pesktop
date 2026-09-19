@@ -1,6 +1,7 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 import type { CSSProperties } from "vue";
 import { animate } from "motion";
+import { currentMonitor, primaryMonitor } from "@tauri-apps/api/window";
 import type { BoxCollapseMode, DesktopBox } from "@/entities/desktopBox/types";
 import {
   BOX_COLLAPSE_INTERACTION,
@@ -68,6 +69,7 @@ export function useBoxCollapsePreview(options: {
   const isCollapseContentFaded = ref(false);
   const boxSurfaceVisualHeight = ref<number | null>(null);
   const boxSurfaceVisualWidth = ref<number | null>(null);
+  const iconAnchorOffset = ref<{ x: number; y: number }>({ x: 0, y: 0 });
   const isBoxCollapsedToTitle = computed(() =>
     Boolean(options.box.value?.collapsed && !isCollapsedPreviewOpen.value),
   );
@@ -124,7 +126,7 @@ export function useBoxCollapsePreview(options: {
   const boxSurfaceStyle = computed(
     () =>
       ({
-        "--dasktop-box-background-opacity": `${Math.min(options.getBoxBackgroundOpacity() / 100, 0.85)}`,
+        "--dasktop-box-background-opacity": `${Math.max(0, Math.min(1, options.getBoxBackgroundOpacity() / 100))}`,
         "--dasktop-box-blur": `${options.getBoxBlur()}px`,
         "--dasktop-box-radius": `${options.getBoxCornerRadius()}px`,
         borderRadius: "var(--dasktop-box-radius)",
@@ -237,7 +239,7 @@ export function useBoxCollapsePreview(options: {
     const targetWidth = isBoxCollapsedToTitle.value
       ? collapsedWindowWidth.value
       : options.box.value.width;
-    const targetFrame = resolveCollapseWindowFrame(targetWidth, targetHeight);
+    const targetFrame = await resolveCollapseWindowFrame(targetWidth, targetHeight);
     const animationMs = shouldAnimate ? options.getBoxCollapseAnimationMs() : 0;
     const canAnimate = shouldAnimate && !shouldReduceMotion();
 
@@ -433,9 +435,10 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * 收缩态统一保留 Box 顶部标题入口，底部标题通过内部布局从下往上移动到这个入口
+   * 智能计算收缩与展开的几何框架：收缩时回归基准锚点，展开时按当前显示器边缘自动向内展开，
+   * 确保贴近屏幕边缘时不越界，并记录图标态的相对锚点偏移避免图标位移
    */
-  function resolveCollapseWindowFrame(width: number, height: number): LogicalWindowFrame {
+  async function resolveCollapseWindowFrame(width: number, height: number): Promise<LogicalWindowFrame> {
     if (!options.box.value) {
       return {
         height,
@@ -445,11 +448,76 @@ export function useBoxCollapsePreview(options: {
       };
     }
 
+    const currentBox = options.box.value;
+    const isExpanding = !isBoxCollapsedToTitle.value;
+    const isIconMode = options.getBoxCollapseMode() === "icon";
+
+    // 收缩时统一以配置的 (box.x, box.y) 为目标归位
+    if (!isExpanding) {
+      return {
+        height,
+        width,
+        x: currentBox.x,
+        y: currentBox.y,
+      };
+    }
+
+    try {
+      const monitor = (await currentMonitor()) ?? (await primaryMonitor());
+      if (monitor) {
+        const scale = monitor.scaleFactor;
+        const workLeft = monitor.workArea.position.x / scale;
+        const workTop = monitor.workArea.position.y / scale;
+        const workRight = workLeft + monitor.workArea.size.width / scale;
+        const workBottom = workTop + monitor.workArea.size.height / scale;
+
+        let targetX = currentBox.x;
+        let targetY = currentBox.y;
+        const collapsedSize = isIconMode ? BOX_ICON_STATE_SIZE : BOX_TITLE_VISIBILITY.expandedHeight;
+
+        // 右边缘检测：向右展开若超出屏幕右侧，则向左伸展，右侧对齐图标/面板
+        if (currentBox.x + width > workRight - 4) {
+          targetX = Math.max(workLeft + 4, currentBox.x + (isIconMode ? collapsedSize : currentBox.width) - width);
+        } else if (currentBox.x < workLeft + 4) {
+          targetX = workLeft + 4;
+        }
+
+        // 下边缘检测：向下展开若超出屏幕底部，则向上伸展，下侧对齐图标/面板
+        if (currentBox.y + height > workBottom - 4) {
+          targetY = Math.max(workTop + 4, currentBox.y + collapsedSize - height);
+        } else if (currentBox.y < workTop + 4) {
+          targetY = workTop + 4;
+        }
+
+        const roundedX = Math.round(targetX);
+        const roundedY = Math.round(targetY);
+
+        if (isIconMode) {
+          iconAnchorOffset.value = {
+            x: Math.max(0, currentBox.x - roundedX),
+            y: Math.max(0, currentBox.y - roundedY),
+          };
+        } else {
+          iconAnchorOffset.value = { x: 0, y: 0 };
+        }
+
+        return {
+          height,
+          width,
+          x: roundedX,
+          y: roundedY,
+        };
+      }
+    } catch {
+      // 容错回退
+    }
+
+    iconAnchorOffset.value = { x: 0, y: 0 };
     return {
       height,
       width,
-      x: options.box.value.x,
-      y: options.box.value.y,
+      x: currentBox.x,
+      y: currentBox.y,
     };
   }
 
@@ -481,6 +549,9 @@ export function useBoxCollapsePreview(options: {
       isCollapseAnimating.value = false;
       // 窗口就位后再淡入内容，淡出与淡入夹住缩放段，视觉上只看到面板平滑变形
       isCollapseContentFaded.value = false;
+      if (isBoxCollapsedToTitle.value) {
+        iconAnchorOffset.value = { x: 0, y: 0 };
+      }
     });
   }
 
@@ -724,6 +795,7 @@ export function useBoxCollapsePreview(options: {
     handleBoxMouseLeave,
     handleBoxTitleMouseEnter,
     handleBoxTitleMouseLeave,
+    iconAnchorOffset,
     isApplyingCollapseWindowSize: () => isApplyingCollapseWindowSize,
     isBoxCollapsedToTitle,
     isBoxExpandingFromIcon,

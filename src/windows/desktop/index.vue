@@ -112,6 +112,7 @@ const {
   handleBoxMouseLeave,
   handleBoxTitleMouseEnter,
   handleBoxTitleMouseLeave,
+  iconAnchorOffset,
   isApplyingCollapseWindowSize,
   isBoxCollapsedToTitle,
   isBoxExpandingFromIcon,
@@ -776,9 +777,13 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
       <button
         v-if="isBoxInIconState || isBoxExpandingFromIcon"
         aria-label="展开 Box"
-        class="dasktop-icon-state-button grid h-full w-full place-items-center"
+        class="dasktop-icon-state-button absolute z-10 grid place-items-center"
         :class="{ 'dasktop-icon-state-button--fading': isBoxExpandingFromIcon }"
         :style="{
+          width: `${BOX_ICON_STATE_SIZE}px`,
+          height: `${BOX_ICON_STATE_SIZE}px`,
+          left: `${iconAnchorOffset.x}px`,
+          top: `${iconAnchorOffset.y}px`,
           '--dasktop-icon-fade-ms': `${desktopStore.settings.boxIconFadeInMs}ms`,
           '--dasktop-icon-fade-out-ms': `${desktopStore.settings.boxIconFadeOutMs}ms`,
         }"

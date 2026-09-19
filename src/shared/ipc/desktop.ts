@@ -18,6 +18,17 @@ export const BOX_WINDOW_READY_EVENT = "dasktop-box-window-ready";
 export const BOX_HOVER_HANDOFF_EVENT = "dasktop-box-hover-handoff";
 
 /**
+ * 设置项实时变更广播：滑块拖动时跨窗口 0ms 直播，不需要等待数据库落库和全局重新载入
+ */
+export const SETTING_LIVE_CHANGED_EVENT = "dasktop-setting-live-changed";
+
+export interface SettingLiveChangedPayload {
+  sourceId: string;
+  key: string;
+  value: unknown;
+}
+
+/**
  * 过界切换事件只携带来源与目标 Box 标识，位置校验由目标窗口用自身 DPI 自行完成
  */
 export interface BoxHoverHandoffPayload {
@@ -100,6 +111,22 @@ export async function listenDesktopStateChanged(
   handler: (event: Event<DesktopStateChangedPayload>) => void | Promise<void>,
 ): Promise<UnlistenFn> {
   return listen<DesktopStateChangedPayload>(DESKTOP_STATE_CHANGED_EVENT, handler);
+}
+
+/**
+ * 0ms 广播单个设置项实时变更，驱动所有 Box 窗口实时重排/重绘
+ */
+export async function notifySettingLiveChanged(payload: SettingLiveChangedPayload): Promise<void> {
+  await emit(SETTING_LIVE_CHANGED_EVENT, payload);
+}
+
+/**
+ * 监听其他窗口的设置项实时变更事件
+ */
+export async function listenSettingLiveChanged(
+  handler: (event: Event<SettingLiveChangedPayload>) => void | Promise<void>,
+): Promise<UnlistenFn> {
+  return listen<SettingLiveChangedPayload>(SETTING_LIVE_CHANGED_EVENT, handler);
 }
 
 /**

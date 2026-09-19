@@ -33,7 +33,9 @@ import {
 } from "@/entities/desktopBox/layout";
 import {
   listenDesktopStateChanged,
+  listenSettingLiveChanged,
   notifyDesktopStateChanged,
+  notifySettingLiveChanged,
   requestDesktopStartupSnapshot,
   type DesktopStartupSnapshot,
   type DesktopStateChangeScope,
@@ -226,6 +228,17 @@ export const useDesktopStore = defineStore("desktop", () => {
     }
 
     stateListenerRegistered = true;
+    void listenSettingLiveChanged(({ payload }) => {
+      if (payload.sourceId === storeInstanceId || !isInitialized.value) {
+        return;
+      }
+      if (payload.key in settings.value) {
+        settings.value = {
+          ...settings.value,
+          [payload.key]: payload.value,
+        };
+      }
+    }).catch(() => undefined);
     void listenDesktopStateChanged(async ({ payload }) => {
       if (payload.sourceId === storeInstanceId || !isInitialized.value) {
         return;
@@ -563,6 +576,11 @@ export const useDesktopStore = defineStore("desktop", () => {
       ...settings.value,
       [key]: nextValue,
     };
+    void notifySettingLiveChanged({
+      sourceId: storeInstanceId,
+      key,
+      value: nextValue,
+    }).catch(() => undefined);
     debouncedSaveSetting(APP_SETTING_KEYS[key], nextValue, "settings", 120);
   }
 

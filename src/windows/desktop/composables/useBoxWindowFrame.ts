@@ -908,7 +908,21 @@ export function useBoxWindowFrame(options: {
       return;
     }
 
-    const finalPosition = await options.currentWindow.outerPosition();
+    const [finalPosition, monitor] = await Promise.all([
+      options.currentWindow.outerPosition(),
+      currentMonitor(),
+    ]);
+    const activeMonitor = monitor ?? (await primaryMonitor());
+    if (activeMonitor) {
+      dragState.workArea = {
+        height: activeMonitor.workArea.size.height,
+        width: activeMonitor.workArea.size.width,
+        x: activeMonitor.workArea.position.x,
+        y: activeMonitor.workArea.position.y,
+      };
+      dragState.scaleFactor = activeMonitor.scaleFactor;
+    }
+
     const snappedPosition = resolveManualDragPosition(finalPosition, dragState);
     await applyWindowPhysicalPosition(snappedPosition.x, snappedPosition.y);
   }
@@ -940,7 +954,10 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 拖动吸附实时参考其他 Box 的相邻边和屏幕工作区边缘，不做延迟二次定位
+   * 拖动吸附与移出屏幕自动回滚：
+   * 1. 实时参考其他 Box 的相邻边做磁吸
+   * 2. 当靠近屏幕工作区边缘时在阈值内自动贴边吸附
+   * 3. 当窗口被拖出屏幕边缘外时，松手自动回滚吸附到屏幕工作区边缘内，防止窗口移出丢失
    */
   function resolveManualDragPosition(
     rawPosition: PhysicalWindowPoint,
@@ -976,13 +993,17 @@ export function useBoxWindowFrame(options: {
           nextY = otherY - dragState.height;
         }
       }
+    }
 
-      if (dragState.workArea) {
-        const workX = dragState.workArea.x;
-        const workY = dragState.workArea.y;
-        const workRight = workX + dragState.workArea.width;
-        const workBottom = workY + dragState.workArea.height;
+    if (dragState.workArea) {
+      const workX = dragState.workArea.x;
+      const workY = dragState.workArea.y;
+      const workRight = workX + dragState.workArea.width;
+      const workBottom = workY + dragState.workArea.height;
+      const maxX = Math.max(workX, workRight - dragState.width);
+      const maxY = Math.max(workY, workBottom - dragState.height);
 
+      if (options.getSnapToEdges()) {
         if (Math.abs(nextX - workX) < threshold) {
           nextX = workX;
         }
@@ -995,6 +1016,19 @@ export function useBoxWindowFrame(options: {
         if (Math.abs(nextY + dragState.height - workBottom) < threshold) {
           nextY = workBottom - dragState.height;
         }
+      }
+
+      // 移出屏幕边缘外的自动回滚吸附：当窗口任一边被拖拽越过屏幕工作区时，自动平滑弹回吸附在屏幕边缘内
+      if (nextX < workX) {
+        nextX = workX;
+      } else if (nextX > maxX) {
+        nextX = maxX;
+      }
+
+      if (nextY < workY) {
+        nextY = workY;
+      } else if (nextY > maxY) {
+        nextY = maxY;
       }
     }
 

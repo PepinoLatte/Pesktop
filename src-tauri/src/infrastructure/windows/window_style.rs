@@ -1,20 +1,99 @@
 //! 窗口扩展样式辅助：把 Box 窗口标记为工具窗口（WS_EX_TOOLWINDOW），
-//! 使其不出现在 Alt+Tab 列表中；通过窗口子类化拦截系统最小化与隐藏消息，
+//! 使其不出现在 Alt+Tab 列表中；通过 WS_POPUP 样式、窗口子类化与 Shell 事件监听，
 //! 确保在 Win+D（显示桌面）时常驻桌面，且不被推入底层或移出屏幕。
 
+use std::sync::{Mutex, OnceLock};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
+use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, IsIconic, IsWindowVisible, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    GWL_EXSTYLE, GWL_STYLE, SC_MINIMIZE, SWP_FRAMECHANGED, SWP_HIDEWINDOW, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_RESTORE, SW_SHOWNOACTIVATE,
-    WINDOWPOS, WM_SHOWWINDOW, WM_SIZE, WM_SYSCOMMAND, WM_WINDOWPOSCHANGED,
-    WM_WINDOWPOSCHANGING, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+    DispatchMessageW, GetClassNameW, GetMessageW, GetWindowLongPtrW, PostMessageW,
+    SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, EVENT_SYSTEM_FOREGROUND,
+    GWL_EXSTYLE, GWL_STYLE, HWND_TOP, MSG, SC_MINIMIZE, SWP_FRAMECHANGED, SWP_HIDEWINDOW,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_RESTORE,
+    SW_SHOWNOACTIVATE, WINEVENT_OUTOFCONTEXT, WINDOWPOS, WM_APP, WM_NCDESTROY, WM_SHOWWINDOW,
+    WM_SIZE, WM_SYSCOMMAND, WM_WINDOWPOSCHANGING, WS_CAPTION, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX,
+    WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
 };
 
 const BOX_WINDOW_SUBCLASS_ID: usize = 0xD45B;
+const WM_APP_RESTORE_BOX: u32 = WM_APP + 0xD45B;
 
-/// 子类化回调：全方位拦截 Win+D 等系统级最小化与隐藏命令，确保 Box 常驻桌面
+/// 全局记录所有激活的 Box 窗口 HWND，用于在系统触发显示桌面时统一将其提升至桌面之上
+static ACTIVE_BOX_HWNDS: Mutex<Vec<isize>> = Mutex::new(Vec::new());
+static HOOK_INITIALIZED: OnceLock<()> = OnceLock::new();
+
+/// 向所有登记的 Box 窗口投递恢复消息，保持常驻桌面
+fn restore_all_box_windows() {
+    let hwnds = {
+        let Ok(guard) = ACTIVE_BOX_HWNDS.lock() else {
+            return;
+        };
+        guard.clone()
+    };
+
+    for hwnd_value in hwnds {
+        unsafe {
+            let _ = PostMessageW(
+                Some(HWND(hwnd_value as *mut _)),
+                WM_APP_RESTORE_BOX,
+                WPARAM(0),
+                LPARAM(0),
+            );
+        }
+    }
+}
+
+/// 注册全局系统前台窗口变化钩子：当 WorkerW 或 Progman 变为前台（用户触发 Win+D 或点击桌面）时，
+/// 立即将所有 Box 窗口唤回并维持在桌面层上方。
+fn ensure_win_event_hook_started() {
+    HOOK_INITIALIZED.get_or_init(|| {
+        std::thread::Builder::new()
+            .name("dasktop-shell-hook".into())
+            .spawn(|| unsafe {
+                let _hook = SetWinEventHook(
+                    EVENT_SYSTEM_FOREGROUND,
+                    EVENT_SYSTEM_FOREGROUND,
+                    None,
+                    Some(shell_win_event_proc),
+                    0,
+                    0,
+                    WINEVENT_OUTOFCONTEXT,
+                );
+
+                let mut msg = MSG::default();
+                while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            })
+            .ok();
+    });
+}
+
+/// WinEvent 回调：检测桌面 Shell 窗口激活
+unsafe extern "system" fn shell_win_event_proc(
+    _hook: HWINEVENTHOOK,
+    event: u32,
+    hwnd: HWND,
+    _id_object: i32,
+    _id_child: i32,
+    _event_thread: u32,
+    _event_time: u32,
+) {
+    if event == EVENT_SYSTEM_FOREGROUND {
+        let mut class_name = [0u16; 64];
+        let len = GetClassNameW(hwnd, &mut class_name);
+        if len > 0 {
+            let name = String::from_utf16_lossy(&class_name[..len as usize]);
+            if name == "WorkerW" || name == "Progman" {
+                restore_all_box_windows();
+            }
+        }
+    }
+}
+
+/// 子类化回调：拦截 Win+D 等系统级最小化与隐藏，响应异步恢复消息
 unsafe extern "system" fn box_window_subclass_proc(
     hwnd: HWND,
     msg: u32,
@@ -24,6 +103,20 @@ unsafe extern "system" fn box_window_subclass_proc(
     _refdata: usize,
 ) -> LRESULT {
     match msg {
+        WM_APP_RESTORE_BOX => {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOP),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            );
+            return LRESULT(0);
+        }
         WM_SYSCOMMAND => {
             // 阻止系统级或快捷键触发的最小化命令 (SC_MINIMIZE)
             if (wparam.0 & 0xFFF0) == SC_MINIMIZE as usize {
@@ -31,48 +124,39 @@ unsafe extern "system" fn box_window_subclass_proc(
             }
         }
         WM_SHOWWINDOW => {
-            // 当外部（如 Win+D ToggleDesktop）试图隐藏窗口时，wparam.0 为 FALSE (0)
-            // 直接拦截并返回 0，阻止系统默认隐藏
+            // 当外部（如 Win+D ToggleDesktop）试图隐藏窗口时，排队异步恢复
             if wparam.0 == 0 {
+                let _ = PostMessageW(Some(hwnd), WM_APP_RESTORE_BOX, WPARAM(0), LPARAM(0));
                 return LRESULT(0);
             }
         }
         WM_SIZE => {
             // 阻止系统将窗口尺寸置为最小化 (SIZE_MINIMIZED = 1)
             if wparam.0 == 1 {
-                let _ = ShowWindow(hwnd, SW_RESTORE);
-                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                let _ = PostMessageW(Some(hwnd), WM_APP_RESTORE_BOX, WPARAM(0), LPARAM(0));
                 return LRESULT(0);
             }
         }
         WM_WINDOWPOSCHANGING => {
             if lparam.0 != 0 {
                 let pos = &mut *(lparam.0 as *mut WINDOWPOS);
-                let mut modified = false;
                 // 当 Win+D 触发时，系统会尝试将窗口移至屏幕外坐标（-32000, -32000）或标记 SWP_HIDEWINDOW
                 if pos.x <= -30000 || pos.y <= -30000 {
                     pos.flags |= SWP_NOMOVE | SWP_NOSIZE;
                     pos.flags &= !SWP_HIDEWINDOW;
-                    modified = true;
                 }
                 if (pos.flags & SWP_HIDEWINDOW).0 != 0 {
                     pos.flags &= !SWP_HIDEWINDOW;
                     pos.flags |= SWP_SHOWWINDOW;
-                    modified = true;
-                }
-                if modified {
-                    return LRESULT(0);
                 }
             }
         }
-        WM_WINDOWPOSCHANGED => {
-            // 在 Win32 中，最小化窗口 IsIconic 为 TRUE，但 IsWindowVisible 仍可能为 TRUE
-            // 同时检查 IsIconic 与 !IsWindowVisible，彻底保持桌面常驻显示
-            if IsIconic(hwnd).as_bool() || !IsWindowVisible(hwnd).as_bool() {
-                let _ = ShowWindow(hwnd, SW_RESTORE);
-                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                return LRESULT(0);
+        WM_NCDESTROY => {
+            let hwnd_val = hwnd.0 as isize;
+            if let Ok(mut list) = ACTIVE_BOX_HWNDS.lock() {
+                list.retain(|&x| x != hwnd_val);
             }
+            let _ = RemoveWindowSubclass(hwnd, Some(box_window_subclass_proc), BOX_WINDOW_SUBCLASS_ID);
         }
         _ => {}
     }
@@ -80,8 +164,8 @@ unsafe extern "system" fn box_window_subclass_proc(
     DefSubclassProc(hwnd, msg, wparam, lparam)
 }
 
-/// 为指定句柄的窗口追加 WS_EX_TOOLWINDOW 扩展样式并移除 WS_MINIMIZEBOX，
-/// 并挂载子类化拦截器保持桌面常驻。
+/// 为指定句柄的窗口追加 WS_EX_TOOLWINDOW 与 WS_POPUP 样式，
+/// 移除 WS_MINIMIZEBOX / WS_CAPTION，并挂载子类化与 Shell 事件监听保持桌面常驻。
 pub(crate) fn set_toolwindow_ex_style(hwnd_value: isize) -> Result<(), String> {
     let hwnd = HWND(hwnd_value as *mut _);
     unsafe {
@@ -89,16 +173,27 @@ pub(crate) fn set_toolwindow_ex_style(hwnd_value: isize) -> Result<(), String> {
         let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TOOLWINDOW.0 as isize);
 
-        // 2. 剥除 WS_MINIMIZEBOX 和 WS_MAXIMIZEBOX，让 Windows Shell ToggleDesktop (Win+D)
-        // 认定该窗口为不可最小化的常驻桌面组件
+        // 2. 将窗口样式标记为 WS_POPUP 并剥除标题栏与最小化框；
+        // Windows Shell ToggleDesktop (Win+D) 仅枚举最小化重叠窗口（WS_OVERLAPPED），
+        // 标记为 WS_POPUP | WS_EX_TOOLWINDOW 后系统将其视作桌面挂件而非普通应用窗口。
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-        SetWindowLongPtrW(
-            hwnd,
-            GWL_STYLE,
-            style & !(WS_MINIMIZEBOX.0 as isize | WS_MAXIMIZEBOX.0 as isize),
-        );
+        let new_style = (style
+            & !(WS_CAPTION.0 as isize
+                | WS_MINIMIZEBOX.0 as isize
+                | WS_MAXIMIZEBOX.0 as isize
+                | WS_SYSMENU.0 as isize))
+            | WS_POPUP.0 as isize;
+        SetWindowLongPtrW(hwnd, GWL_STYLE, new_style);
 
-        // 3. 挂载窗口子类化过程，拦截 Win+D 造成的隐藏、最小化和移出视口
+        // 3. 记录 HWND 并确保 Shell WinEvent 监听已启动
+        if let Ok(mut list) = ACTIVE_BOX_HWNDS.lock() {
+            if !list.contains(&hwnd_value) {
+                list.push(hwnd_value);
+            }
+        }
+        ensure_win_event_hook_started();
+
+        // 4. 挂载窗口子类化过程，拦截 Win+D 造成的隐藏、最小化和移出视口
         let _ = SetWindowSubclass(
             hwnd,
             Some(box_window_subclass_proc),
@@ -106,7 +201,7 @@ pub(crate) fn set_toolwindow_ex_style(hwnd_value: isize) -> Result<(), String> {
             0,
         );
 
-        // 4. 刷新窗口框架样式
+        // 5. 刷新窗口框架样式
         let _ = SetWindowPos(
             hwnd,
             None,
