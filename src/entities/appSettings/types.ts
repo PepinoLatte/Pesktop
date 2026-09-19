@@ -119,6 +119,11 @@ export interface AppSettings {
    */
   boxIconFadeInMs: number;
   /**
+   * 是否启用系统级窗口模糊（DWM Acrylic）：开启后模糊由系统合成，
+   * Box 背景只保留色调层，透明度滑杆继续用于调节虚化程度
+   */
+  boxAcrylicEnabled: boolean;
+  /**
    * Box 图标列之间的横向间距，控制整理面板的信息密度
    */
   boxIconGapX: number;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ComponentPublicInstance, CSSProperties } from "vue";
-import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
+import { cursorPosition, Effect, getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen } from "@tauri-apps/api/event";
 import { Folder } from "@lucide/vue";
 import BoxFileGrid from "@/windows/desktop/components/BoxFileGrid.vue";
@@ -69,8 +69,20 @@ const {
 } = useBoxWindowFrame({
   box,
   closeContextMenu: () => closeActiveContextMenu(),
-  currentWindow,
+  currentWindow: {
+    clearWindowEffects: () => currentWindow.setEffects({ effects: [] }),
+    outerPosition: () => currentWindow.outerPosition(),
+    outerSize: () => currentWindow.outerSize(),
+    scaleFactor: () => currentWindow.scaleFactor(),
+    setEffects: (effects) =>
+      currentWindow.setEffects({ effects: effects.effects as Effect[] }),
+    setPosition: (position) => currentWindow.setPosition(position),
+    setResizable: (resizable) => currentWindow.setResizable(resizable),
+    setSize: (size) => currentWindow.setSize(size),
+    startDragging: () => currentWindow.startDragging(),
+  },
   getBoxes: () => desktopStore.boxes,
+  getBoxAcrylicEnabled: () => desktopStore.settings.boxAcrylicEnabled,
   getResizeGridSettings: () => desktopStore.settings,
   getSnapThreshold: () => desktopStore.settings.snapThreshold,
   getSnapToEdges: () => desktopStore.settings.snapToEdges,
@@ -274,6 +286,30 @@ onMounted(() => {
     })
     .catch(() => undefined);
 });
+
+/**
+ * 系统毛玻璃（DWM Acrylic）按设置应用或清除：开启后背景模糊由系统合成，
+ * 前端 surface 只保留色调层；拖动期间的效果暂停由窗口框架逻辑单独管理
+ */
+async function applyWindowEffectsFromSettings(): Promise<void> {
+  try {
+    if (desktopStore.settings.boxAcrylicEnabled) {
+      await currentWindow.setEffects({ effects: [Effect.Acrylic] });
+    } else {
+      await currentWindow.setEffects({ effects: [] });
+    }
+  } catch (error) {
+    setLastError(error instanceof Error ? error.message : String(error));
+  }
+}
+
+watch(
+  () => desktopStore.settings.boxAcrylicEnabled,
+  () => {
+    void applyWindowEffectsFromSettings();
+  },
+  { immediate: true },
+);
 const boxGridStyle = computed(
   () =>
     ({
@@ -691,10 +727,6 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
       v-if="box"
       ref="boxSurfaceRef"
       class="dasktop-box-surface relative flex h-full w-full flex-col overflow-hidden text-slate-950 dark:text-white"
-      :class="{
-        'dasktop-box-surface--dragging': isManualDraggingBox,
-        'dasktop-box-surface--animating': isCollapseAnimating,
-      }"
       :style="boxSurfaceStyle"
       @mouseenter="handleBoxMouseEnter"
       @mouseleave="handleBoxMouseLeaveWithHandoff"

@@ -103,12 +103,15 @@ const resizeHandles: Array<{
 const NATIVE_DRAG_RELEASE_PROBE_MS = 32;
 
 /**
- * 只声明当前桌面窗口用到的 Tauri 能力，降低组合式逻辑对具体窗口类的类型耦合
+ * 只声明当前桌面窗口用到的 Tauri 能力，降低组合式逻辑对具体窗口类的类型耦合；
+ * 窗口效果参数保持结构化透传，效果清单由调用方按设置组装
  */
 interface DesktopWindowHandle {
+  clearWindowEffects: () => Promise<void>;
   outerPosition: () => Promise<PhysicalWindowPoint>;
   outerSize: () => Promise<{ height: number; width: number }>;
   scaleFactor: () => Promise<number>;
+  setEffects: (effects: { effects: string[] }) => Promise<void>;
   setPosition: (position: LogicalPosition | PhysicalPosition) => Promise<void>;
   setResizable: (resizable: boolean) => Promise<void>;
   setSize: (size: LogicalSize) => Promise<void>;
@@ -130,6 +133,7 @@ export function useBoxWindowFrame(options: {
   closeContextMenu: () => void;
   currentWindow: DesktopWindowHandle;
   getBoxes: () => DesktopBox[];
+  getBoxAcrylicEnabled: () => boolean;
   getResizeGridSettings: () => AppSettings;
   getSnapThreshold: () => number;
   getSnapToEdges: () => boolean;
@@ -808,7 +812,32 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 手写拖动从全局鼠标坐标开始，避免 Tauri 原生拖动在松手时回写旧位置
+   * 系统毛玻璃在 Win10 的拖动场景存在合成滞后，原生拖动循环启动前临时清除效果，
+   * 松手恢复后由 DWM 重新应用，保证拖动全程跟手
+   */
+  async function suspendWindowEffects(): Promise<void> {
+    try {
+      await options.currentWindow.clearWindowEffects();
+    } catch (error) {
+      options.setLastError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function restoreWindowEffects(): Promise<void> {
+    if (!options.getBoxAcrylicEnabled()) {
+      return;
+    }
+
+    try {
+      await options.currentWindow.setEffects({ effects: ["acrylic"] });
+    } catch (error) {
+      options.setLastError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
+   * 原生拖动：窗口进入操作系统的模态移动循环，跟手度等同系统原生窗口；
+   * JS/IPC 不参与每一帧定位，彻底移除 mousemove→setPosition 的 IPC 管线
    */
   async function startNativeDragging(): Promise<void> {
     if (!options.box.value || nativeDragState) {
@@ -839,12 +868,14 @@ export function useBoxWindowFrame(options: {
     };
 
     bindNativeDragReleaseProbe();
+    await suspendWindowEffects();
 
     try {
       // 原生拖动：窗口进入操作系统的模态移动循环，跟手度等同系统原生窗口；
       // JS/IPC 不参与每一帧定位，彻底移除 mousemove→setPosition 的 IPC 管线
       await options.currentWindow.startDragging();
     } catch (error) {
+      await restoreWindowEffects();
       stopManualDragging(false).catch(() => undefined);
       options.setLastError(error instanceof Error ? error.message : String(error));
     }
@@ -881,7 +912,8 @@ export function useBoxWindowFrame(options: {
 
   /**
    * 结束拖动：shouldPersist 时取真实最终位置，过一遍吸附后由带锁 apply
-   * 一次性校正定位并写入数据库；顺带覆盖原生循环可能的旧位置回写
+   * 一次性校正定位并写入数据库；顺带覆盖原生循环可能的旧位置回写，
+   * 并恢复被拖动期暂停的系统毛玻璃
    */
   async function stopManualDragging(shouldPersist: boolean): Promise<void> {
     const dragState = nativeDragState;
@@ -893,6 +925,7 @@ export function useBoxWindowFrame(options: {
     isManualDraggingBox.value = false;
     clearNativeDragReleaseProbe();
     options.refreshCollapsedPreviewCloseSchedule();
+    await restoreWindowEffects();
     if (!shouldPersist) {
       return;
     }

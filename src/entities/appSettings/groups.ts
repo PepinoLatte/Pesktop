@@ -118,6 +118,11 @@ export const WINDOW_BEHAVIOR_SETTING_CONTROLS: Array<{
     label: "按网格调整大小",
     description: "拖拽窗口边缘时吸附到完整图标行列，减少半截空位",
   },
+  {
+    key: APP_SETTING_KEYS.boxAcrylicEnabled,
+    label: "系统毛玻璃",
+    description: "由系统合成背景模糊，关闭后 Box 背景只剩半透明色",
+  },
 ];
 
 /**
