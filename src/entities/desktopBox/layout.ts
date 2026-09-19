@@ -59,6 +59,12 @@ export const BOX_TITLE_VISIBILITY = {
 export const BOX_ICON_STATE_SIZE = 56;
 
 /**
+ * 窗口模式收起后标题栏的最大宽度：宽 Box 收起时不再保留整个 Box 宽度，
+ * 避免出现横贯桌面的宽标题条；窄 Box 保持自身宽度不变
+ */
+export const BOX_WINDOW_COLLAPSED_MAX_WIDTH = 240;
+
+/**
  * Box 图标网格使用 Tailwind p-2.5，对应 10px；resize 吸附和收缩动画都依赖这个内容留白
  */
 export const BOX_GRID_LAYOUT = {

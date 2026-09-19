@@ -7,6 +7,7 @@ import {
   BOX_COLLAPSE_INTERACTION,
   BOX_GRID_LAYOUT,
   BOX_ICON_STATE_SIZE,
+  BOX_WINDOW_COLLAPSED_MAX_WIDTH,
   BOX_TITLE_OPACITY,
   BOX_TITLE_VISIBILITY,
 } from "@/entities/desktopBox/layout";
@@ -98,11 +99,14 @@ export function useBoxCollapsePreview(options: {
       ? BOX_ICON_STATE_SIZE
       : BOX_TITLE_VISIBILITY.expandedHeight,
   );
-  const collapsedWindowWidth = computed(() =>
-    options.getBoxCollapseMode() === "icon"
-      ? BOX_ICON_STATE_SIZE
-      : options.box.value?.width ?? BOX_ICON_STATE_SIZE,
-  );
+  const collapsedWindowWidth = computed(() => {
+    if (options.getBoxCollapseMode() === "icon") {
+      return BOX_ICON_STATE_SIZE;
+    }
+
+    const boxWidth = options.box.value?.width ?? BOX_ICON_STATE_SIZE;
+    return Math.min(boxWidth, BOX_WINDOW_COLLAPSED_MAX_WIDTH);
+  });
   /**
    * 标题在下方时，内容区高度跟随可视高度变化，让标题自身从下往上收到顶部入口
    */
