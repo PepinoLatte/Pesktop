@@ -46,6 +46,7 @@ export function useBoxCollapsePreview(options: {
   getBoxIconFadeOutMs: () => number;
   getBoxIdleOpacityHideAnimationMs: () => number;
   getBoxIdleOpacityShowAnimationMs: () => number;
+  isBoxIconHoverExpandEnabled: () => boolean;
   isContextMenuOpen: () => boolean;
   isEditingTitle: () => boolean;
   isManualDraggingBox: () => boolean;
@@ -233,6 +234,10 @@ export function useBoxCollapsePreview(options: {
     cancelCollapseAnimationTween();
     collapseAnimationVersion += 1;
     const activeCollapseAnimationVersion = collapseAnimationVersion;
+    const isExpandingToFull = !isBoxCollapsedToTitle.value;
+    // 动画标记必须在任何 IPC await 之前同步置位：展开时内容区与图标淡出层都依赖它，
+    // 否则首帧渲染会先卸载图标入口再重挂载，产生图标闪现
+    isCollapseAnimating.value = true;
 
     const targetHeight = isBoxCollapsedToTitle.value
       ? collapsedWindowHeight.value
@@ -255,10 +260,10 @@ export function useBoxCollapsePreview(options: {
       return;
     }
 
-    // 动画期间先淡出标题和内容，只呈现面板缩放本身；完成后统一淡入，掩盖中途重排
-    isCollapseContentFaded.value = true;
+    // 收缩时先淡出标题和内容，只呈现面板缩放本身，掩盖网格重排；
+    // 展开时内容随面板伸展即时呈现，图标不必等动画播完才出现
+    isCollapseContentFaded.value = !isExpandingToFull;
     boxSurfaceVisualHeight.value = resolveOptimisticAnimationStartHeight();
-    isCollapseAnimating.value = true;
     const [currentWindowHeight, currentWindowWidth] = await Promise.all([
       options.resolveCurrentWindowHeight(),
       options.resolveCurrentWindowWidth(),
@@ -750,7 +755,8 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * Box 区域 hover 进入时取消延迟收起；图标态下按设置延迟展开（防误触），
+   * Box 区域 hover 进入时取消延迟收起；图标态下按设置决定悬停是否展开：
+   * 允许悬停展开时按延迟防误触，关闭悬停展开时只做高亮等待单击或拖动；
    * 其余形态保持立即展开的既有手感；动画期间只标记 hover 不重启定时器
    */
   function handleBoxMouseEnter(): void {
@@ -760,13 +766,19 @@ export function useBoxCollapsePreview(options: {
     }
 
     isBoxHovered.value = true;
-    if (isBoxInIconState.value && options.getBoxExpandHoverDelayMs() > 0) {
-      clearExpandHoverTimer();
-      expandHoverTimer = window.setTimeout(() => {
-        expandHoverTimer = null;
-        openCollapsedPreviewForActiveInteraction();
-      }, options.getBoxExpandHoverDelayMs());
-      return;
+    if (isBoxInIconState.value) {
+      if (!options.isBoxIconHoverExpandEnabled()) {
+        return;
+      }
+
+      if (options.getBoxExpandHoverDelayMs() > 0) {
+        clearExpandHoverTimer();
+        expandHoverTimer = window.setTimeout(() => {
+          expandHoverTimer = null;
+          openCollapsedPreviewForActiveInteraction();
+        }, options.getBoxExpandHoverDelayMs());
+        return;
+      }
     }
 
     openCollapsedPreviewForActiveInteraction();

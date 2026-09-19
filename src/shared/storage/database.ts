@@ -526,6 +526,7 @@ function sanitizeSettingValue<Key extends keyof AppSettings>(
     key === APP_SETTING_KEYS.snapToEdges ||
     key === APP_SETTING_KEYS.boxResizeGridEnabled ||
     key === APP_SETTING_KEYS.boxAcrylicEnabled ||
+    key === APP_SETTING_KEYS.boxIconHoverExpandEnabled ||
     key === APP_SETTING_KEYS.showItemLabels ||
     key === APP_SETTING_KEYS.showShortcutArrow ||
     key === APP_SETTING_KEYS.autoHideNativeShellIcons ||

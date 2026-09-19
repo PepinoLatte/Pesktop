@@ -141,6 +141,7 @@ const {
   getBoxIconFadeOutMs: () => desktopStore.settings.boxIconFadeOutMs,
   getBoxIdleOpacityHideAnimationMs: () => desktopStore.getBoxIdleOpacityHideAnimationMs(),
   getBoxIdleOpacityShowAnimationMs: () => desktopStore.getBoxIdleOpacityShowAnimationMs(),
+  isBoxIconHoverExpandEnabled: () => desktopStore.settings.boxIconHoverExpandEnabled,
   isContextMenuOpen: () => readContextMenuOpen(),
   isEditingTitle: () => readEditingTitle(),
   isManualDraggingBox: () => isManualDraggingBox.value,
@@ -265,11 +266,12 @@ function handleBoxMouseLeaveWithHandoff(): void {
 
 /**
  * 接收相邻 Box 的过界切换：防误触延迟后确认鼠标确实落在自己边界内才临时展开，
- * 鼠标快速划过桌面时不会反复拉起沿途的收缩 Box
+ * 鼠标快速划过桌面时不会反复拉起沿途的收缩 Box；
+ * 关闭「图标态悬停展开」后过界切换一并停用，保持悬停不展开的交互约定
  */
 async function acceptHoverHandoff(): Promise<void> {
   const currentBox = box.value;
-  if (!currentBox?.collapsed) {
+  if (!currentBox?.collapsed || !desktopStore.settings.boxIconHoverExpandEnabled) {
     return;
   }
 
@@ -317,24 +319,22 @@ onMounted(() => {
 });
 
 /**
- * 系统毛玻璃 / 模糊（DWM Acrylic 或 Blur）按设置应用或清除：开启后背景模糊由系统合成，
- * 前端 surface 呈现半透明磨砂质感；图标态静止时清除效果避免图标背后出现模糊方块，
- * 展开/收缩过渡期保留效果使面板缩放质感完整连贯
+ * 系统毛玻璃（DWM Acrylic）仅作为用户显式开启项应用；
+ * Box 展开不再自动施加原生模糊：DWM 效果作用于整个窗口矩形，
+ * 会在展开瞬间把面板背后的桌面壁纸模糊成一大块方形色斑，
+ * 面板质感改由半透明色调与 surface 自身磨砂层承担
  */
 async function applyWindowEffectsFromSettings(): Promise<void> {
   try {
-    if (isBoxInIconState.value && !isCollapseAnimating.value) {
+    if (
+      !desktopStore.settings.boxAcrylicEnabled ||
+      (isBoxInIconState.value && !isCollapseAnimating.value)
+    ) {
       await currentWindow.setEffects({ effects: [] });
       return;
     }
 
-    if (desktopStore.settings.boxAcrylicEnabled) {
-      await currentWindow.setEffects({ effects: [Effect.Acrylic] });
-    } else if (desktopStore.settings.boxBlur > 0) {
-      await currentWindow.setEffects({ effects: [Effect.Blur] });
-    } else {
-      await currentWindow.setEffects({ effects: [] });
-    }
+    await currentWindow.setEffects({ effects: [Effect.Acrylic] });
   } catch (error) {
     setLastError(error instanceof Error ? error.message : String(error));
   }
@@ -343,7 +343,6 @@ async function applyWindowEffectsFromSettings(): Promise<void> {
 watch(
   [
     () => desktopStore.settings.boxAcrylicEnabled,
-    () => desktopStore.settings.boxBlur,
     () => isBoxInIconState.value,
     () => isCollapseAnimating.value,
   ],
@@ -787,6 +786,7 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         悬停/点击交给现有展开调度回到完整态，右键直接唤出 Box 菜单，
         按下即可拖动（原生拖动循环），与完整态标题栏的手感一致。
         展开/收缩时锚定在屏幕边缘原位，面板朝工作区内部平滑伸展，图标保持不动。
+        展开过渡期图标与内容同时挂载：图标按淡出时长退场，内容即时可见。
       -->
       <button
         v-if="isBoxInIconState || isBoxExpandingFromIcon"
@@ -826,7 +826,8 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         <Folder v-else aria-hidden="true" class="text-slate-400 dark:text-slate-500" :size="32" />
       </button>
 
-      <template v-else>
+      <!-- 内容区在非图标态闲置时挂载：展开动画期间即已就绪，随面板伸展即时露出 -->
+      <template v-if="!isBoxInIconState">
         <BoxResizeHandles
           :can-resize-box="canResizeBox"
           :resize-handles="resizeHandles"

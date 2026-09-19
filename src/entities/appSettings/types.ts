@@ -136,6 +136,11 @@ export interface AppSettings {
    */
   boxExpandHoverDelayMs: number;
   /**
+   * 图标态是否允许悬停自动展开；关闭后悬停只做高亮，单击才展开，
+   * 按住图标可直接拖动而不会被自动展开打断
+   */
+  boxIconHoverExpandEnabled: boolean;
+  /**
    * Box 图标列之间的横向间距，控制整理面板的信息密度
    */
   boxIconGapX: number;

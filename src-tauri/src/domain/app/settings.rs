@@ -56,6 +56,8 @@ pub mod keys {
     pub const BOX_ICON_FADE_OUT_MS: &str = "boxIconFadeOutMs";
     /// 图标态悬停展开延迟。
     pub const BOX_EXPAND_HOVER_DELAY_MS: &str = "boxExpandHoverDelayMs";
+    /// 图标态是否允许悬停自动展开；关闭后需单击展开，按住可直接拖动。
+    pub const BOX_ICON_HOVER_EXPAND_ENABLED: &str = "boxIconHoverExpandEnabled";
     /// 是否启用系统级窗口模糊（DWM Acrylic）。
     pub const BOX_ACRYLIC_ENABLED: &str = "boxAcrylicEnabled";
     /// Box 手动 resize 是否按图标网格吸附。

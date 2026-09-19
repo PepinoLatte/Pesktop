@@ -123,6 +123,11 @@ export const WINDOW_BEHAVIOR_SETTING_CONTROLS: Array<{
     label: "系统毛玻璃",
     description: "由系统合成背景模糊，关闭后 Box 背景只剩半透明色",
   },
+  {
+    key: APP_SETTING_KEYS.boxIconHoverExpandEnabled,
+    label: "图标态悬停展开",
+    description: "悬停图标时自动展开完整 Box；关闭后单击图标才展开，按住可直接拖动图标",
+  },
 ];
 
 /**
@@ -165,7 +170,7 @@ export const BOX_COLLAPSE_TIMING_SETTING_CONTROLS: Array<{
   {
     key: "boxExpandHoverDelayMs",
     label: "悬停展开延迟",
-    description: "图标态下鼠标悬停多久后展开完整 Box，0 为立即展开",
+    description: "开启「图标态悬停展开」后，悬停多久展开完整 Box；0 为立即展开",
     ...APP_SETTING_NUMBER_LIMITS.boxExpandHoverDelayMs,
   },
   {
@@ -215,7 +220,7 @@ export const BOX_VISUAL_SETTING_CONTROLS: Array<{
   {
     key: "boxBlur",
     label: "模糊度",
-    description: "调整 Box 背景模糊程度（半透明磨砂质感）",
+    description: "调整 Box 面板自身磨砂质感强度（不会模糊桌面壁纸）",
     ...APP_SETTING_NUMBER_LIMITS.boxBlur,
   },
   {
