@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ComponentPublicInstance, CSSProperties } from "vue";
-import { cursorPosition, Effect, getCurrentWindow } from "@tauri-apps/api/window";
+import { cursorPosition, Effect, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { emit, listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { Folder } from "@lucide/vue";
@@ -69,6 +69,13 @@ const {
   syncNativeWindowResizable,
   syncWindowBoundsFromStore,
 } = useBoxWindowFrame({
+  beforeNativeDragStart: async () => {
+    // 按住图标开始拖动时，若有从图标态展开的动画正在进行，立即收回图标态：
+    // 拖动应携带纯粹的图标，动画同时改写窗口尺寸会造成挤压和拉伸
+    if (isBoxExpandingFromIcon.value) {
+      await collapseToIdleStateImmediately();
+    }
+  },
   box,
   clearExpandHoverTimer: () => clearExpandHoverTimerHandler(),
   closeContextMenu: () => closeActiveContextMenu(),
@@ -111,6 +118,7 @@ const {
   boxTitleAreaStyle,
   clearCollapseWindowAnimation,
   clearExpandHoverTimer,
+  collapseToIdleStateImmediately,
   expandAnchorHorizontal,
   expandAnchorVertical,
   handleBoxMouseEnter,
@@ -162,6 +170,13 @@ const {
     ]);
 
     return windowSize.width / scaleFactor;
+  },
+  resolveCurrentWindowPosition: async () => {
+    const position = await currentWindow.outerPosition();
+    const scaleFactor = await currentWindow.scaleFactor();
+    const logical = new PhysicalPosition(position.x, position.y).toLogical(scaleFactor);
+
+    return { x: logical.x, y: logical.y };
   },
   resolvePointerLocalPoint: async () => ({ inside: false }),
   resizePersistSettleMs: BOX_WINDOW_INTERACTION_TIMING.resizePersistSettleMs,
@@ -291,6 +306,32 @@ async function acceptHoverHandoff(): Promise<void> {
   if (inside) {
     openCollapsedPreviewForActiveInteraction();
   }
+}
+
+/**
+ * 图标态点击与拖动共用左键：记录按下时的屏幕坐标，click 到达时位移超过
+ * 阈值判定为拖动收尾，不再触发展开（避免拖完图标后面板在落点弹开）
+ */
+const ICON_CLICK_MAX_DRAG_DISTANCE_PX = 4;
+let iconPressScreenPoint: { x: number; y: number } | null = null;
+
+function handleIconStateMouseDown(event: MouseEvent): void {
+  iconPressScreenPoint = { x: event.screenX, y: event.screenY };
+  startDragging(event);
+}
+
+function handleIconStateClick(event: MouseEvent): void {
+  const pressPoint = iconPressScreenPoint;
+  iconPressScreenPoint = null;
+  if (
+    pressPoint &&
+    Math.hypot(event.screenX - pressPoint.x, event.screenY - pressPoint.y) >
+      ICON_CLICK_MAX_DRAG_DISTANCE_PX
+  ) {
+    return;
+  }
+
+  openCollapsedPreviewForActiveInteraction();
 }
 
 onMounted(() => {
@@ -805,9 +846,9 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
           '--dasktop-icon-fade-out-ms': `${desktopStore.settings.boxIconFadeOutMs}ms`,
         }"
         type="button"
-        @click="openCollapsedPreviewForActiveInteraction()"
+        @click="handleIconStateClick($event)"
         @contextmenu.prevent.stop="toggleContextMenu"
-        @mousedown.left.stop="startDragging($event)"
+        @mousedown.left.stop="handleIconStateMouseDown($event)"
       >
         <img
           v-if="iconStateImageSrc"

@@ -129,6 +129,7 @@ interface UpdateBoxOptions {
  * Box 窗口框架组合式逻辑负责原生窗口位置、尺寸、拖动、缩放和边界落库
  */
 export function useBoxWindowFrame(options: {
+  beforeNativeDragStart?: () => Promise<void>;
   box: ComputedRef<DesktopBox | undefined>;
   clearExpandHoverTimer?: () => void;
   closeContextMenu: () => void;
@@ -837,6 +838,9 @@ export function useBoxWindowFrame(options: {
 
     isManualDraggingBox.value = true;
     options.clearExpandHoverTimer?.();
+    // 若图标态展开动画仍在进行，先立即收回图标态再进入原生拖动：
+    // 拖动必须携带稳定的目标尺寸，进行中的展开动画会在拖动中改写窗口大小造成拉伸
+    await options.beforeNativeDragStart?.();
     if (!options.isBoxCollapsedToTitle()) {
       options.openCollapsedPreviewForActiveInteraction();
     }
@@ -911,13 +915,12 @@ export function useBoxWindowFrame(options: {
    * 结束拖动：shouldPersist 时取真实最终位置，过一遍吸附后由带锁 apply
    * 一次性校正定位并写入数据库；顺带覆盖原生循环可能的旧位置回写，
    * 并恢复被拖动期暂停的系统毛玻璃。
-   * 若位移极小（< 4px）判定为单纯单击，折叠态下直接平滑展开
+   * 若位移极小（< 4px）判定为单纯单击，折叠态下直接平滑展开。
+   * 状态清理永远执行：极速拖动时预取可能尚未完成（dragState 为空），
+   * 此时跳过吸附落库但绝不能留下拖动标记和探针计时器
    */
   async function stopManualDragging(shouldPersist: boolean): Promise<void> {
     const dragState = nativeDragState;
-    if (!dragState) {
-      return;
-    }
 
     nativeDragState = null;
     isManualDraggingBox.value = false;
@@ -931,6 +934,12 @@ export function useBoxWindowFrame(options: {
       options.currentWindow.outerPosition(),
       currentMonitor(),
     ]);
+
+    if (!dragState) {
+      // 预取未完成的极速拖动：位置依然准确（原生循环已落定），仅跳过吸附直接落库
+      await persistWindowPositionFromPhysical(finalPosition.x, finalPosition.y);
+      return;
+    }
 
     const dragDistance = Math.hypot(
       finalPosition.x - dragStartPhysicalPosition.x,

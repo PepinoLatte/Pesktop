@@ -55,6 +55,7 @@ export function useBoxCollapsePreview(options: {
   isResizingBox: () => boolean;
   resolveCurrentWindowHeight: () => Promise<number>;
   resolveCurrentWindowWidth: () => Promise<number>;
+  resolveCurrentWindowPosition: () => Promise<{ x: number; y: number }>;
   resolvePointerLocalPoint: (screenX: number, screenY: number) => Promise<BoxPointerLocalPoint>;
   resizePersistSettleMs: number;
 }) {
@@ -129,31 +130,39 @@ export function useBoxCollapsePreview(options: {
       ? 1
       : (options.box.value?.titleOpacity ?? BOX_TITLE_OPACITY.max) / 100,
   );
+  /**
+   * 收缩/展开动画期间的几何钉住参数，在每次动画启动时按当时的窗口实测位置计算：
+   * - base = 目标框架原点 - 当前窗口原点（拖动后收起时按新位置推导，不用过期的展开锚点）
+   * - pinRight/pinBottom = 目标框架不贴窗口左/上边缘时，把表面钉在右/下边
+   * 收起：offset = base + (当前窗口边长 - 视觉边长)；展开：base=0、窗口边长=目标边长
+   */
+  let tweenPin: {
+    baseX: number;
+    baseY: number;
+    pinRight: boolean;
+    pinBottom: boolean;
+    windowW: number;
+    windowH: number;
+  } | null = null;
   const boxSurfaceStyle = computed(() => {
     const visualHeight = boxSurfaceVisualHeight.value;
     const visualWidth = boxSurfaceVisualWidth.value;
     // 四向自适应展开会让原生窗口在动画前先行移动/放大到目标框架，表面默认从窗口
     // 左上角生长，右/底边缘锚定的 Box 在动画起点和收尾落位时都会整体位移。
-    // 动画期间把表面钉在图标所在的边（右/底），让面板朝远离图标的方向生长/收回，
+    // 动画期间按 tweenPin 把表面钉在图标所在的边，让面板朝远离图标的方向生长/收回，
     // 图标视觉位置全程不动，动画收尾时表面与窗口几何完全重合、无强制位移
     let anchorTransform: string | undefined;
-    if (
-      isCollapseAnimating.value &&
-      visualHeight !== null &&
-      visualWidth !== null &&
-      lastAppliedWindowHeight !== null &&
-      lastAppliedWindowWidth !== null
-    ) {
-      const offsetX =
-        expandAnchorHorizontal.value === "right"
-          ? lastAppliedWindowWidth - visualWidth
-          : 0;
-      const offsetY =
-        expandAnchorVertical.value === "bottom"
-          ? lastAppliedWindowHeight - visualHeight
-          : 0;
-      if (offsetX !== 0 || offsetY !== 0) {
-        anchorTransform = `translate(${Math.round(offsetX)}px, ${Math.round(offsetY)}px)`;
+    if (isCollapseAnimating.value && tweenPin && visualHeight !== null && visualWidth !== null) {
+      const offsetX = tweenPin.pinRight
+        ? tweenPin.baseX + (tweenPin.windowW - visualWidth)
+        : tweenPin.baseX;
+      const offsetY = tweenPin.pinBottom
+        ? tweenPin.baseY + (tweenPin.windowH - visualHeight)
+        : tweenPin.baseY;
+      const roundX = Math.round(offsetX);
+      const roundY = Math.round(offsetY);
+      if (roundX !== 0 || roundY !== 0) {
+        anchorTransform = `translate(${roundX}px, ${roundY}px)`;
       }
     }
 
@@ -295,9 +304,10 @@ export function useBoxCollapsePreview(options: {
     // 展开时内容随面板伸展即时呈现，图标不必等动画播完才出现
     isCollapseContentFaded.value = !isExpandingToFull;
     boxSurfaceVisualHeight.value = resolveOptimisticAnimationStartHeight();
-    const [currentWindowHeight, currentWindowWidth] = await Promise.all([
+    const [currentWindowHeight, currentWindowWidth, currentWindowPosition] = await Promise.all([
       options.resolveCurrentWindowHeight(),
       options.resolveCurrentWindowWidth(),
+      options.resolveCurrentWindowPosition(),
     ]);
     const startHeight = boxSurfaceVisualHeight.value ?? currentWindowHeight;
     const startWidth = resolveOptimisticAnimationStartWidth();
@@ -305,12 +315,38 @@ export function useBoxCollapsePreview(options: {
     const widthDistance = targetWidth - startWidth;
 
     if (Math.abs(heightDistance) < 1 && Math.abs(widthDistance) < 1) {
+      tweenPin = null;
       boxSurfaceVisualHeight.value = null;
       boxSurfaceVisualWidth.value = null;
       isCollapseAnimating.value = false;
       isCollapseContentFaded.value = false;
       await applyCollapseFrame(targetFrame);
       return;
+    }
+
+    // 按本次动画的实测窗口几何计算钉住参数：展开时窗口已被预应用到目标框架、
+    // 以图标所在的展开锚点为钉边；收起时窗口原地不动、按目标框架相对当前窗口
+    // 的实际偏移推导钉边——拖动后的收起因此始终按新位置收敛，不再吃到过期锚点
+    if (isExpandingToFull) {
+      tweenPin = {
+        baseX: 0,
+        baseY: 0,
+        pinRight: expandAnchorHorizontal.value === "right",
+        pinBottom: expandAnchorVertical.value === "bottom",
+        windowW: targetWidth,
+        windowH: targetHeight,
+      };
+    } else {
+      const baseX = targetFrame.x - currentWindowPosition.x;
+      const baseY = targetFrame.y - currentWindowPosition.y;
+      tweenPin = {
+        baseX,
+        baseY,
+        pinRight: Math.abs(baseX) > 1,
+        pinBottom: Math.abs(baseY) > 1,
+        windowW: currentWindowWidth,
+        windowH: currentWindowHeight,
+      };
     }
 
     boxSurfaceVisualHeight.value = startHeight;
@@ -602,6 +638,7 @@ export function useBoxCollapsePreview(options: {
 
       boxSurfaceVisualHeight.value = null;
       boxSurfaceVisualWidth.value = null;
+      tweenPin = null;
       isCollapseAnimating.value = false;
       // 窗口就位后再淡入内容，淡出与淡入夹住缩放段，视觉上只看到面板平滑变形
       isCollapseContentFaded.value = false;
@@ -646,6 +683,7 @@ export function useBoxCollapsePreview(options: {
   function clearCollapseWindowAnimation(): void {
     collapseAnimationVersion += 1;
     cancelCollapseAnimationTween();
+    tweenPin = null;
     boxOpacityTween?.stop();
     boxOpacityTween = null;
     clearCollapsedPreviewCloseTimer();
@@ -658,6 +696,17 @@ export function useBoxCollapsePreview(options: {
     }
     isApplyingCollapseWindowSize = false;
     isCollapseAnimating.value = false;
+  }
+
+  /**
+   * 立即收回图标态：关闭临时展开并跳过动画直接落到收缩框架。
+   * 供按住图标开始原生拖动时调用——拖动应携带纯粹的图标形态，
+   * 进行中的展开动画若不终止，会在拖动的同时改写窗口尺寸造成拉伸
+   */
+  async function collapseToIdleStateImmediately(): Promise<void> {
+    clearExpandHoverTimer();
+    closeCollapsedPreview();
+    await applyCollapseWindowSize(false);
   }
 
   /**
@@ -864,6 +913,7 @@ export function useBoxCollapsePreview(options: {
     boxTitleAreaStyle,
     clearCollapseWindowAnimation,
     clearExpandHoverTimer,
+    collapseToIdleStateImmediately,
     expandAnchorHorizontal,
     expandAnchorVertical,
     handleBoxMouseEnter,
