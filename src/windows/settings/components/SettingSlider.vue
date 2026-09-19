@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { ref, watch } from "vue";
 import { RotateCcw } from "@lucide/vue";
 
 /**
  * 设置页滑块统一数值展示和单项重置入口，具体范围来自应用设置校验配置。
  */
-defineProps<{
+const props = defineProps<{
   defaultValue: number;
   label: string;
   max: number;
@@ -18,6 +19,26 @@ const emit = defineEmits<{
   change: [value: number];
   reset: [];
 }>();
+
+const localValue = ref(props.modelValue);
+
+watch(
+  () => props.modelValue,
+  (val) => {
+    localValue.value = val;
+  },
+);
+
+function handleInput(event: Event): void {
+  const val = Number((event.target as HTMLInputElement).value);
+  localValue.value = val;
+  emit("change", val);
+}
+
+function handleReset(): void {
+  localValue.value = props.defaultValue;
+  emit("reset");
+}
 </script>
 
 <template>
@@ -29,19 +50,19 @@ const emit = defineEmits<{
       :min="min"
       :step="step"
       type="range"
-      :value="modelValue"
-      @input="emit('change', Number(($event.target as HTMLInputElement).value))"
+      :value="localValue"
+      @input="handleInput"
     />
     <span class="w-[70px] shrink-0 whitespace-nowrap text-right text-[13px] font-medium text-[#555b66] dark:text-[#c7cad1]">
-      {{ modelValue }} {{ unit }}
+      {{ localValue }} {{ unit }}
     </span>
     <button
       :aria-label="`重置${label}`"
       class="grid size-8 shrink-0 place-items-center rounded-[6px] text-[#68707d] transition-colors hover:bg-[#eef0f4] hover:text-[#17181c] disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[#68707d] dark:text-[#a7abb5] dark:hover:bg-[#242730] dark:hover:text-[#f4f4f5] dark:disabled:hover:bg-transparent dark:disabled:hover:text-[#a7abb5]"
-      :disabled="modelValue === defaultValue"
+      :disabled="localValue === defaultValue"
       :title="`重置${label}`"
       type="button"
-      @click="emit('reset')"
+      @click="handleReset"
     >
       <RotateCcw :size="15" />
     </button>

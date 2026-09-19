@@ -19,8 +19,8 @@ const BITMAP_COLOR_DEPTH_BITS: u16 = 32;
 const BITMAP_COLOR_PLANES: u16 = 1;
 /// 传统 icon mask 中高亮通道大于该阈值时视为透明。
 const ICON_MASK_ALPHA_THRESHOLD: u8 = 127;
-/// 内容像素的 Alpha 判定阈值，大于该值视为有效内容（0 表示保留任何非零半透明过渡边缘）。
-const CONTENT_ALPHA_THRESHOLD: u8 = 0;
+/// 内容像素的 Alpha 判定阈值，过滤边缘微弱杂色与微透明伪边框（<= 20 视为透明边缘）。
+const CONTENT_ALPHA_THRESHOLD: u8 = 20;
 /// 裁剪后保留的相对边距比例，0 表示完全贴边填满 1:1 画布，实现统一缩放。
 const CONTENT_MARGIN_RATIO: f64 = 0.0;
 /// 完全透明 Alpha 值。
@@ -115,7 +115,13 @@ fn remove_solid_background_if_opaque(rgba: &mut [u8], width: usize, height: usiz
 
     let stride = width * BYTES_PER_PIXEL as usize;
     let is_white_pixel = |p: &[u8]| -> bool {
-        p[3] >= 180 && p[0] >= 235 && p[1] >= 235 && p[2] >= 235
+        (p[3] >= 140
+            && p[0] >= 200
+            && p[1] >= 200
+            && p[2] >= 200
+            && (p[0] as i16 - p[1] as i16).abs() <= 15
+            && (p[1] as i16 - p[2] as i16).abs() <= 15)
+            || p[3] <= 20
     };
 
     let top_left = &rgba[0..4];
@@ -123,13 +129,13 @@ fn remove_solid_background_if_opaque(rgba: &mut [u8], width: usize, height: usiz
     let bottom_left = &rgba[(height - 1) * stride..(height - 1) * stride + 4];
     let bottom_right = &rgba[(height - 1) * stride + (width - 1) * 4..(height - 1) * stride + width * 4];
 
-    // 只要四角存在实心白底（或四周边界为白色底板），就执行边缘连通漫水消除
+    // 只要四角中至少有2个角为实心白底/外框衬板，执行边缘连通漫水消除
     let corners_white = (is_white_pixel(top_left) as u8)
         + (is_white_pixel(top_right) as u8)
         + (is_white_pixel(bottom_left) as u8)
         + (is_white_pixel(bottom_right) as u8);
 
-    if corners_white < 3 {
+    if corners_white < 2 {
         return;
     }
 

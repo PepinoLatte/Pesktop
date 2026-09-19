@@ -23,7 +23,7 @@ use windows::Win32::UI::Shell::{
     SHParseDisplayName, ShellLink, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_PIDL, SIIGBF,
     SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY, SIIGBF_SCALEUP,
 };
-use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
+use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, PrivateExtractIconsW, HICON};
 
 /// Shell 图像请求尺寸，兼顾桌面图标清晰度和 base64 传输体积。
 const SHELL_IMAGE_SIZE: i32 = 96;
@@ -33,6 +33,90 @@ const APPS_FOLDER_PARSING_NAME_PREFIX: &str = "shell:AppsFolder\\";
 const SHELL_NAMESPACE_PREFIX: &str = "::";
 /// 浏览器可直接渲染的 PNG data URL 前缀。
 const PNG_DATA_URL_PREFIX: &str = "data:image/png;base64,";
+
+extern "system" {
+    fn MultiByteToWideChar(
+        CodePage: u32,
+        dwFlags: u32,
+        lpMultiByteStr: *const u8,
+        cbMultiByte: i32,
+        lpWideCharStr: *mut u16,
+        cchWideChar: i32,
+    ) -> i32;
+}
+
+/// 支持 UTF-8 与 Windows 系统代码页（中文 ANSI/GBK）双向解析文本
+fn read_file_as_string_lossy_or_ansi(bytes: &[u8]) -> String {
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    // CP_ACP = 0 (系统当前 ANSI 代码页，中文环境为 GBK)
+    let wide_len = unsafe {
+        MultiByteToWideChar(0, 0, bytes.as_ptr(), bytes.len() as i32, std::ptr::null_mut(), 0)
+    };
+    if wide_len > 0 {
+        let mut wide_buf = vec![0u16; wide_len as usize];
+        let written = unsafe {
+            MultiByteToWideChar(0, 0, bytes.as_ptr(), bytes.len() as i32, wide_buf.as_mut_ptr(), wide_len)
+        };
+        if written > 0 {
+            return String::from_utf16_lossy(&wide_buf);
+        }
+    }
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// 从文件（.exe, .dll, .ico 等）直接提取高清原生 HICON，避开 Explorer 的白底缩略图和衬板
+fn extract_native_file_icon(file_path: &str, icon_index: i32) -> io::Result<Option<String>> {
+    let mut wide_buf = [0u16; 260];
+    let mut len = 0;
+    for c in file_path.encode_utf16() {
+        if len < 259 {
+            wide_buf[len] = c;
+            len += 1;
+        }
+    }
+    wide_buf[len] = 0;
+
+    let mut icons = [HICON::default()];
+    // 优先以 256x256 提取最高清的原生 HICON
+    let count = unsafe {
+        PrivateExtractIconsW(
+            &wide_buf,
+            icon_index,
+            256,
+            256,
+            Some(&mut icons),
+            None,
+            0,
+        )
+    };
+
+    if count == 0 || icons[0].is_invalid() {
+        // 退回系统原生内嵌最佳尺寸 (0x0)
+        let count_native = unsafe {
+            PrivateExtractIconsW(
+                &wide_buf,
+                icon_index,
+                0,
+                0,
+                Some(&mut icons),
+                None,
+                0,
+            )
+        };
+        if count_native == 0 || icons[0].is_invalid() {
+            return Ok(None);
+        }
+    }
+
+    let hicon = icons[0];
+    let pixels = unsafe { bitmap::icon_to_png_rgba(hicon) };
+    unsafe {
+        let _ = DestroyIcon(hicon);
+    }
+    pixels.map(|png| Some(png_data_url(&png)))
+}
 
 /// 按 Windows Shell 默认逻辑提取缩略图或图标，并编码成浏览器可直接渲染的 PNG data URL。
 pub fn resolve_shell_image_data_url(path: &Path) -> io::Result<Option<String>> {
@@ -61,33 +145,59 @@ fn is_media_file_parsing_name(parsing_name: &str) -> bool {
 pub fn resolve_shell_image_data_url_for_parsing_name(
     parsing_name: &str,
 ) -> io::Result<Option<String>> {
-    // 媒体文件走缩略图，普通文件/应用/快捷方式一律优先纯图标（ICONONLY | SCALEUP），
-    // 彻底切断 Windows Shell 在生成缩略图时给图标画的白色衬板或带灰边的外框
-    if !is_media_file_parsing_name(parsing_name) {
-        if let Ok(Some(icon)) = resolve_shell_icon_only_image_data_url(parsing_name) {
-            return Ok(Some(icon));
+    // 媒体文件优先走真实缩略图
+    if is_media_file_parsing_name(parsing_name) {
+        if let Ok(Some(thumbnail)) = resolve_shell_thumbnail_data_url(parsing_name) {
+            return Ok(Some(thumbnail));
         }
     }
 
-    if let Ok(Some(thumbnail)) = resolve_shell_thumbnail_data_url(parsing_name) {
-        return Ok(Some(thumbnail));
+    // 1. 优先提取原生文件图标（.exe, .ico, .dll 等），彻底根治白框与灰边
+    if let Ok(Some(icon)) = extract_native_file_icon(parsing_name, 0) {
+        return Ok(Some(icon));
     }
 
-    resolve_shell_icon_data_url(parsing_name)
+    // 2. 尝试纯系统关联大图标
+    if let Ok(Some(icon)) = resolve_shell_icon_data_url(parsing_name) {
+        return Ok(Some(icon));
+    }
+
+    // 3. 备选 IShellItemImageFactory 纯图标模式
+    if let Ok(Some(icon)) = resolve_shell_icon_only_image_data_url(parsing_name) {
+        return Ok(Some(icon));
+    }
+
+    resolve_shell_thumbnail_data_url(parsing_name)
 }
 
 /// 读取 `.url` 网络快捷方式（如 Steam 游戏桌面图标），直接解析其中指定的 IconFile 原生图标
 fn resolve_url_shortcut_icon_data_url(path: &Path) -> io::Result<Option<String>> {
     let bytes = std::fs::read(path).map_err(error::io_other)?;
-    let content = String::from_utf8_lossy(&bytes);
+    let content = read_file_as_string_lossy_or_ansi(&bytes);
+    let mut icon_path_found: Option<String> = None;
+    let mut icon_index = 0_i32;
+
     for line in content.lines() {
         let trimmed = line.trim();
         if let Some(icon_path) = trimmed.strip_prefix("IconFile=") {
-            let icon_path = icon_path.trim().trim_matches('"');
-            if !icon_path.is_empty() && Path::new(icon_path).exists() {
-                if let Ok(Some(icon)) = resolve_shell_image_data_url_for_parsing_name(icon_path) {
-                    return Ok(Some(icon));
-                }
+            let p = icon_path.trim().trim_matches('"');
+            if !p.is_empty() {
+                icon_path_found = Some(p.to_string());
+            }
+        } else if let Some(idx_str) = trimmed.strip_prefix("IconIndex=") {
+            if let Ok(idx) = idx_str.trim().parse::<i32>() {
+                icon_index = idx;
+            }
+        }
+    }
+
+    if let Some(icon_path) = icon_path_found {
+        if Path::new(&icon_path).exists() {
+            if let Ok(Some(icon)) = extract_native_file_icon(&icon_path, icon_index) {
+                return Ok(Some(icon));
+            }
+            if let Ok(Some(icon)) = resolve_shell_image_data_url_for_parsing_name(&icon_path) {
+                return Ok(Some(icon));
             }
         }
     }
@@ -131,6 +241,9 @@ fn resolve_shortcut_icon_data_url(path: &Path) -> io::Result<Option<String>> {
         let icon_path_str = wide::from_null_terminated_u16(&icon_path_buf);
         let trimmed = icon_path_str.trim();
         if !trimmed.is_empty() && Path::new(trimmed).exists() {
+            if let Ok(Some(icon)) = extract_native_file_icon(trimmed, icon_index) {
+                return Ok(Some(icon));
+            }
             if let Ok(Some(icon)) = resolve_shell_image_data_url_for_parsing_name(trimmed) {
                 return Ok(Some(icon));
             }
@@ -147,7 +260,10 @@ fn resolve_shortcut_icon_data_url(path: &Path) -> io::Result<Option<String>> {
         let target_path_str = wide::from_null_terminated_u16(&target_path_buf);
         let trimmed = target_path_str.trim();
         if !trimmed.is_empty() && Path::new(trimmed).exists() {
-            // 直接解析目标真实程序的原生高清图标，彻底避免 .lnk 携带的白色衬板和快捷方式角标
+            // 直接提取目标程序原生高清图标，彻底避免 .lnk 携带的白色衬板和快捷方式角标
+            if let Ok(Some(icon)) = extract_native_file_icon(trimmed, 0) {
+                return Ok(Some(icon));
+            }
             if let Ok(Some(icon)) = resolve_shell_image_data_url_for_parsing_name(trimmed) {
                 return Ok(Some(icon));
             }
@@ -299,4 +415,19 @@ fn is_shortcut_path(path: &Path) -> bool {
 /// 将 PNG 字节包装成浏览器 `<img>` 可以直接消费的 data URL。
 fn png_data_url(png: &[u8]) -> String {
     format!("{PNG_DATA_URL_PREFIX}{}", STANDARD.encode(png))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_native_file_icon_structure() {
+        let dummy_path = r"C:\Windows\explorer.exe";
+        if Path::new(dummy_path).exists() {
+            let res = extract_native_file_icon(dummy_path, 0);
+            assert!(res.is_ok());
+            assert!(res.unwrap().is_some());
+        }
+    }
 }

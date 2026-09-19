@@ -86,14 +86,14 @@ const resizeHandles: Array<{
   direction: ResizeDirection;
   className: string;
 }> = [
-  { direction: "North", className: "left-3 right-3 top-0 h-3 cursor-ns-resize hover:bg-white/35 dark:hover:bg-white/20" },
-  { direction: "South", className: "bottom-0 left-3 right-3 h-3 cursor-ns-resize hover:bg-white/35 dark:hover:bg-white/20" },
-  { direction: "West", className: "bottom-3 left-0 top-3 w-3 cursor-ew-resize hover:bg-white/35 dark:hover:bg-white/20" },
-  { direction: "East", className: "bottom-3 right-0 top-3 w-3 cursor-ew-resize hover:bg-white/35 dark:hover:bg-white/20" },
-  { direction: "NorthWest", className: "left-0 top-0 size-5 cursor-nwse-resize hover:bg-white/35 dark:hover:bg-white/20" },
-  { direction: "NorthEast", className: "right-0 top-0 size-5 cursor-nesw-resize hover:bg-white/35 dark:hover:bg-white/20" },
-  { direction: "SouthWest", className: "bottom-0 left-0 size-5 cursor-nesw-resize hover:bg-white/35 dark:hover:bg-white/20" },
-  { direction: "SouthEast", className: "bottom-0 right-0 size-5 cursor-nwse-resize hover:bg-white/35 dark:hover:bg-white/20" },
+  { direction: "North", className: "left-3 right-3 top-0 h-3 cursor-ns-resize" },
+  { direction: "South", className: "bottom-0 left-3 right-3 h-3 cursor-ns-resize" },
+  { direction: "West", className: "bottom-3 left-0 top-3 w-3 cursor-ew-resize" },
+  { direction: "East", className: "bottom-3 right-0 top-3 w-3 cursor-ew-resize" },
+  { direction: "NorthWest", className: "left-0 top-0 size-5 cursor-nwse-resize" },
+  { direction: "NorthEast", className: "right-0 top-0 size-5 cursor-nesw-resize" },
+  { direction: "SouthWest", className: "bottom-0 left-0 size-5 cursor-nesw-resize" },
+  { direction: "SouthEast", className: "bottom-0 right-0 size-5 cursor-nwse-resize" },
 ];
 
 /**

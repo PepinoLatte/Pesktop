@@ -135,6 +135,7 @@ export async function openBoxWindow(
       transparent: true,
       shadow: false,
       resizable: !box.locked && !box.collapsed,
+      minimizable: false,
       skipTaskbar: true,
       preventOverflow: true,
       visible: shouldShowInitially,

@@ -526,8 +526,32 @@ export const useDesktopStore = defineStore("desktop", () => {
     await updateNumberSetting(APP_SETTING_KEYS.snapThreshold, threshold);
   }
 
+  const pendingSettingSaves = new Map<keyof AppSettings, ReturnType<typeof setTimeout>>();
+
+  function debouncedSaveSetting<Key extends keyof AppSettings>(
+    key: Key,
+    value: AppSettings[Key],
+    scope: DesktopStateChangeScope = "settings",
+    delay = 120,
+  ): void {
+    const existing = pendingSettingSaves.get(key);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const timer = setTimeout(async () => {
+      pendingSettingSaves.delete(key);
+      try {
+        await saveSetting(key, value);
+        await broadcastStateChanged(scope);
+      } catch (error) {
+        lastError.value = error instanceof Error ? error.message : String(error);
+      }
+    }, delay);
+    pendingSettingSaves.set(key, timer);
+  }
+
   /**
-   * 数值类设置统一做范围校验和跨窗口广播，避免每个滑块各自复制保存逻辑
+   * 数值类设置统一做范围校验和防抖持久化，保证滑块拖拽 60fps 顺滑不卡死 DWM/SQLite
    */
   async function updateNumberSetting<Key extends AppSettingNumberKey>(
     key: Key,
@@ -539,8 +563,7 @@ export const useDesktopStore = defineStore("desktop", () => {
       ...settings.value,
       [key]: nextValue,
     };
-    await saveSetting(APP_SETTING_KEYS[key], nextValue);
-    await broadcastStateChanged("settings");
+    debouncedSaveSetting(APP_SETTING_KEYS[key], nextValue, "settings", 120);
   }
 
   /**
