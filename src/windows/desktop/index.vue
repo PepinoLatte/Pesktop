@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { ComponentPublicInstance, CSSProperties } from "vue";
 import { cursorPosition, Effect, getCurrentWindow } from "@tauri-apps/api/window";
 import { emit, listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { Folder } from "@lucide/vue";
 import BoxFileGrid from "@/windows/desktop/components/BoxFileGrid.vue";
 import BoxHeader from "@/windows/desktop/components/BoxHeader.vue";
@@ -19,7 +20,7 @@ import { useBoxWindowFrame } from "@/windows/desktop/composables/useBoxWindowFra
 import { useBoxWindowLifecycle } from "@/windows/desktop/composables/useBoxWindowLifecycle";
 import { resolveBoxResizeGridRowHeight } from "@/windows/desktop/utils/boxResizeGrid";
 import { useDesktopStore } from "@/entities/desktopBox/store";
-import { BOX_WINDOW_INTERACTION_TIMING } from "@/entities/desktopBox/layout";
+import { BOX_ICON_STATE_SIZE, BOX_WINDOW_INTERACTION_TIMING } from "@/entities/desktopBox/layout";
 import { BOX_HOVER_HANDOFF_EVENT, type BoxHoverHandoffPayload } from "@/shared/ipc/desktop";
 import { BUILTIN_COVER_ICONS, parseBuiltinCoverId } from "@/windows/boxContextMenu/model/builtinCovers";
 import type { DesktopItem } from "@/entities/desktopItem/types";
@@ -128,6 +129,7 @@ const {
   getBoxCollapseDelayMs: () => desktopStore.getBoxCollapseDelayMs(),
   getBoxCollapseMode: () => box.value?.collapseMode ?? "icon",
   getBoxCornerRadius: () => desktopStore.settings.boxCornerRadius,
+  getBoxExpandHoverDelayMs: () => desktopStore.settings.boxExpandHoverDelayMs,
   getBoxIconFadeInMs: () => desktopStore.settings.boxIconFadeInMs,
   getBoxIdleOpacityHideAnimationMs: () => desktopStore.getBoxIdleOpacityHideAnimationMs(),
   getBoxIdleOpacityShowAnimationMs: () => desktopStore.getBoxIdleOpacityShowAnimationMs(),
@@ -171,16 +173,20 @@ const boxTitleOrderClass = computed(() =>
   box.value?.titlePosition === "bottom" ? "order-2" : "order-0",
 );
 /**
- * 图标态入口按既定优先级取图：自定义图片封面 > 内置图标库 > Box 内第一个文件的
- * Shell 图标 > 默认文件夹图标；封面由更多菜单「设置封面」维护
+ * 图标态入口按既定优先级取图：自定义图片封面 > 内置图标库 > Box 内第一个
+ * 非快捷方式文件的 Shell 图标 > 默认文件夹图标；封面由更多菜单「设置封面」维护。
+ * 快捷方式的 Shell 位图自带白底角标，不作为图标态封面源
  */
+const firstNonShortcutItem = computed(
+  () => boxItems.value.find((item) => item.kind !== "shortcut") ?? null,
+);
 const iconStateImageSrc = computed(() => {
   const cover = box.value?.coverIcon ?? null;
   if (cover?.startsWith("data:image/")) {
     return cover;
   }
 
-  return boxItems.value[0]?.iconDataUrl ?? null;
+  return firstNonShortcutItem.value?.iconDataUrl ?? null;
 });
 const iconStateBuiltinComponent = computed(() => {
   const builtinId = parseBuiltinCoverId(box.value?.coverIcon ?? null);
@@ -220,11 +226,13 @@ async function broadcastHoverHandoffOnLeave(): Promise<void> {
       return false;
     }
 
+    // 判定视点用目标收缩后的图标方块范围，而不是其展开尺寸，
+    // 避免相邻 Box 展开体覆盖到鼠标路径时造成误触发
     return (
       logicalX >= candidate.x - tolerance &&
-      logicalX <= candidate.x + candidate.width + tolerance &&
+      logicalX <= candidate.x + BOX_ICON_STATE_SIZE + tolerance &&
       logicalY >= candidate.y - tolerance &&
-      logicalY <= candidate.y + candidate.height + tolerance
+      logicalY <= candidate.y + BOX_ICON_STATE_SIZE + tolerance
     );
   });
 
@@ -256,17 +264,23 @@ async function acceptHoverHandoff(): Promise<void> {
   ]);
   const logicalX = cursor.x / scaleFactor;
   const logicalY = cursor.y / scaleFactor;
+  // 接受判定同样以自己的图标方块为视点：鼠标确实停在图标附近才算承接，
+  // 鼠标仍停在来源 Box 的展开区域内时不切换
   const inside =
     logicalX >= currentBox.x - HOVER_HANDOFF_TOLERANCE_PX &&
-    logicalX <= currentBox.x + currentBox.width + HOVER_HANDOFF_TOLERANCE_PX &&
+    logicalX <= currentBox.x + BOX_ICON_STATE_SIZE + HOVER_HANDOFF_TOLERANCE_PX &&
     logicalY >= currentBox.y - HOVER_HANDOFF_TOLERANCE_PX &&
-    logicalY <= currentBox.y + currentBox.height + HOVER_HANDOFF_TOLERANCE_PX;
+    logicalY <= currentBox.y + BOX_ICON_STATE_SIZE + HOVER_HANDOFF_TOLERANCE_PX;
   if (inside) {
     openCollapsedPreviewForActiveInteraction();
   }
 }
 
 onMounted(() => {
+  // Box 是常驻桌面挂件：标记为工具窗口后不进 Alt+Tab，Win+D 显示桌面时保持原位
+  void invoke("apply_desktop_toolbox").catch((error) => {
+    setLastError(error instanceof Error ? error.message : String(error));
+  });
   void listen<BoxHoverHandoffPayload>(BOX_HOVER_HANDOFF_EVENT, ({ payload }) => {
     if (payload.toBoxId !== props.boxId || !box.value?.collapsed) {
       return;

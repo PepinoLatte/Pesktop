@@ -69,6 +69,7 @@ pub fn run() {
             commands::native_drop::register_box_native_drop_target,
             commands::native_drop::unregister_box_native_drop_target,
             commands::app::is_autostart_enabled,
+            commands::app::apply_desktop_toolbox,
             commands::app::is_external_frontend,
             commands::app::is_primary_mouse_button_pressed,
             commands::app::set_autostart_enabled,

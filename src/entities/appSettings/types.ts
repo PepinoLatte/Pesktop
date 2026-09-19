@@ -124,6 +124,10 @@ export interface AppSettings {
    */
   boxAcrylicEnabled: boolean;
   /**
+   * 图标态下鼠标悬停多久后展开完整 Box；0 表示立即展开
+   */
+  boxExpandHoverDelayMs: number;
+  /**
    * Box 图标列之间的横向间距，控制整理面板的信息密度
    */
   boxIconGapX: number;

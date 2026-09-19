@@ -836,8 +836,9 @@ export function useBoxWindowFrame(options: {
   }
 
   /**
-   * 原生拖动：窗口进入操作系统的模态移动循环，跟手度等同系统原生窗口；
-   * JS/IPC 不参与每一帧定位，彻底移除 mousemove→setPosition 的 IPC 管线
+   * 原生拖动：按下后立即向窗口线程发起模态移动循环请求——锚点取按下瞬间的光标，
+   * 零启动延迟跟手；吸附所需信息与毛玻璃暂停在拖动请求受理后并行补齐，
+   * 不阻塞拖动启动。快速点按时探测会在状态就绪后的下一个周期自然收尾。
    */
   async function startNativeDragging(): Promise<void> {
     if (!options.box.value || nativeDragState) {
@@ -846,6 +847,24 @@ export function useBoxWindowFrame(options: {
 
     isManualDraggingBox.value = true;
     options.openCollapsedPreviewForActiveInteraction();
+    bindNativeDragReleaseProbe();
+
+    try {
+      const dragStarted = options.currentWindow.startDragging();
+      void prepareNativeDragResources();
+      void suspendWindowEffects();
+      await dragStarted;
+    } catch (error) {
+      await restoreWindowEffects();
+      stopManualDragging(false).catch(() => undefined);
+      options.setLastError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
+   * 拖动循环运行期间并行预取吸附所需的窗口尺寸、缩放系数和工作区
+   */
+  async function prepareNativeDragResources(): Promise<void> {
     const [windowSize, scaleFactor, monitor] = await Promise.all([
       options.currentWindow.outerSize(),
       options.currentWindow.scaleFactor(),
@@ -866,19 +885,6 @@ export function useBoxWindowFrame(options: {
           }
         : undefined,
     };
-
-    bindNativeDragReleaseProbe();
-    await suspendWindowEffects();
-
-    try {
-      // 原生拖动：窗口进入操作系统的模态移动循环，跟手度等同系统原生窗口；
-      // JS/IPC 不参与每一帧定位，彻底移除 mousemove→setPosition 的 IPC 管线
-      await options.currentWindow.startDragging();
-    } catch (error) {
-      await restoreWindowEffects();
-      stopManualDragging(false).catch(() => undefined);
-      options.setLastError(error instanceof Error ? error.message : String(error));
-    }
   }
 
   /**

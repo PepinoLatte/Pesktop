@@ -134,6 +134,7 @@ export type BoxCollapseTimingSettingKey = Extract<
   | "boxCollapseDelayMs"
   | "boxIdleOpacityHideAnimationMs"
   | "boxIdleOpacityShowAnimationMs"
+  | "boxExpandHoverDelayMs"
 >;
 
 /**
@@ -161,6 +162,12 @@ export const BOX_COLLAPSE_TIMING_SETTING_CONTROLS: Array<{
   step: number;
   unit: string;
 }> = [
+  {
+    key: "boxExpandHoverDelayMs",
+    label: "悬停展开延迟",
+    description: "图标态下鼠标悬停多久后展开完整 Box，0 为立即展开",
+    ...APP_SETTING_NUMBER_LIMITS.boxExpandHoverDelayMs,
+  },
   {
     key: "boxCollapseAnimationMs",
     label: "收缩动画速度",
@@ -201,8 +208,8 @@ export const BOX_VISUAL_SETTING_CONTROLS: Array<{
 }> = [
   {
     key: "boxBackgroundOpacity",
-    label: "背景透明度",
-    description: "控制 Box 背景与桌面壁纸的融合程度",
+    label: "虚化程度",
+    description: "数值越低 Box 越通透、桌面越清晰；配合系统毛玻璃调节浓度",
     ...APP_SETTING_NUMBER_LIMITS.boxBackgroundOpacity,
   },
   {

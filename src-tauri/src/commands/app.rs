@@ -1,4 +1,5 @@
 use crate::infrastructure::tauri::frontend_dev;
+use crate::infrastructure::windows::window_style;
 use crate::services::app::lifecycle;
 use tauri::AppHandle;
 
@@ -6,6 +7,15 @@ use tauri::AppHandle;
 #[tauri::command]
 pub fn is_external_frontend() -> bool {
     frontend_dev::is_external_frontend_enabled()
+}
+
+/// 把调用方窗口标记为工具窗口：不进 Alt+Tab，Win+D 显示桌面时保持原位不被最小化。
+#[tauri::command]
+pub fn apply_desktop_toolbox(window: tauri::WebviewWindow) -> Result<(), String> {
+    let hwnd = window
+        .hwnd()
+        .map_err(|error| format!("获取窗口句柄失败：{error}"))?;
+    window_style::set_toolwindow_ex_style(hwnd.0 as isize)
 }
 
 /// 读取系统开机自启状态；状态来源是官方 autostart 插件，不写入前端 SQLite 设置表。

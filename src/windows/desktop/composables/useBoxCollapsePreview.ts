@@ -39,6 +39,7 @@ export function useBoxCollapsePreview(options: {
   getBoxCollapseDelayMs: () => number;
   getBoxCollapseMode: () => BoxCollapseMode;
   getBoxCornerRadius: () => number;
+  getBoxExpandHoverDelayMs: () => number;
   getBoxIconFadeInMs: () => number;
   getBoxIdleOpacityHideAnimationMs: () => number;
   getBoxIdleOpacityShowAnimationMs: () => number;
@@ -175,6 +176,7 @@ export function useBoxCollapsePreview(options: {
   let collapseAnimationTween: ReturnType<typeof animate> | null = null;
   let boxOpacityTween: ReturnType<typeof animate> | null = null;
   let collapsePreviewCloseTimer: ReturnType<typeof window.setTimeout> | null = null;
+  let expandHoverTimer: ReturnType<typeof window.setTimeout> | null = null;
   let collapseSizeApplyLockTimer: ReturnType<typeof window.setTimeout> | null = null;
   let lastAppliedWindowHeight: number | null = null;
   let lastAppliedWindowWidth: number | null = null;
@@ -511,6 +513,7 @@ export function useBoxCollapsePreview(options: {
     boxOpacityTween?.stop();
     boxOpacityTween = null;
     clearCollapsedPreviewCloseTimer();
+    clearExpandHoverTimer();
     boxSurfaceVisualHeight.value = null;
     boxSurfaceVisualWidth.value = null;
     if (collapseSizeApplyLockTimer) {
@@ -644,11 +647,33 @@ export function useBoxCollapsePreview(options: {
   }
 
   /**
-   * Box 区域 hover 进入时取消延迟收起；收缩态窗口只剩标题高度，因此进入可见区域等同于进入标题入口
+   * Box 区域 hover 进入时取消延迟收起；图标态下按设置延迟展开（防误触），
+   * 其余形态保持立即展开的既有手感
    */
   function handleBoxMouseEnter(): void {
     isBoxHovered.value = true;
+    if (isBoxInIconState.value && options.getBoxExpandHoverDelayMs() > 0) {
+      clearExpandHoverTimer();
+      expandHoverTimer = window.setTimeout(() => {
+        expandHoverTimer = null;
+        openCollapsedPreviewForActiveInteraction();
+      }, options.getBoxExpandHoverDelayMs());
+      return;
+    }
+
     openCollapsedPreviewForActiveInteraction();
+  }
+
+  /**
+   * 清理悬停展开延迟计时器，离开 Box、菜单打开或窗口卸载时都应取消旧任务
+   */
+  function clearExpandHoverTimer(): void {
+    if (!expandHoverTimer) {
+      return;
+    }
+
+    window.clearTimeout(expandHoverTimer);
+    expandHoverTimer = null;
   }
 
   /**
@@ -667,12 +692,10 @@ export function useBoxCollapsePreview(options: {
     refreshCollapsedPreviewCloseSchedule();
   }
 
-  /**
-   * 鼠标离开整个 Box 后延迟收回临时展开内容，避免移动到菜单或缩放边缘时立刻收缩
-   */
   function handleBoxMouseLeave(): void {
     isBoxHovered.value = false;
     isTitleHovered.value = false;
+    clearExpandHoverTimer();
     refreshCollapsedPreviewCloseSchedule();
   }
 
