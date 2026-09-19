@@ -87,6 +87,10 @@ export interface AppSettings {
    */
   boxBackgroundOpacity: number;
   /**
+   * Box 背景模糊度使用像素保存（半透明磨砂效果）
+   */
+  boxBlur: number;
+  /**
    * Box 收缩和展开动画的持续时间，数值越小动画速度越快
    */
   boxCollapseAnimationMs: number;

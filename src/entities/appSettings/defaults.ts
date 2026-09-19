@@ -40,6 +40,7 @@ export const APP_SETTINGS_STORAGE = {
  */
 export const APP_SETTING_KEYS = {
   boxBackgroundOpacity: "boxBackgroundOpacity",
+  boxBlur: "boxBlur",
   boxCollapseAnimationMs: "boxCollapseAnimationMs",
   boxCollapseDelayMs: "boxCollapseDelayMs",
   boxConflictPolicy: "boxConflictPolicy",
@@ -93,6 +94,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   boxAcrylicEnabled: false,
   snapThreshold: 20,
   boxBackgroundOpacity: 70,
+  boxBlur: 20,
   boxCollapseAnimationMs: 420,
   boxCollapseDelayMs: 420,
   boxIdleOpacityHideAnimationMs: 420,
@@ -114,6 +116,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
  */
 export const APP_SETTING_NUMBER_LIMITS = {
   boxBackgroundOpacity: { min: 0, max: 100, step: 1, unit: "%" },
+  boxBlur: { min: 0, max: 50, step: 1, unit: "px" },
   boxCollapseAnimationMs: { min: 120, max: 600, step: 10, unit: "ms" },
   boxCollapseDelayMs: { min: 0, max: 2000, step: 20, unit: "ms" },
   boxCornerRadius: { min: 0, max: 24, step: 1, unit: "px" },

@@ -126,6 +126,7 @@ const {
   box,
   boxSurfaceRef,
   getBoxBackgroundOpacity: () => desktopStore.settings.boxBackgroundOpacity,
+  getBoxBlur: () => desktopStore.settings.boxBlur,
   getBoxCollapseAnimationMs: () => desktopStore.getBoxCollapseAnimationMs(),
   getBoxCollapseDelayMs: () => desktopStore.getBoxCollapseDelayMs(),
   getBoxCollapseMode: () => box.value?.collapseMode ?? "icon",
@@ -175,20 +176,23 @@ const boxTitleOrderClass = computed(() =>
   box.value?.titlePosition === "bottom" ? "order-2" : "order-0",
 );
 /**
- * 图标态入口按既定优先级取图：自定义图片封面 > 内置图标库 > Box 内第一个
- * 非快捷方式文件的 Shell 图标 > 默认文件夹图标；封面由更多菜单「设置封面」维护。
- * 快捷方式的 Shell 位图自带白底角标，不作为图标态封面源
+ * 图标态入口按既定优先级取图：自定义图片封面 > 内置图标库 > Box 内第一个具有图标的项（含软件快捷方式原生高清图标） > 默认文件夹图标；
+ * 封面由更多菜单「设置封面」维护。
  */
-const firstNonShortcutItem = computed(
-  () => boxItems.value.find((item) => item.kind !== "shortcut") ?? null,
+const firstBoxItemWithIcon = computed(
+  () => boxItems.value.find((item) => Boolean(item.iconDataUrl)) ?? null,
 );
 const iconStateImageSrc = computed(() => {
   const cover = box.value?.coverIcon ?? null;
-  if (cover?.startsWith("data:image/")) {
-    return cover;
+  if (cover) {
+    if (cover.startsWith("data:image/")) {
+      return cover;
+    }
+    // 设置了内置图标库 (builtin:xxx) 时图片源必须返回 null，让 iconStateBuiltinComponent 正常渲染
+    return null;
   }
 
-  return firstNonShortcutItem.value?.iconDataUrl ?? null;
+  return firstBoxItemWithIcon.value?.iconDataUrl ?? null;
 });
 const iconStateBuiltinComponent = computed(() => {
   const builtinId = parseBuiltinCoverId(box.value?.coverIcon ?? null);
@@ -746,6 +750,7 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
       :class="{
         'dasktop-box-surface--dragging': isManualDraggingBox,
         'dasktop-box-surface--animating': isCollapseAnimating,
+        'dasktop-box-surface--icon-state': isBoxInIconState,
       }"
       :style="boxSurfaceStyle"
       @mouseenter="handleBoxMouseEnter"
@@ -774,7 +779,7 @@ function resolveRowBottom(row: BoxSortInsertionCandidate[]): number {
         <img
           v-if="iconStateImageSrc"
           :alt="box.title"
-          class="h-10 w-10 object-contain"
+          class="h-10 w-10 object-contain rounded-[10px] bg-transparent"
           draggable="false"
           :src="iconStateImageSrc"
         />

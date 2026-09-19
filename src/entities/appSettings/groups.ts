@@ -208,9 +208,15 @@ export const BOX_VISUAL_SETTING_CONTROLS: Array<{
 }> = [
   {
     key: "boxBackgroundOpacity",
-    label: "虚化程度",
-    description: "数值越低 Box 越通透、桌面越清晰；配合系统毛玻璃调节浓度",
+    label: "透明度",
+    description: "调整 Box 展开时的背景透明度（数值越低越通透）",
     ...APP_SETTING_NUMBER_LIMITS.boxBackgroundOpacity,
+  },
+  {
+    key: "boxBlur",
+    label: "模糊度",
+    description: "调整 Box 背景模糊程度（半透明磨砂质感）",
+    ...APP_SETTING_NUMBER_LIMITS.boxBlur,
   },
   {
     key: "boxCornerRadius",

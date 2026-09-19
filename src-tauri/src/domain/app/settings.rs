@@ -24,6 +24,8 @@ pub const APP_SETTINGS_TABLE: &str = tables::APP_SETTINGS;
 pub mod keys {
     /// Box 背景透明度百分比。
     pub const BOX_BACKGROUND_OPACITY: &str = "boxBackgroundOpacity";
+    /// Box 背景模糊度（px）。
+    pub const BOX_BLUR: &str = "boxBlur";
     /// Box 收缩和展开动画持续时间。
     pub const BOX_COLLAPSE_ANIMATION_MS: &str = "boxCollapseAnimationMs";
     /// 鼠标离开 Box 后等待收缩的延迟时间。

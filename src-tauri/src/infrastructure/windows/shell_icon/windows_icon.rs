@@ -78,9 +78,38 @@ fn resolve_shortcut_icon_data_url(path: &Path) -> io::Result<Option<String>> {
             .map_err(error::io_other)?;
     }
 
-    // 普通文件快捷方式仍交给路径 Shell 图标逻辑，保留自定义 icon location 和现有表现。
-    if shortcut_has_file_target(&shell_link) {
-        return Ok(None);
+    // 1. 如果快捷方式指定了自定义图标位置（例如特定 .ico 或 resource dll/exe），直接提取
+    let mut icon_path_buf = vec![0_u16; MAX_PATH as usize];
+    let mut icon_index = 0_i32;
+    if unsafe {
+        shell_link
+            .GetIconLocation(&mut icon_path_buf, &mut icon_index)
+            .is_ok()
+    } {
+        let icon_path_str = wide::from_null_terminated_u16(&icon_path_buf);
+        let trimmed = icon_path_str.trim();
+        if !trimmed.is_empty() && Path::new(trimmed).exists() {
+            if let Ok(Some(icon)) = resolve_shell_image_data_url_for_parsing_name(trimmed) {
+                return Ok(Some(icon));
+            }
+        }
+    }
+
+    // 2. 获取快捷方式指向的真实文件/程序目标（如 C:\Program Files\...\app.exe）
+    let mut target_path_buf = vec![0_u16; MAX_PATH as usize];
+    if unsafe {
+        shell_link
+            .GetPath(&mut target_path_buf, std::ptr::null_mut(), 0)
+            .is_ok()
+    } {
+        let target_path_str = wide::from_null_terminated_u16(&target_path_buf);
+        let trimmed = target_path_str.trim();
+        if !trimmed.is_empty() && Path::new(trimmed).exists() {
+            // 直接解析目标真实程序的原生高清图标，彻底避免 .lnk 携带的白色衬板和快捷方式角标
+            if let Ok(Some(icon)) = resolve_shell_image_data_url_for_parsing_name(trimmed) {
+                return Ok(Some(icon));
+            }
+        }
     }
 
     let pidl = unsafe { shell_link.GetIDList().map_err(error::io_other)? };
@@ -104,20 +133,6 @@ fn resolve_apps_folder_icon_data_url(app_user_model_id: &str) -> io::Result<Opti
     }
 
     resolve_shell_image_data_url_for_parsing_name(&parsing_name)
-}
-
-/// `IShellLink::GetPath` 为空时通常代表目标是 Applications 等 Shell 命名空间对象。
-fn shortcut_has_file_target(shell_link: &IShellLinkW) -> bool {
-    let mut target_path = vec![0_u16; MAX_PATH as usize];
-    if unsafe {
-        shell_link
-            .GetPath(&mut target_path, std::ptr::null_mut(), 0)
-            .is_err()
-    } {
-        return false;
-    }
-
-    target_path.first().copied().unwrap_or_default() != 0
 }
 
 /// Explorer 同源的 Shell 图像工厂会优先返回文件缩略图，普通文件则返回系统图标。

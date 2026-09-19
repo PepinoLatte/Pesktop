@@ -19,8 +19,8 @@ const BITMAP_COLOR_DEPTH_BITS: u16 = 32;
 const BITMAP_COLOR_PLANES: u16 = 1;
 /// 传统 icon mask 中高亮通道大于该阈值时视为透明。
 const ICON_MASK_ALPHA_THRESHOLD: u8 = 127;
-/// 内容像素的 Alpha 判定阈值，低于该值视为透明背景。
-const CONTENT_ALPHA_THRESHOLD: u8 = 8;
+/// 内容像素的 Alpha 判定阈值，大于该值视为有效内容（0 表示保留任何非零半透明过渡边缘）。
+const CONTENT_ALPHA_THRESHOLD: u8 = 0;
 /// 裁剪后保留的相对边距比例，避免内容紧贴画布边缘产生压迫感。
 const CONTENT_MARGIN_RATIO: f64 = 0.04;
 /// 完全透明 Alpha 值。
@@ -53,13 +53,19 @@ pub(super) unsafe fn icon_to_png_rgba(icon: HICON) -> io::Result<Vec<u8>> {
 
 /// 从 Shell 缩略图位图读取 32 位像素并转为 PNG，保持 Alpha 通道以匹配透明边缘。
 pub(super) unsafe fn bitmap_to_png(bitmap: HBITMAP) -> io::Result<Vec<u8>> {
-    let rgba_bitmap = bitmap_to_rgba(bitmap)?;
+    let mut rgba_bitmap = bitmap_to_rgba(bitmap)?;
     if is_fully_transparent(&rgba_bitmap.pixels) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "shell bitmap is fully transparent",
         ));
     }
+
+    remove_solid_background_if_opaque(
+        &mut rgba_bitmap.pixels,
+        rgba_bitmap.width as usize,
+        rgba_bitmap.height as usize,
+    );
 
     let (width, height, pixels) =
         crop_transparent_padding(rgba_bitmap.width as u32, rgba_bitmap.height as u32, &rgba_bitmap.pixels);
@@ -83,6 +89,13 @@ unsafe fn icon_bitmaps_to_png(color_bitmap: HBITMAP, mask_bitmap: HBITMAP) -> io
         ));
     }
 
+    // 如果位图所有像素均完全不透明且四角为白色/近白色底板，执行边缘连通透明化，消除实心白框
+    remove_solid_background_if_opaque(
+        &mut color.pixels,
+        color.width as usize,
+        color.height as usize,
+    );
+
     let (width, height, pixels) =
         crop_transparent_padding(color.width as u32, color.height as u32, &color.pixels);
     encode_png(width, height, &pixels)
@@ -94,11 +107,91 @@ fn has_smooth_alpha_channel(rgba: &[u8]) -> bool {
         .any(|pixel| pixel[3] > TRANSPARENT_ALPHA && pixel[3] < OPAQUE_ALPHA)
 }
 
-/// 裁掉四周完全透明的背景，让不同来源的图标以一致的视觉密度铺满画布。
-///
-/// Shell 返回的图标位图普遍带大块透明留白，直接整图缩放会让不同文件类型的
-/// 图标在 Box 里看起来忽大忽小；裁剪后前端按 `object-contain` 等比缩放即可
-/// 天然实现"过大压入、过小放大"的统一观感，照片类铺满内容的缩略图不受影响。
+/// 若位图缺乏透明度（全部 alpha == 255）且四周被纯白底衬包围，执行边缘连通漫水消除白框底板
+fn remove_solid_background_if_opaque(rgba: &mut [u8], width: usize, height: usize) {
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    let is_all_opaque = rgba
+        .chunks_exact(BYTES_PER_PIXEL as usize)
+        .all(|p| p[3] == OPAQUE_ALPHA);
+    if !is_all_opaque {
+        return;
+    }
+
+    let stride = width * BYTES_PER_PIXEL as usize;
+    let is_white_pixel = |p: &[u8]| -> bool {
+        p[0] >= 246 && p[1] >= 246 && p[2] >= 246
+    };
+
+    let top_left = &rgba[0..4];
+    let top_right = &rgba[(width - 1) * 4..width * 4];
+    let bottom_left = &rgba[(height - 1) * stride..(height - 1) * stride + 4];
+    let bottom_right = &rgba[(height - 1) * stride + (width - 1) * 4..(height - 1) * stride + width * 4];
+
+    if !(is_white_pixel(top_left) && is_white_pixel(top_right) && is_white_pixel(bottom_left) && is_white_pixel(bottom_right)) {
+        return;
+    }
+
+    let mut visited = vec![false; width * height];
+    let mut queue = std::collections::VecDeque::new();
+
+    for x in 0..width {
+        let idx_top = x;
+        if is_white_pixel(&rgba[x * 4..x * 4 + 4]) {
+            visited[idx_top] = true;
+            queue.push_back((x, 0));
+        }
+        let idx_bottom = (height - 1) * width + x;
+        let offset = (height - 1) * stride + x * 4;
+        if is_white_pixel(&rgba[offset..offset + 4]) {
+            visited[idx_bottom] = true;
+            queue.push_back((x, height - 1));
+        }
+    }
+    for y in 1..height.saturating_sub(1) {
+        let idx_left = y * width;
+        let offset_l = y * stride;
+        if is_white_pixel(&rgba[offset_l..offset_l + 4]) && !visited[idx_left] {
+            visited[idx_left] = true;
+            queue.push_back((0, y));
+        }
+        let idx_right = y * width + (width - 1);
+        let offset_r = y * stride + (width - 1) * 4;
+        if is_white_pixel(&rgba[offset_r..offset_r + 4]) && !visited[idx_right] {
+            visited[idx_right] = true;
+            queue.push_back((width - 1, y));
+        }
+    }
+
+    while let Some((cx, cy)) = queue.pop_front() {
+        let p_offset = (cy * width + cx) * 4;
+        rgba[p_offset + 3] = TRANSPARENT_ALPHA;
+
+        let neighbors = [
+            (cx.wrapping_sub(1), cy),
+            (cx + 1, cy),
+            (cx, cy.wrapping_sub(1)),
+            (cx, cy + 1),
+        ];
+
+        for (nx, ny) in neighbors {
+            if nx < width && ny < height {
+                let n_idx = ny * width + nx;
+                if !visited[n_idx] {
+                    visited[n_idx] = true;
+                    let n_offset = (ny * stride) + nx * 4;
+                    if is_white_pixel(&rgba[n_offset..n_offset + 4]) {
+                        queue.push_back((nx, ny));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 裁掉四周完全透明的背景，并居中归一化为 1:1 正方形画布，保证所有来源的图标视觉大小完全一致。
 fn crop_transparent_padding(width: u32, height: u32, pixels: &[u8]) -> (u32, u32, Vec<u8>) {
     let stride = width as usize * BYTES_PER_PIXEL as usize;
     let mut min_x = width as usize;
@@ -132,9 +225,6 @@ fn crop_transparent_padding(width: u32, height: u32, pixels: &[u8]) -> (u32, u32
     let bottom = (max_y + 1 + margin_y).min(height as usize);
     let crop_width = right - left;
     let crop_height = bottom - top;
-    if crop_width == width as usize && crop_height == height as usize {
-        return (width, height, pixels.to_vec());
-    }
 
     let mut cropped = Vec::with_capacity(crop_width * crop_height * BYTES_PER_PIXEL as usize);
     for row in top..bottom {
@@ -143,7 +233,23 @@ fn crop_transparent_padding(width: u32, height: u32, pixels: &[u8]) -> (u32, u32
         cropped.extend_from_slice(&pixels[start..end]);
     }
 
-    (crop_width as u32, crop_height as u32, cropped)
+    // 归一化为 1:1 正方形画布：以最大边为长，中心对称填充完全透明像素。
+    // 使得不同长宽比的图标在前端 object-contain 缩放下拥有完全统一的视觉面积与大小，
+    // 彻底解决图标忽大忽小、非正方形被压扁或过小问题。
+    let square_size = crop_width.max(crop_height);
+    let mut square_pixels = vec![0_u8; square_size * square_size * BYTES_PER_PIXEL as usize];
+    let offset_x = (square_size - crop_width) / 2;
+    let offset_y = (square_size - crop_height) / 2;
+
+    for row in 0..crop_height {
+        let src_start = row * crop_width * BYTES_PER_PIXEL as usize;
+        let src_end = src_start + crop_width * BYTES_PER_PIXEL as usize;
+        let dst_start = ((row + offset_y) * square_size + offset_x) * BYTES_PER_PIXEL as usize;
+        let dst_end = dst_start + crop_width * BYTES_PER_PIXEL as usize;
+        square_pixels[dst_start..dst_end].copy_from_slice(&cropped[src_start..src_end]);
+    }
+
+    (square_size as u32, square_size as u32, square_pixels)
 }
 
 /// 传统图标 mask 中白色表示透明、黑色表示不透明，用它补回空 Alpha 通道。

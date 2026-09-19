@@ -45,3 +45,10 @@ pub(crate) fn double_null_paths<'a>(paths: impl IntoIterator<Item = &'a Path>) -
 
     wide
 }
+
+/// 从 Windows API 填充的 UTF-16 缓冲区解析 Rust 字符串，截取至首个空字符。
+#[cfg(target_os = "windows")]
+pub(crate) fn from_null_terminated_u16(slice: &[u16]) -> String {
+    let len = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
+    String::from_utf16_lossy(&slice[..len])
+}

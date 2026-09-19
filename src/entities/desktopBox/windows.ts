@@ -9,7 +9,7 @@ import {
   primaryMonitor,
 } from "@tauri-apps/api/window";
 import type { DesktopBox } from "@/entities/desktopBox/types";
-import { BOX_CONTEXT_MENU_LAYOUT, BOX_WINDOW_SIZE } from "@/entities/desktopBox/layout";
+import { BOX_CONTEXT_MENU_LAYOUT, BOX_ICON_STATE_SIZE } from "@/entities/desktopBox/layout";
 import { resolveAppWindowUrl } from "@/shared/ipc/frontendDev";
 import {
   clearBoxContextMenuReady,
@@ -98,10 +98,13 @@ export async function openBoxWindow(
   const existingWindow = await WebviewWindow.getByLabel(label);
   const shouldFocus = options.focus ?? true;
   const shouldShowInitially = options.visible ?? true;
+  const isCollapsedIcon = box.collapsed && box.collapseMode === "icon";
+  const initialWidth = isCollapsedIcon ? BOX_ICON_STATE_SIZE : box.width;
+  const initialHeight = isCollapsedIcon ? BOX_ICON_STATE_SIZE : box.height;
 
   if (existingWindow) {
     await existingWindow.setPosition(new LogicalPosition(box.x, box.y));
-    await existingWindow.setSize(new LogicalSize(box.width, box.height));
+    await existingWindow.setSize(new LogicalSize(initialWidth, initialHeight));
     await existingWindow.setResizable(!box.locked && !box.collapsed);
     if (shouldShowInitially) {
       await existingWindow.show();
@@ -122,10 +125,10 @@ export async function openBoxWindow(
       title: box.title || UNTITLED_BOX_WINDOW_TITLE,
       x: box.x,
       y: box.y,
-      width: box.width,
-      height: box.height,
-      minWidth: BOX_WINDOW_SIZE.min.width,
-      minHeight: BOX_WINDOW_SIZE.min.height,
+      width: initialWidth,
+      height: initialHeight,
+      minWidth: BOX_ICON_STATE_SIZE,
+      minHeight: BOX_ICON_STATE_SIZE,
       decorations: false,
       dragDropEnabled: true,
       focus: shouldFocus,

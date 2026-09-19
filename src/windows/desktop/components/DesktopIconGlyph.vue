@@ -57,10 +57,9 @@ const iconImageStyle = computed(
 const shortcutBadgeStyle = computed(
   () =>
     ({
-      background: "#ffffff",
-      borderRadius: `${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.overlayRadius)}px`,
+      background: "transparent",
       bottom: `${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.offset)}px`,
-      boxShadow: WINDOWS_SHORTCUT_BADGE.shadow,
+      filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.45))",
       height: `${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.overlaySize)}px`,
       left: `${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.offset)}px`,
       width: `${scaleShortcutBadgeValue(WINDOWS_SHORTCUT_BADGE.overlaySize)}px`,

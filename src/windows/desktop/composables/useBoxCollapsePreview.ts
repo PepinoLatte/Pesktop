@@ -35,6 +35,7 @@ export function useBoxCollapsePreview(options: {
   box: ComputedRef<DesktopBox | undefined>;
   boxSurfaceRef: Ref<HTMLElement | null>;
   getBoxBackgroundOpacity: () => number;
+  getBoxBlur: () => number;
   getBoxCollapseAnimationMs: () => number;
   getBoxCollapseDelayMs: () => number;
   getBoxCollapseMode: () => BoxCollapseMode;
@@ -124,6 +125,7 @@ export function useBoxCollapsePreview(options: {
     () =>
       ({
         "--dasktop-box-background-opacity": `${options.getBoxBackgroundOpacity() / 100}`,
+        "--dasktop-box-blur": `${options.getBoxBlur()}px`,
         "--dasktop-box-radius": `${options.getBoxCornerRadius()}px`,
         borderRadius: "var(--dasktop-box-radius)",
         clipPath: "inset(0 round var(--dasktop-box-radius))",
